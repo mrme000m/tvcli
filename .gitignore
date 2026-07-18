@@ -5,9 +5,9 @@ authenticated_cookies.json
 .tv-meta.json
 .tv-scripts/
 
-# Compiled binaries
-tv
-tvcli
+# Compiled binaries (root-level only)
+/tv
+/tvcli
 
 # OS
 .DS_Store
