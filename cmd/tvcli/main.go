@@ -645,6 +645,12 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		fatal("Usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] [--json] [--raw] [--out F] [--raw-out F] [--signals] [--force-cleanup]")
 	}
 
+	// --persistent / --loop uses the persistent runner (reuses WS connection)
+	if flags.has("persistent") || flags.has("loop") {
+		cmdRunPersistent(cfg, flags)
+		return
+	}
+
 	// Serialize runs — only one study per chart on TradingView
 	runMu.Lock()
 	defer runMu.Unlock()
@@ -1076,6 +1082,196 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 	}
 }
 
+// cmdRunPersistent runs an indicator using a persistent WS connection.
+// With --loop <interval>, it re-runs the same indicator periodically.
+func cmdRunPersistent(cfg *config.Config, flags flagSet) {
+	pineID := flags.positional[0]
+	if !pinefacade.LooksLikePineID(pineID) {
+		store, _ := loadMetaStore(cfg)
+		entry := store.getScript(pineID)
+		if entry != nil {
+			pineID = entry.PineID
+		}
+	}
+
+	symbol := flags.get("symbol")
+	if symbol == "" {
+		symbol = "OANDA:XAUUSD"
+	}
+	normalizedSymbol, err := pinefacade.ValidateSymbol(symbol)
+	if err != nil {
+		fatal("Invalid symbol: %v", err)
+	}
+	symbol = normalizedSymbol
+
+	tf := flags.get("tf")
+	if tf == "" {
+		tf = flags.get("timeframe")
+	}
+	if tf == "" {
+		tf = "5m"
+	}
+	bars := flags.getInt("bars", 500)
+
+	limits := getTierLimits()
+	if limits.MaxBars > 0 && bars > limits.MaxBars {
+		bars = limits.MaxBars
+	}
+
+	// Load indicator metadata
+	pineClient := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
+	indResult, err := pineClient.Get(pineID, "last", cfg.CookieHeaderOrEmpty())
+	if err != nil {
+		fatal("Failed to load indicator: %v", err)
+	}
+	if indResult.Source == "" {
+		fatal("Indicator returned empty source for %s", pineID)
+	}
+
+	indicatorOpts := map[string]any{
+		"pineId": pineID,
+		"script": indResult.Source,
+	}
+	if indResult.MetaInfo != nil {
+		indicatorOpts["metaInfo"] = indResult.MetaInfo
+		if pine, ok := indResult.MetaInfo["pine"].(map[string]any); ok {
+			if v, ok := pine["version"].(string); ok {
+				indicatorOpts["pineVersion"] = v
+			}
+		}
+	} else {
+		indicatorOpts["metaInfo"] = map[string]any{"inputs": []any{}}
+	}
+
+	indicator := tradingview.NewPineIndicator(indicatorOpts)
+
+	// Apply custom inputs
+	for k, v := range flags.flags {
+		reserved := map[string]bool{
+			"symbol": true, "tf": true, "timeframe": true, "bars": true,
+			"json": true, "out": true, "raw": true, "raw-out": true,
+			"signals": true, "settle": true, "persistent": true, "loop": true,
+			"force-cleanup": true, "cleanup": true,
+		}
+		if reserved[k] {
+			continue
+		}
+		if err := indicator.SetOption(k, v); err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ Input '%s': %v\n", k, err)
+		}
+	}
+
+	settleMs := flags.getInt("settle", 1500)
+	if settleMs <= 0 {
+		settleMs = 1500
+	}
+	calcTimeout := time.Duration(limits.CalcTimeoutSecs) * time.Second
+	if calcTimeout == 0 {
+		calcTimeout = 60 * time.Second
+	}
+
+	// Build persistent runner
+	pr := runner.NewPersistentRunner(
+		[]tradingview.ClientOption{
+			tradingview.WithToken(cfg.SessionID),
+			tradingview.WithSignature(cfg.Signature),
+			tradingview.WithDebug(cfg.Debug),
+		},
+		cfg.Debug,
+	)
+	defer pr.Close()
+
+	fmt.Fprintf(os.Stderr, "Persistent mode: WS connection will stay open\n")
+	fmt.Fprintf(os.Stderr, "Running %s on %s @ %s (%d bars)\n", pineID, symbol, tf, bars)
+
+	// Check for --loop interval
+	loopInterval := 0
+	if flags.has("loop") {
+		loopStr := flags.get("loop")
+		if loopStr == "" || loopStr == "true" {
+			loopInterval = 300 // default 5 minutes
+		} else {
+			d, err := time.ParseDuration(loopStr)
+			if err != nil {
+				// Try parsing as seconds
+				n := 0
+				fmt.Sscanf(loopStr, "%d", &n)
+				if n > 0 {
+					loopInterval = n
+				} else {
+					fatal("Invalid loop interval: %s (use e.g. 30s, 5m, 1h)", loopStr)
+				}
+			} else {
+				loopInterval = int(d.Seconds())
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Loop mode: re-running every %ds\n", loopInterval)
+	}
+
+	runCount := 0
+	for {
+		runCount++
+		if loopInterval > 0 {
+			fmt.Fprintf(os.Stderr, "\n--- Run #%d ---\n", runCount)
+		}
+
+		result, err := pr.Run(runner.RunOnceOptions{
+			PineID:      pineID,
+			Symbol:      symbol,
+			Timeframe:   tf,
+			Bars:        bars,
+			Indicator:   indicator,
+			SettleMs:    settleMs,
+			CalcTimeout: calcTimeout,
+			Debug:       cfg.Debug,
+		})
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Run error: %v\n", err)
+			if loopInterval == 0 {
+				fatal("Run failed: %v", err)
+			}
+			// In loop mode, log error and continue
+			fmt.Fprintf(os.Stderr, "Retrying in %ds...\n", loopInterval)
+			time.Sleep(time.Duration(loopInterval) * time.Second)
+			continue
+		}
+
+		if flags.has("signals") {
+			if result.Extracted != nil {
+				if flags.has("json") {
+					b, _ := json.MarshalIndent(result.Extracted, "", "  ")
+					fmt.Println(string(b))
+				} else {
+					fmt.Println(result.Extracted.Compact())
+				}
+			} else {
+				fmt.Fprintf(os.Stderr, "No signals extracted\n")
+			}
+		} else if flags.has("json") {
+			b, _ := json.MarshalIndent(result, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			output := runner.FormatResults(result, false)
+			fmt.Println(output)
+		}
+
+		if outFile := flags.get("out"); outFile != "" {
+			b, _ := json.MarshalIndent(result, "", "  ")
+			os.WriteFile(outFile, b, 0644)
+			fmt.Fprintf(os.Stderr, "✓ Saved: %s\n", outFile)
+		}
+
+		// Single run (no --loop)
+		if loopInterval == 0 {
+			break
+		}
+
+		fmt.Fprintf(os.Stderr, "Next run in %ds...\n", loopInterval)
+		time.Sleep(time.Duration(loopInterval) * time.Second)
+	}
+}
+
 func printHelp() {
 	fmt.Print(`
 TradingView Pine Script Manager (Go)
@@ -1114,6 +1310,8 @@ Commands:
     --multi-run, --sweep        Generate input sweep configurations (shows what would be varied)
     --settle <ms>               Wait after first data update for follow-up graphics/backfill (default 1500)
     --force-cleanup             Aggressively retry when study limit hit (web UI indicators blocking)
+    --persistent                Keep WS connection open across runs (no reconnect between runs)
+    --loop <interval>           Re-run periodically (e.g. 30s, 5m, 1h). Implies --persistent.
 
   Symbol formats:
     Forex:    OANDA:XAUUSD, OANDA:EURUSD, FXCM:GBPUSD

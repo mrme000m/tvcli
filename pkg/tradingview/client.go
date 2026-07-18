@@ -234,6 +234,13 @@ func (c *Client) Close() {
 	c.loggedIn = false
 }
 
+// IsConnected returns true if the WebSocket connection is alive and authenticated.
+func (c *Client) IsConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.connected && c.loggedIn
+}
+
 func (c *Client) WaitForConnected(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
