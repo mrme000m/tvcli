@@ -642,7 +642,7 @@ func cmdCompile(cfg *config.Config, flags flagSet) {
 
 func cmdRun(cfg *config.Config, flags flagSet) {
 	if len(flags.positional) == 0 {
-		fatal("Usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] [--json] [--force-cleanup]")
+		fatal("Usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] [--json] [--raw] [--out F] [--raw-out F] [--force-cleanup]")
 	}
 
 	// Serialize runs — only one study per chart on TradingView
@@ -757,7 +757,7 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 
 	// Apply custom inputs from flags
 	for k, v := range flags.flags {
-		if k == "symbol" || k == "tf" || k == "timeframe" || k == "bars" || k == "json" || k == "out" || k == "force-cleanup" || k == "cleanup" {
+		if k == "symbol" || k == "tf" || k == "timeframe" || k == "bars" || k == "json" || k == "out" || k == "force-cleanup" || k == "cleanup" || k == "raw" || k == "raw-out" {
 			continue
 		}
 		if err := indicator.SetOption(k, v); err != nil {
@@ -939,6 +939,42 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		fatal("No data received from study")
 	}
 
+	// --raw: dump unprocessed capture (periods + graphic + strategyReport + meta)
+	// for debugging. Destination priority: --raw-out <file>, else <out>.raw.json,
+	// else stdout. The processed result is still emitted unless --json is absent
+	// AND --raw wrote to stdout (avoids mixing raw JSON with human-readable text).
+	if rawOut := flags.get("raw-out"); flags.has("raw") || rawOut != "" {
+		rawPayload := map[string]any{
+			"pineId":         pineID,
+			"symbol":         symbol,
+			"timeframe":      tf,
+			"bars":           bars,
+			"periodCount":    len(periods),
+			"periods":        periods,
+			"graphic":        graphicData,
+			"strategyReport": stratReport,
+		}
+		rawJSON, _ := json.MarshalIndent(rawPayload, "", "  ")
+		dest := ""
+		switch {
+		case rawOut != "" && rawOut != "true":
+			dest = rawOut
+		case flags.get("out") != "":
+			dest = flags.get("out") + ".raw.json"
+		}
+		if dest != "" {
+			os.WriteFile(dest, rawJSON, 0644)
+			fmt.Fprintf(os.Stderr, "✓ Raw dump: %s\n", dest)
+		} else {
+			fmt.Println(string(rawJSON))
+			// Raw JSON went to stdout; skip the processed result unless --json
+			// was explicitly requested (in which case it follows on stdout too).
+			if !flags.has("json") {
+				return
+			}
+		}
+	}
+
 	result := runner.ParseOutput(periods, graphicData, stratReport, tf, pineID)
 	output := runner.FormatResults(result, flags.has("json"))
 	fmt.Println(output)
@@ -979,6 +1015,8 @@ Commands:
     --tf 5m                     Timeframe
     --bars 500                  Number of bars
     --json                      JSON output
+    --raw                       Dump raw unprocessed capture (periods + graphic + strategyReport)
+    --raw-out <file>            Write raw dump to file (implies --raw)
     --out <file>                Save output to file
     --force-cleanup             Aggressively retry when study limit hit (web UI indicators blocking)
 
