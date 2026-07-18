@@ -30,25 +30,129 @@ For a full inventory of all JS-based TVCLI projects in `/Volumes/ExMac/code/trad
 
 ```
 go/
-├── cmd/tvcli/main.go           (867 lines)  — CLI entry point, all commands
-├── internal/config/config.go   (127 lines)  — Env/`.env` config, cookie auth
+├── cmd/tvcli/main.go             — CLI entry point, all commands
+├── internal/config/config.go     — Env/`.env` config, cookie auth
 ├── pkg/
 │   ├── pinefacade/
-│   │   ├── client.go           (414 lines)  — HTTP client (CRUD, search, compile)
-│   │   ├── parser.go           (233 lines)  — PineScript input extraction
-│   │   └── types.go            (63 lines)   — Response types
+│   │   ├── client.go             — HTTP client (CRUD, search, compile)
+│   │   ├── parser.go             — PineScript input extraction
+│   │   └── types.go              — Response types
 │   ├── tradingview/
-│   │   ├── client.go           (304 lines)  — WebSocket client, auth token fetch
-│   │   ├── chart.go            (238 lines)  — Chart session, symbol loading
-│   │   ├── study.go            (223 lines)  — Study/indicator execution
-│   │   ├── indicator.go        (169 lines)  — PineIndicator + BuiltinIndicator
-│   │   └── protocol.go         (81 lines)   — ~m~ framing protocol
+│   │   ├── client.go             — WebSocket client, auth token fetch, IsConnected()
+│   │   ├── chart.go              — Chart session, symbol loading
+│   │   ├── study.go              — Study/indicator execution
+│   │   ├── indicator.go          — PineIndicator + BuiltinIndicator
+│   │   └── protocol.go           — ~m~ framing protocol
 │   └── runner/
-│       └── runner.go           (357 lines)  — Generic indicator output parser
-├── .env                        — Session cookies (not committed)
+│       ├── runner.go             — Generic indicator output parser
+│       ├── persistent.go         — Persistent WS connection runner
+│       └── multirun.go           — Input sweep / multi-run analysis
+├── .env                          — Session cookies (not committed)
 ├── go.mod
 └── go.sum
 ```
+
+## Use as a Library
+
+Import the packages directly in your Go project:
+
+```go
+import (
+    "github.com/ch99q/tvcli/pkg/tradingview"
+    "github.com/ch99q/tvcli/pkg/runner"
+    "github.com/ch99q/tvcli/pkg/pinefacade"
+)
+```
+
+### Quick Example — Run an Indicator
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    "github.com/ch99q/tvcli/pkg/tradingview"
+    "github.com/ch99q/tvcli/pkg/runner"
+)
+
+func main() {
+    // 1. Create WS client
+    client := tradingview.NewClient(
+        tradingview.WithToken("your-session-cookie"),
+        tradingview.WithSignature("your-signature-cookie"),
+    )
+    if err := client.Connect(); err != nil {
+        log.Fatal(err)
+    }
+    defer client.Close()
+
+    // 2. Load indicator metadata (via Pine Facade HTTP API)
+    // indResult, _ := pineClient.Get(pineID, "last", cookieHeader)
+
+    // 3. Create chart + study
+    ch := tradingview.NewChartSession(client)
+    ch.SetMarket("OANDA:XAUUSD", map[string]any{"timeframe": "5m", "range": 500})
+    ch.WaitForSymbol(15 * time.Second)
+
+    indicator := tradingview.NewPineIndicator(map[string]any{
+        "pineId":  pineID,
+        "script":  sourceCode,
+        "metaInfo": metaInfo,
+    })
+    study := ch.Study(indicator)
+
+    // 4. Wait for data
+    // ... (use study.OnUpdate / study.OnError callbacks)
+
+    // 5. Parse results
+    result := runner.ParseOutput(study.Periods(), study.Graphic(), study.StrategyReport(), "5m", pineID, indicator.Schema)
+    fmt.Println(runner.FormatResults(result, false))
+}
+```
+
+### Quick Example — Persistent Connection (Loop)
+
+```go
+pr := runner.NewPersistentRunner(
+    []tradingview.ClientOption{
+        tradingview.WithToken(session),
+        tradingview.WithSignature(sig),
+    },
+    false, // debug
+)
+defer pr.Close()
+
+// Run repeatedly — WS stays open, only chart sessions cycle
+for i := 0; i < 10; i++ {
+    result, err := pr.Run(runner.RunOnceOptions{
+        PineID:     pineID,
+        Symbol:     "OANDA:XAUUSD",
+        Timeframe:  "5m",
+        Bars:       500,
+        Indicator:  indicator,
+        CalcTimeout: 60 * time.Second,
+    })
+    if err != nil {
+        log.Printf("run %d error: %v", i, err)
+        continue
+    }
+    fmt.Printf("Run %d: %d periods\n", i, len(result.NumericalData.Fields))
+    time.Sleep(30 * time.Second)
+}
+```
+
+### Available Packages
+
+| Package | Import Path | Key Types |
+|---------|-------------|-----------|
+| `tradingview` | `github.com/ch99q/tvcli/pkg/tradingview` | `Client`, `ChartSession`, `ChartStudy`, `PineIndicator` |
+| `runner` | `github.com/ch99q/tvcli/pkg/runner` | `PersistentRunner`, `RunResult`, `ParseOutput()` |
+| `pinefacade` | `github.com/ch99q/tvcli/pkg/pinefacade` | `Client`, `Compile()`, `Get()`, `SearchPublicScripts()` |
+| `extract` | `github.com/ch99q/tvcli/pkg/extract` | `Extract()`, `Signals` |
+| `schema` | `github.com/ch99q/tvcli/pkg/schema` | `PineSchema`, `ScriptSchema` |
 
 ## Authentication
 
