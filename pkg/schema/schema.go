@@ -1,5 +1,3 @@
-// Package schema parses TradingView metaInfo into a structured PineSchema
-// that bridges raw plot indices (plot_0, plot_1) to semantic names and types.
 package schema
 
 import (
@@ -7,379 +5,466 @@ import (
 	"strings"
 )
 
-// PlotDecl describes a single plot declared in metaInfo.
-type PlotDecl struct {
-	Index     int    // 0-based position in the st.v array
-	Name      string // semantic name from metaInfo (e.g. "momentum", "upperBB")
-	Title     string // display title from styles (e.g. "Momentum")
-	PlotType  string // histogram, line, area, cross, columns, circles, area_br, step_line
-	StyleID   string // key in styles map
-	Palette   string // palette name for colorer plots (empty if not a colorer)
-	IsColorer bool   // true when this plot drives a color palette
+// ScriptSchema is the complete self-documenting description of a Pine script's outputs.
+// Built from metaInfo returned by the pine-facade /translate/ endpoint.
+type ScriptSchema struct {
+	PineID      string                `json:"pineId"`
+	Name        string                `json:"name"`
+	Description string                `json:"description"`
+	IsStrategy  bool                  `json:"isStrategy"`
+	IsOverlay   bool                  `json:"isOverlay"`
+	Plots       []PlotDef             `json:"plots"`
+	Inputs      []InputDef            `json:"inputs"`
+	Styles      map[string]StyleDef   `json:"styles"`
+	Graphics    GraphicsProfile       `json:"graphics"`
 }
 
-// StyleDecl describes visual configuration for a named plot.
-type StyleDecl struct {
-	Title         string
-	PlotType      string
-	TrackPrice    bool
-	HistogramBase float64
-	ColorPalette  string
-	LineColor     string
-	LineWidth     int
+// PlotDef describes one plot column in the st[] data stream.
+// The Index corresponds to plot_N in the raw period data.
+type PlotDef struct {
+	Index      int      `json:"index"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`        // human-readable from styles.title
+	StyleType  string   `json:"styleType"`   // "line", "histogram", "columns", "circles"
+	PlotType   string   `json:"plotType"`    // "plot", "hline", "plotshape", "fill", "bgcolor"
+	IsOverlay  bool     `json:"isOverlay"`
+	IsHLine    bool     `json:"isHLine"`
+	HLineValue *float64 `json:"hLineValue,omitempty"`
+	Semantic   string   `json:"semantic"`    // "price", "signal", "oscillator", "band", "level", "color", "unknown"
+	IsColor    bool     `json:"isColor"`     // bgcolor/barcolor/plotcolor
+	TargetStyle string  `json:"targetStyle,omitempty"` // style ID this plot references
 }
 
-// PaletteDecl describes a color palette used by colorer plots.
-type PaletteDecl struct {
-	Name      string
-	Colors    map[int]string // index → hex color
-	ValToExpr string         // Pine expression that maps value → color index
+// InputDef describes a user-configurable input.
+type InputDef struct {
+	ID       string   `json:"id"`
+	Name     string   `json:"name"`
+	Type     string   `json:"type"`     // "integer", "float", "bool", "string", "color"
+	Default  any      `json:"default"`
+	Min      any      `json:"min,omitempty"`
+	Max      any      `json:"max,omitempty"`
+	Step     any      `json:"step,omitempty"`
+	Options  []string `json:"options,omitempty"`
+	Tooltip  string   `json:"tooltip,omitempty"`
+	IsHidden bool     `json:"isHidden,omitempty"`
+	IsFake   bool     `json:"isFake,omitempty"`
 }
 
-// InputDecl describes a script input with optional link to output plots.
-type InputDecl struct {
-	Name   string
-	Type   string // int, float, bool, string, symbol, session, source, resolution
-	DefVal any
-	Title  string
-	Group  string
+// StyleDef describes a visual style entry from metaInfo.styles.
+type StyleDef struct {
+	Title string `json:"title"`
+	Type  string `json:"type"`
 }
 
-// PineSchema is the compiled declaration of a Pine script's I/O contract.
-type PineSchema struct {
-	PineID    string
-	Version   string
-	Plots     []PlotDecl         // ordered by index
-	PlotByName map[string]PlotDecl // quick lookup by semantic name
-	Styles    map[string]StyleDecl
-	Palettes  map[string]PaletteDecl
-	Inputs    []InputDecl
-	IsStrategy bool
+// GraphicsProfile summarizes what graphic types the script produces.
+type GraphicsProfile struct {
+	HasLines     bool     `json:"hasLines"`
+	HasLabels    bool     `json:"hasLabels"`
+	HasBoxes     bool     `json:"hasBoxes"`
+	HasFills     bool     `json:"hasFills"`
+	HasTables    bool     `json:"hasTables"`
+	ToggleInputs []string `json:"toggleInputs,omitempty"` // boolean inputs that likely toggle graphics
 }
 
-// FromMetaInfo compiles a PineSchema from the raw metaInfo map returned
-// by the /translate/ endpoint. Returns nil when metaInfo is empty.
-func FromMetaInfo(pineID string, metaInfo map[string]any) *PineSchema {
+// BuildSchema constructs a ScriptSchema from the metaInfo map returned by /translate/.
+// This is the core introspection function — it turns opaque metadata into a structured
+// description of what the script produces.
+func BuildSchema(metaInfo map[string]any, pineID string) *ScriptSchema {
 	if metaInfo == nil {
+		return &ScriptSchema{PineID: pineID}
+	}
+
+	schema := &ScriptSchema{
+		PineID: pineID,
+		Styles: make(map[string]StyleDef),
+	}
+
+	// Extract script identity
+	if v, ok := metaInfo["scriptIdPart"].(string); ok {
+		schema.PineID = v
+	}
+	if v, ok := metaInfo["description"].(string); ok {
+		schema.Description = v
+		schema.Name = v
+	}
+	if v, ok := metaInfo["shortDescription"].(string); ok && v != "" {
+		schema.Name = v
+	}
+
+	// Detect strategy vs indicator
+	schema.IsStrategy = detectStrategy(metaInfo)
+	schema.IsOverlay = detectOverlay(metaInfo)
+
+	// Parse styles
+	if styles, ok := metaInfo["styles"].(map[string]any); ok {
+		for pid, styleRaw := range styles {
+			styleMap, ok := styleRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			sd := StyleDef{}
+			if t, ok := styleMap["title"].(string); ok {
+				sd.Title = t
+			}
+			if t, ok := styleMap["type"].(string); ok {
+				sd.Type = t
+			}
+			schema.Styles[pid] = sd
+		}
+	}
+
+	// Parse plots — order matters! The Nth plot maps to plot_N in st[] data.
+	if plotsArr, ok := metaInfo["plots"].([]any); ok {
+		for i, pRaw := range plotsArr {
+			pMap, ok := pRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			pd := PlotDef{
+				Index: i,
+			}
+			if id, ok := pMap["id"].(string); ok {
+				pd.ID = id
+			}
+			if pt, ok := pMap["type"].(string); ok {
+				pd.PlotType = pt
+			}
+			if target, ok := pMap["target"].(string); ok {
+				pd.TargetStyle = target
+				// Look up the style for name and visual type
+				if style, ok := schema.Styles[target]; ok {
+					pd.Name = sanitizeName(style.Title)
+					pd.StyleType = style.Type
+				} else {
+					pd.Name = pd.ID
+				}
+			} else {
+				// No target — use the plot's own ID as name
+				pd.Name = pd.ID
+			}
+
+			// Detect hline and extract value
+			if pd.PlotType == "hline" {
+				pd.IsHLine = true
+				pd.Semantic = "level"
+				// Try to find the hline value from inputs
+				if val := findHLineValue(metaInfo, pd.ID, pd.TargetStyle); val != nil {
+					pd.HLineValue = val
+				}
+			}
+
+			// Detect color plots
+			if pd.PlotType == "bgcolor" || pd.PlotType == "barcolor" || pd.PlotType == "plotcolor" {
+				pd.IsColor = true
+				pd.Semantic = "color"
+			}
+
+			// Overlay detection from plot metadata
+			if ov, ok := pMap["isOverlay"].(bool); ok {
+				pd.IsOverlay = ov
+			} else if schema.IsOverlay {
+				pd.IsOverlay = true
+			}
+
+			// Classify semantic from metadata before falling through to statistical
+			if pd.Semantic == "" {
+				pd.Semantic = classifyFromMetadata(pd, schema.Description)
+			}
+
+			schema.Plots = append(schema.Plots, pd)
+		}
+	}
+
+	// Parse inputs
+	if inputsArr, ok := metaInfo["inputs"].([]any); ok {
+		for _, inpRaw := range inputsArr {
+			inpMap, ok := inpRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := inpMap["id"].(string)
+			if id == "" || id == "text" || id == "pineId" || id == "pineVersion" || id == "__profile" || id == "pineFeatures" {
+				continue
+			}
+			inp := InputDef{
+				ID: id,
+			}
+			if n, ok := inpMap["name"].(string); ok {
+				inp.Name = n
+			} else {
+				inp.Name = id
+			}
+			if t, ok := inpMap["type"].(string); ok {
+				inp.Type = t
+			}
+			if d, ok := inpMap["defval"]; ok {
+				inp.Default = d
+			}
+			if m, ok := inpMap["minval"]; ok {
+				inp.Min = m
+			}
+			if m, ok := inpMap["maxval"]; ok {
+				inp.Max = m
+			}
+			if s, ok := inpMap["step"]; ok {
+				inp.Step = s
+			}
+			if opts, ok := inpMap["options"].([]any); ok {
+				for _, o := range opts {
+					if s, ok := o.(string); ok {
+						inp.Options = append(inp.Options, s)
+					}
+				}
+			}
+			if t, ok := inpMap["tooltip"].(string); ok {
+				inp.Tooltip = t
+			}
+			if h, ok := inpMap["isHidden"].(bool); ok {
+				inp.IsHidden = h
+			}
+			if f, ok := inpMap["isFake"].(bool); ok {
+				inp.IsFake = f
+			}
+			schema.Inputs = append(schema.Inputs, inp)
+		}
+	}
+
+	// Detect graphics toggle inputs
+	schema.Graphics.ToggleInputs = findGraphicsToggles(schema.Inputs)
+
+	return schema
+}
+
+// PlotName returns the human-readable name for a plot at the given 0-based index.
+// Returns empty string if index is out of range.
+func (s *ScriptSchema) PlotName(index int) string {
+	if s == nil || index < 0 || index >= len(s.Plots) {
+		return ""
+	}
+	name := s.Plots[index].Name
+	if name == "" {
+		return fmt.Sprintf("plot_%d", index)
+	}
+	return name
+}
+
+// PlotByIndex returns the PlotDef for a given 0-based index.
+func (s *ScriptSchema) PlotByIndex(index int) *PlotDef {
+	if s == nil || index < 0 || index >= len(s.Plots) {
 		return nil
 	}
-
-	s := &PineSchema{
-		PineID:     pineID,
-		PlotByName: make(map[string]PlotDecl),
-		Styles:     make(map[string]StyleDecl),
-		Palettes:   make(map[string]PaletteDecl),
-	}
-
-	// Version
-	if pine, ok := metaInfo["pine"].(map[string]any); ok {
-		if v, ok := pine["version"].(string); ok {
-			s.Version = v
-		}
-	}
-
-	// Strategy detection
-	if script, ok := metaInfo["script"].(map[string]any); ok {
-		if calc, ok := script["calcStyle"].(string); ok {
-			s.IsStrategy = calc == "strategy" || calc == "strategy_only"
-		}
-	}
-	// Also check top-level
-	if t, ok := metaInfo["type"].(string); ok {
-		s.IsStrategy = t == "strategy"
-	}
-
-	// Parse plots: metaInfo.plots is a map of plot_id → {name, id}
-	if plots, ok := metaInfo["plots"].(map[string]any); ok {
-		s.parsePlots(plots)
-	}
-
-	// Parse styles: metaInfo.styles is a map of style_name → config
-	if styles, ok := metaInfo["styles"].(map[string]any); ok {
-		s.parseStyles(styles)
-	}
-
-	// Cross-reference: attach style info to plots
-	s.crossReference()
-
-	// Parse palettes: metaInfo.palettes is a map of palette_name → {colors, valToIndex}
-	if palettes, ok := metaInfo["palettes"].(map[string]any); ok {
-		s.parsePalettes(palettes)
-	}
-
-	// Parse inputs: metaInfo.inputs is an array
-	if inputs, ok := metaInfo["inputs"].([]any); ok {
-		s.parseInputs(inputs)
-	}
-
-	if len(s.Plots) == 0 && len(s.Styles) == 0 {
-		return nil // no useful schema
-	}
-
-	return s
+	return &s.Plots[index]
 }
 
-func (s *PineSchema) parsePlots(raw map[string]any) {
-	// plots map: key is "plot_0", "plot_1", etc. or just "0", "1"
-	// value is { "name": "momentum", "id": "plot_0" } or similar
-	for key, val := range raw {
-		pMap, ok := val.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		name, _ := pMap["name"].(string)
-		if name == "" {
-			// Try "id" as fallback
-			name, _ = pMap["id"].(string)
-		}
-		if name == "" {
-			continue
-		}
-
-		idx := parsePlotIndex(key)
-
-		decl := PlotDecl{
-			Index: idx,
-			Name:  name,
-		}
-
-		// Check if this plot is a colorer (has palette reference)
-		if palette, ok := pMap["palette"].(string); ok && palette != "" {
-			decl.Palette = palette
-			decl.IsColorer = true
-		}
-		// Some formats use "colorPalette" or "target"
-		if target, ok := pMap["target"].(string); ok && target != "" {
-			decl.StyleID = target
-		}
-
-		s.Plots = append(s.Plots, decl)
-		s.PlotByName[name] = decl
+// HLineLevels returns all fixed horizontal line levels from the schema.
+func (s *ScriptSchema) HLineLevels() []HLineLevel {
+	if s == nil {
+		return nil
 	}
+	var levels []HLineLevel
+	for _, p := range s.Plots {
+		if p.IsHLine && p.HLineValue != nil {
+			levels = append(levels, HLineLevel{
+				Name:  p.Name,
+				Value: *p.HLineValue,
+				Index: p.Index,
+			})
+		}
+	}
+	return levels
+}
 
-	// Sort by index
-	for i := 0; i < len(s.Plots); i++ {
-		for j := i + 1; j < len(s.Plots); j++ {
-			if s.Plots[j].Index < s.Plots[i].Index {
-				s.Plots[i], s.Plots[j] = s.Plots[j], s.Plots[i]
+// HLineLevel is a fixed horizontal line extracted from the schema.
+type HLineLevel struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
+	Index int     `json:"index"`
+}
+
+// SignalFields returns plots classified as signals.
+func (s *ScriptSchema) SignalFields() []PlotDef {
+	if s == nil {
+		return nil
+	}
+	var out []PlotDef
+	for _, p := range s.Plots {
+		if p.Semantic == "signal" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// PriceFields returns plots classified as price levels.
+func (s *ScriptSchema) PriceFields() []PlotDef {
+	if s == nil {
+		return nil
+	}
+	var out []PlotDef
+	for _, p := range s.Plots {
+		if p.Semantic == "price" || p.Semantic == "level" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// --- helpers ---
+
+func sanitizeName(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" {
+		return s
+	}
+	// Replace spaces with underscores, strip non-alphanumeric
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '-' {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	// Collapse multiple underscores
+	for strings.Contains(result, "__") {
+		result = strings.ReplaceAll(result, "__", "_")
+	}
+	result = strings.Trim(result, "_")
+	if result == "" {
+		return raw
+	}
+	return result
+}
+
+func detectStrategy(metaInfo map[string]any) bool {
+	// Check description
+	if desc, ok := metaInfo["description"].(string); ok {
+		lower := strings.ToLower(desc)
+		if strings.Contains(lower, "strategy") {
+			return true
+		}
+	}
+	// Check inputs for strategy-specific fields
+	if inputs, ok := metaInfo["inputs"].([]any); ok {
+		for _, inp := range inputs {
+			if m, ok := inp.(map[string]any); ok {
+				if id, ok := m["id"].(string); ok {
+					if strings.Contains(id, "calc_on_order") || strings.Contains(id, "pyramiding") ||
+						strings.Contains(id, "commission") || strings.Contains(id, "slippage") {
+						return true
+					}
+				}
 			}
 		}
 	}
+	return false
 }
 
-func (s *PineSchema) parseStyles(raw map[string]any) {
-	for name, val := range raw {
-		sMap, ok := val.(map[string]any)
-		if !ok {
-			continue
+func detectOverlay(metaInfo map[string]any) bool {
+	if desc, ok := metaInfo["description"].(string); ok {
+		lower := strings.ToLower(desc)
+		// Common overlay indicators
+		overlayKeywords := []string{"moving average", "ema", "sma", "bollinger", "vwap",
+			"pivot", "support", "resistance", "ichimoku", "super trend", "psar",
+			"donchian", "keltner", "envelope", "ma ", " ema", " sma"}
+		for _, kw := range overlayKeywords {
+			if strings.Contains(lower, kw) {
+				return true
+			}
 		}
-
-		st := StyleDecl{Title: name}
-
-		if title, ok := sMap["title"].(string); ok {
-			st.Title = title
-		}
-		if pt, ok := sMap["plottype"].(string); ok {
-			st.PlotType = pt
-		}
-		if tp, ok := sMap["trackPrice"].(bool); ok {
-			st.TrackPrice = tp
-		}
-		if hb, ok := sMap["histogramBase"].(float64); ok {
-			st.HistogramBase = hb
-		}
-		if cp, ok := sMap["colorPalette"].(string); ok {
-			st.ColorPalette = cp
-		}
-		if lc, ok := sMap["linecolor"].(string); ok {
-			st.LineColor = lc
-		}
-		if lw, ok := sMap["linewidth"].(float64); ok {
-			st.LineWidth = int(lw)
-		}
-
-		s.Styles[name] = st
 	}
-}
-
-func (s *PineSchema) parsePalettes(raw map[string]any) {
-	for name, val := range raw {
-		pMap, ok := val.(map[string]any)
-		if !ok {
-			continue
-		}
-
-		p := PaletteDecl{Name: name, Colors: make(map[int]string)}
-
-		if colors, ok := pMap["colors"].(map[string]any); ok {
-			for idxStr, cVal := range colors {
-				cMap, ok := cVal.(map[string]any)
-				if !ok {
+	// Check if first non-hline plot has isOverlay
+	if plots, ok := metaInfo["plots"].([]any); ok {
+		for _, p := range plots {
+			if m, ok := p.(map[string]any); ok {
+				pt, _ := m["type"].(string)
+				if pt == "hline" || pt == "fill" || pt == "bgcolor" || pt == "barcolor" {
 					continue
 				}
-				if hex, ok := cMap["color"].(string); ok {
-					idx := 0
-					for _, ch := range idxStr {
-						if ch >= '0' && ch <= '9' {
-							idx = idx*10 + int(ch-'0')
-						} else {
-							break
-						}
+				if ov, ok := m["isOverlay"].(bool); ok {
+					return ov
+				}
+				break // only check first real plot
+			}
+		}
+	}
+	return false
+}
+
+func findHLineValue(metaInfo map[string]any, plotID, targetStyle string) *float64 {
+	// hline values are typically defined by input defaults
+	// Look for inputs whose name matches the hline's style title
+	if inputs, ok := metaInfo["inputs"].([]any); ok {
+		for _, inp := range inputs {
+			m, ok := inp.(map[string]any)
+			if !ok {
+				continue
+			}
+			// Check if input name matches the style title
+			name, _ := m["name"].(string)
+			id, _ := m["id"].(string)
+			defval := m["defval"]
+
+			// Match by name similarity to the plot/style
+			if name != "" && targetStyle != "" {
+				// Normalize and compare
+				normName := strings.ToLower(strings.ReplaceAll(name, " ", ""))
+				normTarget := strings.ToLower(strings.ReplaceAll(targetStyle, " ", ""))
+				if strings.Contains(normName, normTarget) || strings.Contains(normTarget, normName) {
+					if f, ok := toFloat(defval); ok {
+						return &f
 					}
-					p.Colors[idx] = hex
+				}
+			}
+			// Also check if input ID contains the plot ID
+			if id != "" && plotID != "" {
+				if strings.Contains(id, plotID) || strings.Contains(plotID, id) {
+					if f, ok := toFloat(defval); ok {
+						return &f
+					}
 				}
 			}
 		}
-
-		if vti, ok := pMap["valToIndex"].(string); ok {
-			p.ValToExpr = vti
-		}
-
-		s.Palettes[name] = p
 	}
+	return nil
 }
 
-func (s *PineSchema) parseInputs(raw []any) {
-	for _, inp := range raw {
-		iMap, ok := inp.(map[string]any)
-		if !ok {
+func toFloat(v any) (float64, bool) {
+	switch x := v.(type) {
+	case float64:
+		return x, true
+	case int:
+		return float64(x), true
+	case int64:
+		return float64(x), true
+	case string:
+		// Try parsing
+		var f float64
+		n, _ := fmt.Sscanf(x, "%f", &f)
+		if n == 1 {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func findGraphicsToggles(inputs []InputDef) []string {
+	var toggles []string
+	for _, inp := range inputs {
+		if inp.Type != "bool" || inp.IsHidden || inp.IsFake {
 			continue
 		}
-
-		id, _ := iMap["id"].(string)
-		if id == "" || id == "text" || id == "pineId" || id == "pineVersion" || id == "__profile" {
-			continue
-		}
-
-		d := InputDecl{Name: id}
-		if t, ok := iMap["type"].(string); ok {
-			d.Type = t
-		}
-		if dv, ok := iMap["defval"]; ok {
-			d.DefVal = dv
-		}
-		if title, ok := iMap["title"].(string); ok {
-			d.Title = title
-		}
-		if group, ok := iMap["group"].(string); ok {
-			d.Group = group
-		}
-
-		s.Inputs = append(s.Inputs, d)
-	}
-}
-
-func (s *PineSchema) crossReference() {
-	for i, p := range s.Plots {
-		// Match style by name
-		if st, ok := s.Styles[p.Name]; ok {
-			s.Plots[i].Title = st.Title
-			s.Plots[i].PlotType = st.PlotType
-			s.Plots[i].Palette = st.ColorPalette
-			s.Plots[i].IsColorer = st.ColorPalette != ""
-			s.Plots[i].StyleID = p.Name
-		}
-		// Also try StyleID if set from plot definition
-		if p.StyleID != "" {
-			if st, ok := s.Styles[p.StyleID]; ok {
-				if s.Plots[i].Title == "" {
-					s.Plots[i].Title = st.Title
-				}
-				if s.Plots[i].PlotType == "" {
-					s.Plots[i].PlotType = st.PlotType
-				}
-				if s.Plots[i].Palette == "" {
-					s.Plots[i].Palette = st.ColorPalette
-					s.Plots[i].IsColorer = st.ColorPalette != ""
-				}
-			}
-		}
-		// Update the map too
-		s.PlotByName[p.Name] = s.Plots[i]
-	}
-}
-
-// PlotTypeCategory returns a high-level category for a plot type.
-func PlotTypeCategory(plotType string) string {
-	switch strings.ToLower(plotType) {
-	case "histogram", "columns":
-		return "histogram"
-	case "cross":
-		return "reference"
-	case "line", "step_line":
-		return "line"
-	case "area", "area_br":
-		return "band"
-	case "circles":
-		return "marker"
-	default:
-		return "line"
-	}
-}
-
-// IsSignalPlot returns true when the plot type suggests a binary/discrete signal.
-func IsSignalPlot(plotType string) bool {
-	switch strings.ToLower(plotType) {
-	case "cross", "marker", "circles":
-		return true
-	default:
-		return false
-	}
-}
-
-// IsBandPlot returns true when the plot type suggests a price band/area.
-func IsBandPlot(plotType string) bool {
-	switch strings.ToLower(plotType) {
-	case "area", "area_br", "band":
-		return true
-	default:
-		return false
-	}
-}
-
-// parsePlotIndex extracts the numeric index from keys like "plot_0", "0", "plot_12".
-func parsePlotIndex(key string) int {
-	// Try "plot_N" format
-	if strings.HasPrefix(key, "plot_") {
-		n := 0
-		for _, ch := range key[5:] {
-			if ch >= '0' && ch <= '9' {
-				n = n*10 + int(ch-'0')
-			} else {
+		lower := strings.ToLower(inp.Name)
+		lowerID := strings.ToLower(inp.ID)
+		graphicsKeywords := []string{"show", "display", "visible", "label", "line", "box",
+			"fill", "table", "signal", "alert", "arrow", "shape"}
+		for _, kw := range graphicsKeywords {
+			if strings.Contains(lower, kw) || strings.Contains(lowerID, kw) {
+				toggles = append(toggles, inp.ID)
 				break
 			}
 		}
-		return n
 	}
-	// Try pure numeric
-	n := 0
-	for _, ch := range key {
-		if ch >= '0' && ch <= '9' {
-			n = n*10 + int(ch-'0')
-		} else {
-			return 0
-		}
-	}
-	return n
-}
-
-// Summary returns a human-readable overview of the schema.
-func (s *PineSchema) Summary() string {
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Schema: %s (v%s, strategy=%v)\n", s.PineID, s.Version, s.IsStrategy))
-	sb.WriteString(fmt.Sprintf("  Plots: %d\n", len(s.Plots)))
-	for _, p := range s.Plots {
-		sb.WriteString(fmt.Sprintf("    [%d] %-20s type=%-10s palette=%s\n", p.Index, p.Name, p.PlotType, p.Palette))
-	}
-	sb.WriteString(fmt.Sprintf("  Styles: %d\n", len(s.Styles)))
-	for name, st := range s.Styles {
-		sb.WriteString(fmt.Sprintf("    %-20s plottype=%s\n", name, st.PlotType))
-	}
-	sb.WriteString(fmt.Sprintf("  Palettes: %d\n", len(s.Palettes)))
-	for name, p := range s.Palettes {
-		sb.WriteString(fmt.Sprintf("    %-20s colors=%d expr=%s\n", name, len(p.Colors), p.ValToExpr))
-	}
-	sb.WriteString(fmt.Sprintf("  Inputs: %d\n", len(s.Inputs)))
-	return sb.String()
+	return toggles
 }
