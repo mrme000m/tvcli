@@ -1,6 +1,10 @@
 package tradingview
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ch99q/tvcli/pkg/schema"
+)
 
 type InputDef struct {
 	Name       string   `json:"name"`
@@ -24,6 +28,7 @@ type PineIndicator struct {
 	Plots           map[string]string
 	Script          string
 	Type            string
+	Schema          *schema.PineSchema // Compiled from metaInfo (plots, styles, palettes)
 	metaInfo        map[string]any
 }
 
@@ -99,6 +104,8 @@ func NewPineIndicator(opts map[string]any) *PineIndicator {
 				ind.InputsOrder = append(ind.InputsOrder, id)
 			}
 		}
+		// Compile schema from full metaInfo for dynamic parsing
+		ind.Schema = schema.FromMetaInfo(ind.PineID, mi)
 	}
 
 	return ind

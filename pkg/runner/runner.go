@@ -6,6 +6,10 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/ch99q/tvcli/pkg/dynparse"
+	"github.com/ch99q/tvcli/pkg/extract"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 type RunOptions struct {
@@ -20,10 +24,12 @@ type RunOptions struct {
 	OutputFile  string
 	Session     string
 	Signature   string
+	Schema      *schema.PineSchema // Optional schema for dynamic parsing
 }
 
 type RunResult struct {
 	Signals         []Signal          `json:"signals,omitempty"`
+	Extracted       *extract.Signals  `json:"extracted,omitempty"`
 	Narrative       Narrative         `json:"narrative"`
 	Validation      Validation        `json:"validation"`
 	AgenticScore    float64           `json:"agenticScore"`
@@ -98,10 +104,34 @@ type Signal struct {
 	Confidence string  `json:"confidence"`
 }
 
-func ParseOutput(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string) *RunResult {
+// ExtractSignals runs the script-agnostic signal extractor on the raw data.
+func ExtractSignals(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string, symbol string, sch *schema.PineSchema) *extract.Signals {
+	if sch != nil && len(sch.Plots) > 0 {
+		parsed := dynparse.Parse(periods, sch)
+		return extract.ExtractWithSchema(pineID, symbol, tf, parsed, graphic, strategyReport)
+	}
+	return extract.Extract(pineID, symbol, tf, periods, graphic, strategyReport)
+}
+
+func ParseOutput(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string, sch *schema.PineSchema) *RunResult {
 	start := time.Now()
 
-	numData := extractNumericalData(periods)
+	// Use dynamic parser when schema is available
+	var parsed *dynparse.ParseResult
+	var numData *NumericalData
+	var extracted *extract.Signals
+
+	if sch != nil && len(sch.Plots) > 0 {
+		// Schema-guided path: rename plot_N → semantic names, classify from metaInfo
+		parsed = dynparse.Parse(periods, sch)
+		numData = numericalDataFromTyped(parsed)
+		extracted = extract.ExtractWithSchema(pineID, "", tf, parsed, graphic, strategyReport)
+	} else {
+		// Fallback: statistical inference (original path)
+		numData = extractNumericalData(periods)
+		extracted = extract.Extract(pineID, "", tf, periods, graphic, strategyReport)
+	}
+
 	stratMetrics := extractStrategyMetrics(strategyReport)
 	graphicInt := extractGraphicIntelligence(graphic)
 	dashboard := extractDashboard(graphic)
@@ -109,6 +139,7 @@ func ParseOutput(periods []map[string]any, graphic map[string]map[string]any, st
 
 	result := &RunResult{
 		NumericalData:   *numData,
+		Extracted:       extracted,
 		StrategyMetrics: stratMetrics,
 		GraphicData:     *graphicInt,
 		Dashboard:       *dashboard,
@@ -186,6 +217,67 @@ func extractNumericalData(periods []map[string]any) *NumericalData {
 	return &NumericalData{
 		Count:     len(periods),
 		Fields:    fields,
+		FieldMeta: fieldMeta,
+	}
+}
+
+// numericalDataFromTyped converts dynparse.TypedBar output to NumericalData.
+func numericalDataFromTyped(parsed *dynparse.ParseResult) *NumericalData {
+	if len(parsed.Bars) == 0 {
+		return &NumericalData{FieldMeta: make(map[string]FieldMeta)}
+	}
+
+	fieldMeta := make(map[string]FieldMeta)
+	for _, name := range parsed.FieldNames {
+		var nonNull []float64
+		for _, bar := range parsed.Bars {
+			for _, tv := range bar.Values {
+				if tv.Name == name && !tv.IsNull {
+					nonNull = append(nonNull, tv.Value)
+				}
+			}
+		}
+
+		// Category comes from the dynamic parser's classification
+		category := "metric"
+		for _, bar := range parsed.Bars {
+			for _, tv := range bar.Values {
+				if tv.Name == name {
+					category = tv.Category
+					break
+				}
+			}
+			if category != "metric" {
+				break
+			}
+		}
+
+		meta := FieldMeta{Category: category}
+		if len(nonNull) > 0 {
+			min, max := nonNull[0], nonNull[0]
+			sum := 0.0
+			for _, v := range nonNull {
+				if v < min {
+					min = v
+				}
+				if v > max {
+					max = v
+				}
+				sum += v
+			}
+			meta.Min = min
+			meta.Max = max
+			meta.Avg = sum / float64(len(nonNull))
+			meta.Current = nonNull[0]
+		}
+		meta.UniqueCount = len(nonNull)
+		meta.NullCount = len(parsed.Bars) - len(nonNull)
+		fieldMeta[name] = meta
+	}
+
+	return &NumericalData{
+		Count:     len(parsed.Bars),
+		Fields:    parsed.FieldNames,
 		FieldMeta: fieldMeta,
 	}
 }

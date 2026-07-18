@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 )
 
@@ -131,32 +132,62 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 
 	// Process graphics + strategy report
 	if ns, ok := studyData["ns"].(map[string]any); ok {
-		// TradingView may deliver the strategy report inside a base64-encoded
-		// compressed payload (`ns.dCompressed`) rather than inline in `ns.d`.
-		// Try the inline path first, then the compressed path.
+		if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+			keys := make([]string, 0, len(ns))
+			for k := range ns {
+				keys = append(keys, k)
+			}
+			log.Printf("[DEBUG] study %s ns keys: %v", cs.studyID, keys)
+		}
+		var inlineParsed map[string]any
+
+		// Inline path: ns.d is a JSON string containing graphicsCmds and/or report.
 		if d, ok := ns["d"].(string); ok {
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(d), &parsed); err == nil {
-				if graphicsCmds, ok := parsed["graphicsCmds"].(map[string]any); ok {
+			if err := json.Unmarshal([]byte(d), &inlineParsed); err == nil {
+				if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+					dkeys := make([]string, 0, len(inlineParsed))
+					for k := range inlineParsed {
+						dkeys = append(dkeys, k)
+					}
+					log.Printf("[DEBUG] study %s ns.d keys: %v (len=%d)", cs.studyID, dkeys, len(d))
+				}
+				if graphicsCmds, ok := inlineParsed["graphicsCmds"].(map[string]any); ok {
 					cs.processGraphics(graphicsCmds)
 				}
-				cs.mergeStrategyReport(parsed["report"])
+				cs.mergeStrategyReport(inlineParsed["report"])
 				// Some payloads nest the report under `data`.
-				if data, ok := parsed["data"].(map[string]any); ok {
+				if data, ok := inlineParsed["data"].(map[string]any); ok {
 					cs.mergeStrategyReport(data["report"])
 				}
 			}
 		}
-		// Compressed path: either `ns.dCompressed` directly, or `parsed.dataCompressed`
-		// inside the already-parsed `ns.d` JSON.
+
+		// Compressed path: ns.dCompressed is a base64/zlib/zip payload.
 		if comp, ok := ns["dCompressed"].(string); ok && comp != "" {
 			if parsed, err := parseCompressed(comp); err == nil {
 				cs.mergeStrategyReport(parsed["report"])
+				if graphicsCmds, ok := parsed["graphicsCmds"].(map[string]any); ok {
+					cs.processGraphics(graphicsCmds)
+				}
 			} else if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
 				log.Printf("[DEBUG] compressed report: %v", err)
 			}
 		}
+
+		// Fallback: dataCompressed nested inside the parsed `d` JSON.
+		if inlineParsed != nil {
+			if dataMap, ok := inlineParsed["data"].(map[string]any); ok {
+				if dataComp, ok := dataMap["dataCompressed"].(string); ok && dataComp != "" {
+					if decomp, err := parseCompressed(dataComp); err == nil {
+						cs.mergeStrategyReport(decomp["report"])
+						if graphicsCmds, ok := decomp["graphicsCmds"].(map[string]any); ok {
+							cs.processGraphics(graphicsCmds)
+						}
+					}
+				}
+		}
 	}
+}
 }
 
 // mergeStrategyReport merges a report object (currency, settings, performance,
@@ -211,7 +242,7 @@ func (cs *ChartStudy) processGraphics(cmds map[string]any) {
 						if dataArr, ok := gMap["data"].([]any); ok {
 							for _, item := range dataArr {
 								if iMap, ok := item.(map[string]any); ok {
-									id, _ := iMap["id"].(string)
+									id := graphicIDToString(iMap["id"])
 									if id != "" {
 										if cs.graphic[drawType] == nil {
 											cs.graphic[drawType] = make(map[string]any)
@@ -225,6 +256,24 @@ func (cs *ChartStudy) processGraphics(cmds map[string]any) {
 				}
 			}
 		}
+	}
+}
+
+// graphicIDToString coerces TradingView graphic item IDs (which may be float64
+// or int in the wire format) into string map keys, mirroring JS object-key
+// coercion.
+func graphicIDToString(v any) string {
+	switch x := v.(type) {
+	case string:
+		return x
+	case float64:
+		return strconv.FormatInt(int64(x), 10)
+	case int:
+		return strconv.Itoa(x)
+	case int64:
+		return strconv.FormatInt(x, 10)
+	default:
+		return ""
 	}
 }
 

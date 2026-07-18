@@ -642,7 +642,7 @@ func cmdCompile(cfg *config.Config, flags flagSet) {
 
 func cmdRun(cfg *config.Config, flags flagSet) {
 	if len(flags.positional) == 0 {
-		fatal("Usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] [--json] [--raw] [--out F] [--raw-out F] [--force-cleanup]")
+		fatal("Usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] [--json] [--raw] [--out F] [--raw-out F] [--signals] [--force-cleanup]")
 	}
 
 	// Serialize runs — only one study per chart on TradingView
@@ -757,12 +757,26 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 
 	// Apply custom inputs from flags
 	for k, v := range flags.flags {
-		if k == "symbol" || k == "tf" || k == "timeframe" || k == "bars" || k == "json" || k == "out" || k == "force-cleanup" || k == "cleanup" || k == "raw" || k == "raw-out" {
+		if k == "symbol" || k == "tf" || k == "timeframe" || k == "bars" || k == "json" || k == "out" || k == "force-cleanup" || k == "cleanup" || k == "raw" || k == "raw-out" || k == "signals" || k == "settle" || k == "schema" {
 			continue
 		}
 		if err := indicator.SetOption(k, v); err != nil {
 			fmt.Fprintf(os.Stderr, "⚠ Input '%s': %v\n", k, err)
 		}
+	}
+
+	// --schema: dump the parsed metaInfo schema and exit
+	if flags.has("schema") {
+		if indicator.Schema != nil {
+			fmt.Println(indicator.Schema.Summary())
+			if flags.has("json") {
+				b, _ := json.MarshalIndent(indicator.Schema, "", "  ")
+				fmt.Println(string(b))
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "No schema available for %s (metaInfo had no plots/styles)\n", pineID)
+		}
+		return
 	}
 
 	// Connect fresh — disconnect first to release any stale sessions
@@ -871,6 +885,14 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		var studyErr error
 		once := sync.Once{}
 
+		// TradingView often sends graphics/backfill in follow-up messages after the
+		// first data update. Collect updates for a short settle window so we don't
+		// quit while the payload is still streaming.
+		settleMs := flags.getInt("settle", 1500)
+		if settleMs <= 0 {
+			settleMs = 1500
+		}
+
 		study.OnUpdate(func() {
 			once.Do(func() {
 				p := study.Periods()
@@ -878,7 +900,17 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 					periods = p
 					graphicData = study.Graphic()
 					stratReport = study.StrategyReport()
-					close(done)
+					// Start settle timer on first successful update.
+					go func() {
+						timer := time.NewTimer(time.Duration(settleMs) * time.Millisecond)
+						defer timer.Stop()
+						select {
+						case <-done:
+							// already finished by error/timeout
+						case <-timer.C:
+							close(done)
+						}
+					}()
 				}
 			})
 		})
@@ -895,9 +927,14 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 			studyErr = fmt.Errorf("timeout after %s waiting for study data", calcTimeout)
 		}
 
+		// Final snapshot after settle / timeout.
+		periods = study.Periods()
+		graphicData = study.Graphic()
+		stratReport = study.StrategyReport()
+
 		if studyErr == nil && len(periods) > 0 {
 			study.Remove()
-			fmt.Fprintf(os.Stderr, "✓ Study data received (%d periods)\n", len(periods))
+			fmt.Fprintf(os.Stderr, "✓ Study data received (%d periods, %d graphic types)\n", len(periods), len(graphicData))
 			break
 		}
 
@@ -975,7 +1012,23 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		}
 	}
 
-	result := runner.ParseOutput(periods, graphicData, stratReport, tf, pineID)
+	if flags.has("signals") {
+		signals := runner.ExtractSignals(periods, graphicData, stratReport, tf, pineID, symbol, indicator.Schema)
+		if flags.has("json") {
+			b, _ := json.MarshalIndent(signals, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			fmt.Println(signals.Compact())
+		}
+		if outFile := flags.get("out"); outFile != "" {
+			b, _ := json.MarshalIndent(signals, "", "  ")
+			os.WriteFile(outFile, b, 0644)
+			fmt.Printf("✓ Saved: %s\n", outFile)
+		}
+		return
+	}
+
+	result := runner.ParseOutput(periods, graphicData, stratReport, tf, pineID, indicator.Schema)
 	output := runner.FormatResults(result, flags.has("json"))
 	fmt.Println(output)
 
@@ -1018,6 +1071,9 @@ Commands:
     --raw                       Dump raw unprocessed capture (periods + graphic + strategyReport)
     --raw-out <file>            Write raw dump to file (implies --raw)
     --out <file>                Save output to file
+    --signals                   Emit script-agnostic extracted signals (JSON with --json, compact text default)
+    --schema                    Show parsed metaInfo schema (plots, styles, palettes) without running
+    --settle <ms>               Wait after first data update for follow-up graphics/backfill (default 1500)
     --force-cleanup             Aggressively retry when study limit hit (web UI indicators blocking)
 
   Symbol formats:
