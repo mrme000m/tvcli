@@ -2,6 +2,7 @@ package tradingview
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/ch99q/tvcli/pkg/schema"
 )
@@ -106,6 +107,10 @@ func NewPineIndicator(opts map[string]any) *PineIndicator {
 		}
 		// Compile schema from full metaInfo for dynamic parsing
 		ind.Schema = schema.FromMetaInfo(ind.PineID, mi)
+
+		// Populate Plots map from metaInfo.styles/plots (matches JS tv.cjs:288-306)
+		// This maps plot_N indices to human-readable names for study data.
+		ind.Plots = buildPlotsMap(mi)
 	}
 
 	return ind
@@ -198,4 +203,105 @@ func NewBuiltinIndicator(indicatorType string) *BuiltinIndicator {
 
 func (b *BuiltinIndicator) SetOption(key string, value any, force bool) {
 	b.Options[key] = value
+}
+
+// buildPlotsMap constructs the plot_N → name mapping from metaInfo.styles and metaInfo.plots.
+// This mirrors the JS logic in tv.cjs:288-306.
+func buildPlotsMap(mi map[string]any) map[string]string {
+	plots := make(map[string]string)
+
+	// Step 1: Map style IDs to sanitized titles
+	styles, _ := mi["styles"].(map[string]any)
+	styleTitles := make(map[string]string)
+	if styles != nil {
+		for pid, styleRaw := range styles {
+			styleMap, ok := styleRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			title, _ := styleMap["title"].(string)
+			if title == "" {
+				continue
+			}
+			// Sanitize: strip non-alphanumeric, replace spaces with underscores
+			sanitized := sanitizePlotTitle(title)
+			// Deduplicate
+			if containsValue(styleTitles, sanitized) {
+				sanitized = dedupName(styleTitles, sanitized)
+			}
+			styleTitles[pid] = sanitized
+			plots[pid] = sanitized
+		}
+	}
+
+	// Step 2: Map plot IDs using their target style (matches JS meta.plots iteration)
+	plotsArr, _ := mi["plots"].([]any)
+	if plotsArr != nil {
+		for _, pRaw := range plotsArr {
+			pMap, ok := pRaw.(map[string]any)
+			if !ok {
+				continue
+			}
+			target, _ := pMap["target"].(string)
+			id, _ := pMap["id"].(string)
+			if target == "" || id == "" {
+				continue
+			}
+			parent := styleTitles[target]
+			if parent == "" {
+				parent = target
+			}
+			plotType, _ := pMap["type"].(string)
+			if plotType != "" {
+				plots[id] = parent + "_" + plotType
+			} else {
+				plots[id] = parent
+			}
+		}
+	}
+
+	return plots
+}
+
+func sanitizePlotTitle(title string) string {
+	var b strings.Builder
+	for _, r := range title {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else if r == ' ' || r == '-' {
+			b.WriteRune('_')
+		}
+	}
+	result := b.String()
+	for strings.Contains(result, "__") {
+		result = strings.ReplaceAll(result, "__", "_")
+	}
+	return strings.Trim(result, "_")
+}
+
+func containsValue(m map[string]string, val string) bool {
+	for _, v := range m {
+		if v == val {
+			return true
+		}
+	}
+	return false
+}
+
+func dedupName(m map[string]string, base string) string {
+	i := 2
+	for {
+		candidate := fmt.Sprintf("%s_%d", base, i)
+		seen := false
+		for _, v := range m {
+			if v == candidate {
+				seen = true
+				break
+			}
+		}
+		if !seen {
+			return candidate
+		}
+		i++
+	}
 }

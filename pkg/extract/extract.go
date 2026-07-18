@@ -2,6 +2,7 @@ package extract
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
@@ -483,7 +484,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 		return nil, nil, counts
 	}
 
-	// Drawing labels: {t:TEXT, x:time_index, y:price, yl:price_unit}
+	// --- Drawing labels: {t:TEXT, x:time_index, y:price, yl:price_unit} ---
 	if labels, ok := graphic["dwglabels"]; ok {
 		for _, item := range labels {
 			m, _ := item.(map[string]any)
@@ -513,8 +514,6 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 			}
 
 			counts[kind]++
-			// Keep only a small cap of the latest graphic events to avoid flooding
-			// the output with per-bar labels.
 			if len(events) < 20 {
 				events = append(events, Event{
 					Time:  int64(x),
@@ -541,7 +540,176 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 		}
 	}
 
+	// --- Labels (standard TradingView label graphics) ---
+	for drawType, items := range graphic {
+		if drawType == "dwglabels" {
+			continue // already handled above
+		}
+
+		switch drawType {
+		case "label":
+			counts["label"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				text, _ := m["text"].(string)
+				if text == "" {
+					if t, ok := m["t"].(string); ok {
+						text = t
+					}
+				}
+				if text == "" {
+					continue
+				}
+				y, yOk := toFloat(m["y"])
+				if !yOk {
+					continue
+				}
+				x, _ := toFloat(m["x"])
+
+				upper := strings.ToUpper(text)
+				kind := "alert"
+				switch {
+				case strings.Contains(upper, "BUY") || strings.Contains(upper, "LONG") || strings.Contains(upper, "BULL"):
+					kind = "buy"
+				case strings.Contains(upper, "SELL") || strings.Contains(upper, "SHORT") || strings.Contains(upper, "BEAR"):
+					kind = "sell"
+				}
+
+				if len(events) < 20 {
+					events = append(events, Event{
+						Time:  int64(x),
+						Field: "label",
+						Kind:  kind,
+						Value: y,
+					})
+				}
+			}
+
+		case "line":
+			counts["line"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				// Lines have coords: [{x, y}, {x, y}] — extract price levels
+				coords, ok := m["coords"].([]any)
+				if !ok || len(coords) < 2 {
+					continue
+				}
+				p1, ok1 := coords[0].(map[string]any)
+				p2, ok2 := coords[1].(map[string]any)
+				if !ok1 || !ok2 {
+					continue
+				}
+				y1, y1Ok := toFloat(p1["y"])
+				y2, y2Ok := toFloat(p2["y"])
+				if !y1Ok || !y2Ok {
+					continue
+				}
+
+				// Nearly horizontal lines → S/R levels
+				if y1 > 2000 || y2 > 2000 { // price-scale values
+					avgPrice := (y1 + y2) / 2
+					slope := math.Abs(y2-y1) / math.Max(math.Abs(y1), 1)
+					if slope < 0.001 { // nearly flat
+						levels = append(levels, Level{
+							Field: "graphic_line",
+							Kind:  "band",
+							Value: avgPrice,
+						})
+					}
+				}
+			}
+
+		case "box":
+			counts["box"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				coords, ok := m["coords"].([]any)
+				if !ok || len(coords) < 2 {
+					continue
+				}
+				p1, ok1 := coords[0].(map[string]any)
+				p2, ok2 := coords[1].(map[string]any)
+				if !ok1 || !ok2 {
+					continue
+				}
+				y1, y1Ok := toFloat(p1["y"])
+				y2, y2Ok := toFloat(p2["y"])
+				if !y1Ok || !y2Ok {
+					continue
+				}
+				// Box boundaries as price levels
+				if y1 > 2000 || y2 > 2000 {
+					high := math.Max(y1, y2)
+					low := math.Min(y1, y2)
+					levels = append(levels, Level{
+						Field: "graphic_box_top",
+						Kind:  "resistance",
+						Value: high,
+					})
+					levels = append(levels, Level{
+						Field: "graphic_box_bottom",
+						Kind:  "support",
+						Value: low,
+					})
+				}
+			}
+
+		case "fill":
+			counts["fill"] += len(items)
+
+		case "table":
+			counts["table"] += len(items)
+			// Tables often contain dashboard values — extract text fields
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				// Table cells may have text with formatted values
+				if text, ok := m["text"].(string); ok && text != "" {
+					// Try to parse numeric values from table text
+					if val, err := parseFormattedNumber(text); err == nil {
+						events = append(events, Event{
+							Field: "table_" + strings.ReplaceAll(text, " ", "_"),
+							Kind:  "state",
+							Value: val,
+						})
+					}
+				}
+			}
+		}
+	}
+
 	return events, levels, counts
+}
+
+// parseFormattedNumber attempts to extract a numeric value from formatted text
+// like "72.5%", "$1,234.56", "RSI: 72.5", etc.
+func parseFormattedNumber(text string) (float64, error) {
+	// Strip common prefixes/suffixes
+	cleaned := text
+	for _, prefix := range []string{"$", "€", "£", "¥", "RSI:", "EMA:", "SMA:", "MACD:", "ATR:", "Vol:"} {
+		cleaned = strings.ReplaceAll(cleaned, prefix, "")
+	}
+	cleaned = strings.ReplaceAll(cleaned, "%", "")
+	cleaned = strings.ReplaceAll(cleaned, ",", "")
+	cleaned = strings.TrimSpace(cleaned)
+
+	var val float64
+	n, _ := fmt.Sscanf(cleaned, "%f", &val)
+	if n == 1 {
+		return val, nil
+	}
+	return 0, fmt.Errorf("not a number: %s", text)
 }
 
 func capEvents(events []Event, max int) []Event {

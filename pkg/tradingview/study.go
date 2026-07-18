@@ -68,6 +68,16 @@ func (cs *ChartStudy) getInputs() map[string]any {
 	}
 }
 
+// getPlotNames returns the plot_N → human-readable name mapping from the indicator's metadata.
+func (cs *ChartStudy) getPlotNames() map[string]string {
+	switch ind := cs.indicator.(type) {
+	case *PineIndicator:
+		return ind.Plots
+	default:
+		return nil
+	}
+}
+
 func (cs *ChartStudy) onData(packet map[string]any) {
 	msgType, _ := packet["type"].(string)
 	data, _ := packet["data"].([]any)
@@ -107,6 +117,9 @@ func (cs *ChartStudy) onData(packet map[string]any) {
 }
 
 func (cs *ChartStudy) processStudyData(studyData map[string]any) {
+	// Extract plot name mapping from indicator (if available)
+	plotNames := cs.getPlotNames()
+
 	// Process period data
 	if stArr, ok := studyData["st"].([]any); ok {
 		cs.periodsMu.Lock()
@@ -122,8 +135,14 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 			time, _ := vArr[0].(float64)
 			period := map[string]any{"$time": time}
 			for i := 1; i < len(vArr); i++ {
-				key := fmt.Sprintf("plot_%d", i-1)
-				period[key] = vArr[i]
+				plotIdx := i - 1
+				plotKey := fmt.Sprintf("plot_%d", plotIdx)
+				// Use named key from metadata if available
+				if name, ok := plotNames[plotKey]; ok && name != "" {
+					period[name] = vArr[i]
+				}
+				// Always store with plot_N key for backward compatibility
+				period[plotKey] = vArr[i]
 			}
 			cs.periods[time] = period
 		}

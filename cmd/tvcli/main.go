@@ -1028,6 +1028,30 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		return
 	}
 
+	// --multi-run: generate and display input sweep configurations
+	if flags.has("multi-run") || flags.has("sweep") {
+		configs := runner.GenerateRunConfigs(indicator.Schema, nil)
+		fmt.Fprintf(os.Stderr, "\n📊 Multi-Run: %d configurations generated\n\n", len(configs))
+		for i, cfg := range configs {
+			fmt.Fprintf(os.Stderr, "  %2d. %s\n", i+1, cfg.Label)
+			if len(cfg.Inputs) > 0 {
+				for k, v := range cfg.Inputs {
+					fmt.Fprintf(os.Stderr, "      %s = %v\n", k, v)
+				}
+			}
+		}
+		if flags.has("json") {
+			b, _ := json.MarshalIndent(configs, "", "  ")
+			fmt.Println(string(b))
+		}
+		if outFile := flags.get("out"); outFile != "" {
+			b, _ := json.MarshalIndent(configs, "", "  ")
+			os.WriteFile(outFile, b, 0644)
+			fmt.Printf("✓ Saved: %s\n", outFile)
+		}
+		return
+	}
+
 	result := runner.ParseOutput(periods, graphicData, stratReport, tf, pineID, indicator.Schema)
 	output := runner.FormatResults(result, flags.has("json"))
 	fmt.Println(output)
@@ -1073,6 +1097,7 @@ Commands:
     --out <file>                Save output to file
     --signals                   Emit script-agnostic extracted signals (JSON with --json, compact text default)
     --schema                    Show parsed metaInfo schema (plots, styles, palettes) without running
+    --multi-run, --sweep        Generate input sweep configurations (shows what would be varied)
     --settle <ms>               Wait after first data update for follow-up graphics/backfill (default 1500)
     --force-cleanup             Aggressively retry when study limit hit (web UI indicators blocking)
 
