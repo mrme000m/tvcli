@@ -3,6 +3,7 @@ package tradingview
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 )
@@ -128,18 +129,61 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 		cs.periodsMu.Unlock()
 	}
 
-	// Process graphics
+	// Process graphics + strategy report
 	if ns, ok := studyData["ns"].(map[string]any); ok {
+		// TradingView may deliver the strategy report inside a base64-encoded
+		// compressed payload (`ns.dCompressed`) rather than inline in `ns.d`.
+		// Try the inline path first, then the compressed path.
 		if d, ok := ns["d"].(string); ok {
 			var parsed map[string]any
 			if err := json.Unmarshal([]byte(d), &parsed); err == nil {
 				if graphicsCmds, ok := parsed["graphicsCmds"].(map[string]any); ok {
 					cs.processGraphics(graphicsCmds)
 				}
-				if report, ok := parsed["report"].(map[string]any); ok {
-					cs.strategyReport = report
+				cs.mergeStrategyReport(parsed["report"])
+				// Some payloads nest the report under `data`.
+				if data, ok := parsed["data"].(map[string]any); ok {
+					cs.mergeStrategyReport(data["report"])
 				}
 			}
+		}
+		// Compressed path: either `ns.dCompressed` directly, or `parsed.dataCompressed`
+		// inside the already-parsed `ns.d` JSON.
+		if comp, ok := ns["dCompressed"].(string); ok && comp != "" {
+			if parsed, err := parseCompressed(comp); err == nil {
+				cs.mergeStrategyReport(parsed["report"])
+			} else if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+				log.Printf("[DEBUG] compressed report: %v", err)
+			}
+		}
+	}
+}
+
+// mergeStrategyReport merges a report object (currency, settings, performance,
+// trades, equity) into cs.strategyReport. A nil report is a no-op. Matches
+// the JS updateStrategyReport behavior in tv-optimized.cjs.
+func (cs *ChartStudy) mergeStrategyReport(report any) {
+	r, ok := report.(map[string]any)
+	if !ok || r == nil {
+		return
+	}
+	if cs.strategyReport == nil {
+		cs.strategyReport = map[string]any{}
+	}
+	for _, k := range []string{"currency", "settings", "performance", "trades"} {
+		if v, ok := r[k]; ok && v != nil {
+			cs.strategyReport[k] = v
+		}
+	}
+	// Equity comes paired with buyHold/drawDown series — store them together.
+	if _, ok := r["equity"]; ok {
+		cs.strategyReport["history"] = map[string]any{
+			"equity":           r["equity"],
+			"equityPercent":    r["equityPercent"],
+			"buyHold":          r["buyHold"],
+			"buyHoldPercent":   r["buyHoldPercent"],
+			"drawDown":         r["drawDown"],
+			"drawDownPercent":  r["drawDownPercent"],
 		}
 	}
 }

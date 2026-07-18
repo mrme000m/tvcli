@@ -341,7 +341,9 @@ func FormatResults(result *RunResult, jsonOutput bool) string {
 
 	if result.StrategyMetrics != nil {
 		sb.WriteString("\nSTRATEGY METRICS\n")
-		sb.WriteString(fmt.Sprintf("  Trades: %d | Win Rate: %.1f%%\n", result.StrategyMetrics.TotalTrades, result.StrategyMetrics.WinRate))
+		sb.WriteString(fmt.Sprintf("  Trades: %d | Win Rate: %.1f%% | Profit Factor: %.2f | Net: %.2f\n",
+			result.StrategyMetrics.TotalTrades, result.StrategyMetrics.WinRate*100,
+			result.StrategyMetrics.ProfitFactor, result.StrategyMetrics.NetProfit))
 	}
 
 	sb.WriteString(fmt.Sprintf("\nMETA\n  pineId: %s\n  Duration: %dms\n", result.Meta.PineID, result.Meta.DurationMs))
