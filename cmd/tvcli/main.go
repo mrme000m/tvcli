@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -97,6 +98,8 @@ func main() {
 		cmdCompile(cfg, flags)
 	case "run":
 		cmdRun(cfg, flags)
+	case "fetch", "ohlcv":
+		cmdFetch(cfg, flags)
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -1272,6 +1275,154 @@ func cmdRunPersistent(cfg *config.Config, flags flagSet) {
 	}
 }
 
+func cmdFetch(cfg *config.Config, flags flagSet) {
+	symbol := flags.get("symbol")
+	if symbol == "" {
+		symbol = "OANDA:XAUUSD"
+	}
+	normalizedSymbol, err := pinefacade.ValidateSymbol(symbol)
+	if err != nil {
+		fatal("Invalid symbol: %v\n\nUse --symbol EXCHANGE:SYMBOL (e.g. OANDA:XAUUSD, BINANCE:BTCUSDT)", err)
+	}
+	symbol = normalizedSymbol
+
+	tf := flags.get("tf")
+	if tf == "" {
+		tf = flags.get("timeframe")
+	}
+	if tf == "" {
+		tf = "5m"
+	}
+	bars := flags.getInt("bars", 180) // free tier default
+
+	limits := getTierLimits()
+	if limits.MaxBars > 0 && bars > limits.MaxBars {
+		fmt.Fprintf(os.Stderr, "Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
+		bars = limits.MaxBars
+	}
+
+	fmt.Fprintf(os.Stderr, "Fetching OHLCV: %s @ %s, %d bars\n", symbol, tf, bars)
+
+	// Connect WS
+	client := tradingview.NewClient(
+		tradingview.WithToken(cfg.SessionID),
+		tradingview.WithSignature(cfg.Signature),
+		tradingview.WithDebug(cfg.Debug),
+	)
+	if err := client.Connect(); err != nil {
+		fatal("WS connect: %v", err)
+	}
+	if !client.WaitForConnected(10 * time.Second) {
+		fatal("WS timeout")
+	}
+	defer client.Close()
+
+	// Create chart session — no study needed, just the s1 price series
+	ch := tradingview.NewChartSession(client)
+	ch.OnError(func(err error) {
+		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
+	})
+	ch.SetMarket(symbol, map[string]any{
+		"timeframe": pinefacade.NormalizeTimeframe(tf),
+		"range":     bars,
+	})
+
+	// Wait for bars to arrive
+	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
+		fatal("Symbol load: %v", err)
+	}
+
+	// Wait for data to populate
+	done := make(chan struct{})
+	once := sync.Once{}
+	ch.OnUpdate(func() {
+		once.Do(func() { close(done) })
+	})
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		fatal("Timeout waiting for OHLCV data")
+	}
+	// Small settle to catch follow-up bars
+	time.Sleep(800 * time.Millisecond)
+
+	periods := ch.Periods()
+	if len(periods) == 0 {
+		fatal("No OHLCV data received")
+	}
+
+	fmt.Fprintf(os.Stderr, "Received %d bars\n", len(periods))
+
+	// Sort by time ascending for output
+	sort.Slice(periods, func(i, j int) bool {
+		t1, _ := periods[i]["time"].(float64)
+		t2, _ := periods[j]["time"].(float64)
+		return t1 < t2
+	})
+
+	// Build output filenames
+	symbolClean := strings.ReplaceAll(symbol, ":", "_")
+	baseName := fmt.Sprintf("%s_%s_%dbars", symbolClean, tf, bars)
+
+	outDir := flags.get("dir")
+	if outDir == "" {
+		outDir = "."
+	}
+	os.MkdirAll(outDir, 0755)
+
+	jsonPath := filepath.Join(outDir, baseName+".json")
+	csvPath := filepath.Join(outDir, baseName+".csv")
+
+	// --- JSON output ---
+	jsonData := map[string]any{
+		"symbol":    symbol,
+		"timeframe": tf,
+		"bars":      bars,
+		"count":     len(periods),
+		"fetchedAt": time.Now().UTC().Format(time.RFC3339),
+		"data":      periods,
+	}
+
+	if outJSON := flags.get("json-out"); outJSON != "" {
+		jsonPath = outJSON
+	}
+	jsonBytes, _ := json.MarshalIndent(jsonData, "", "  ")
+	if err := os.WriteFile(jsonPath, jsonBytes, 0644); err != nil {
+		fatal("Write JSON: %v", err)
+	}
+	fmt.Fprintf(os.Stderr, "  JSON: %s (%d bytes)\n", jsonPath, len(jsonBytes))
+
+	// --- CSV output ---
+	if outCSV := flags.get("csv-out"); outCSV != "" {
+		csvPath = outCSV
+	}
+	csvFile, err := os.Create(csvPath)
+	if err != nil {
+		fatal("Create CSV: %v", err)
+	}
+	defer csvFile.Close()
+
+	// CSV header
+	fmt.Fprintln(csvFile, "time,open,high,low,close,volume")
+	for _, bar := range periods {
+		ts, _ := bar["time"].(float64)
+		o, _ := bar["open"].(float64)
+		h, _ := bar["high"].(float64)
+		l, _ := bar["low"].(float64)
+		c, _ := bar["close"].(float64)
+		v, _ := bar["volume"].(float64)
+		// Convert Unix timestamp to human-readable
+		utcTime := time.Unix(int64(ts), 0).UTC().Format("2006-01-02T15:04:05Z")
+		fmt.Fprintf(csvFile, "%s,%.8f,%.8f,%.8f,%.8f,%.2f\n", utcTime, o, h, l, c, v)
+	}
+	csvFile.Close()
+	csvInfo, _ := os.Stat(csvPath)
+	fmt.Fprintf(os.Stderr, "  CSV:  %s (%d bytes)\n", csvPath, csvInfo.Size())
+
+	// Stdout: brief summary
+	fmt.Printf("Fetched %d bars for %s @ %s\n", len(periods), symbol, tf)
+}
+
 func printHelp() {
 	fmt.Print(`
 TradingView Pine Script Manager (Go)
@@ -1297,6 +1448,13 @@ Commands:
   delete <id>                   Delete script
     --yes                       Confirm deletion
   compile <file.pine>           Compile script
+  fetch                         Fetch raw OHLCV data (no indicator needed)
+    --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
+    --tf 5m                     Timeframe (default: 5m)
+    --bars 180                  Number of bars (free tier: 180)
+    --dir <dir>                 Output directory (default: .)
+    --json-out <file>           Custom JSON output path
+    --csv-out <file>            Custom CSV output path
   run <pineId>                  Run script with chart session
     --symbol EXCHANGE:SYMBOL     Market symbol (e.g., OANDA:XAUUSD, BINANCE:BTCUSDT)
     --tf 5m                     Timeframe
