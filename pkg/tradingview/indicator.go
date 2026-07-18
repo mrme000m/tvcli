@@ -2,6 +2,7 @@ package tradingview
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/ch99q/tvcli/pkg/schema"
@@ -116,21 +117,49 @@ func NewPineIndicator(opts map[string]any) *PineIndicator {
 	return ind
 }
 
+func toTypedValue(raw any, typ string) any {
+	s, ok := raw.(string)
+	if !ok {
+		return raw
+	}
+	switch typ {
+	case "integer", "int":
+		if n, err := strconv.Atoi(s); err == nil {
+			return n
+		}
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return int(f)
+		}
+	case "float":
+		if f, err := strconv.ParseFloat(s, 64); err == nil {
+			return f
+		}
+	case "bool":
+		switch strings.ToLower(s) {
+		case "true", "1", "yes":
+			return true
+		case "false", "0", "no":
+			return false
+		}
+	}
+	return raw
+}
+
 func (ind *PineIndicator) SetOption(key string, value any) error {
 	// Try direct key match
 	if def, ok := ind.Inputs[key]; ok {
-		def.Value = value
+		def.Value = toTypedValue(value, def.Type)
 		return nil
 	}
 	// Try "in_" prefix
 	if def, ok := ind.Inputs["in_"+key]; ok {
-		def.Value = value
+		def.Value = toTypedValue(value, def.Type)
 		return nil
 	}
 	// Try matching by inline/internalID
 	for _, def := range ind.Inputs {
 		if def.InternalID == key {
-			def.Value = value
+			def.Value = toTypedValue(value, def.Type)
 			return nil
 		}
 	}
