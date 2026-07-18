@@ -865,6 +865,20 @@ func cmdRun(cfg *config.Config, flags flagSet) {
 		maxAttempts = 5
 	}
 
+	// Pre-cleanup: always disconnect and reconnect fresh to clear stale session state.
+	// This ensures we start with a clean chart session every run.
+	fmt.Fprintf(os.Stderr, "🧹 Pre-cleanup: fresh session...\n")
+	chart.RemoveAllStudies()
+	chart.Delete()
+	time.Sleep(500 * time.Millisecond)
+	if err := connectFresh(); err != nil {
+		fatal("Pre-cleanup reconnect failed: %v", err)
+	}
+	chart, err = createChart()
+	if err != nil {
+		fatal("Pre-cleanup chart recreate failed: %v", err)
+	}
+
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		// ALWAYS clean up existing studies before creating — only way to ensure we have room
 		if existing := chart.GetStudies(); len(existing) > 0 {
