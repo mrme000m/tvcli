@@ -1,0 +1,13 @@
+# Secrets & local state
+.env
+.env.bak
+authenticated_cookies.json
+.tv-meta.json
+.tv-scripts/
+
+# Compiled binaries
+tv
+tvcli
+
+# OS
+.DS_Store
