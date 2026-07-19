@@ -16,6 +16,7 @@ The historical JS runner files (`/Volumes/ExMac/code/tradingview/js-experiment06
 | File | Purpose |
 |------|---------|
 | [`PINE_RESPONSE_SKILL.md`](PINE_RESPONSE_SKILL.md) | **Start here.** Anatomy of a TradingView Pine run response (`periods`, `graphics`, `strategyReport`), how to read `metaInfo`/schema, which inputs matter, and the CLI commands that parse the response. |
+| [`VOLUME_PROFILE_SKILL.md`](VOLUME_PROFILE_SKILL.md) | How the video method maps to the `vp` skill, the mapped Pine inputs, recommended timeframes/ranges, and a better numeric VP script for future upgrades. |
 | [`PARSING_PROTOCOL_FOR_GO.md`](PARSING_PROTOCOL_FOR_GO.md) | Protocol reference for the `tv <skill>` commands, including the new `--signals` generic-extraction path. |
 | [`SKILL_REFERENCE_INDEX.md`](SKILL_REFERENCE_INDEX.md) | Per-skill cross-reference of Pine IDs, Go parser files, captured payloads, and known discrepancies. |
 | [`dumps/`](dumps/) | Captured reference payloads (`payload.json`) plus the JS runner `stdout.txt`, `stderr.txt`, and `help.txt` from the original port. Use `payload.json` as the target output; use `tv run ... --raw` to inspect actual period/graphics data. |
