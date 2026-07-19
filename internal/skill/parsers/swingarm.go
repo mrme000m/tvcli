@@ -51,7 +51,7 @@ func parseSwingArm(periods []map[string]any, graphic map[string]map[string]any, 
 	if buySignal || sellSignal { agenticScore += 0.2 }
 	agenticScore = math.Min(agenticScore, 0.99)
 
-	var opps []skill.Opportunity
+	opps := []skill.Opportunity{}
 	if buySignal || sellSignal {
 		dir := "long"
 		if sellSignal { dir = "short" }
@@ -68,8 +68,8 @@ func parseSwingArm(periods []map[string]any, graphic map[string]map[string]any, 
 		Market: skill.MarketData{LastPrice: trailingStop, Bias: bias},
 		Structure: map[string]any{"trailingStop": round2(trailingStop), "extremum": round2(extremum), "fib1": round2(fib1), "fib2": round2(fib2), "fib3": round2(fib3), "signal": signal, "bias": bias},
 		Opportunities: opps,
-		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("Stop: %.0f | Extremum: %.0f | Bias: %s", trailingStop, extremum, bias), PrimaryOpp: primaryOppFromOpps(opps)},
-		Validation: skill.Validation{Passed: true}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
+		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("Stop: %.0f | Extremum: %.0f | Bias: %s", trailingStop, extremum, bias), PrimaryOpp: primaryOppFromOpps(opps), Warnings: []string{}},
+		Validation: skill.Validation{Passed: true, Warnings: []string{}}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
 	}
 }
 
