@@ -71,6 +71,16 @@ func LoadIndicator(cfg *config.Config, pineID string, inputs map[string]string, 
 		if indResult.MetaInfo != nil {
 			if inputsArr, ok := indResult.MetaInfo["inputs"].([]any); ok {
 				fmt.Fprintf(os.Stderr, "[debug] metaInfo.inputs count: %d\n", len(inputsArr))
+				for _, inp := range inputsArr {
+					if m, ok := inp.(map[string]any); ok {
+						id, _ := m["id"].(string)
+						if id == "" || id == "text" || id == "pineId" || id == "pineVersion" || id == "pineFeatures" || id == "__profile" || id == "__fast_calc" {
+							continue
+						}
+						fmt.Fprintf(os.Stderr, "[debug] input: %s (type=%s defval=%v)\n",
+							id, m["type"], m["defval"])
+					}
+				}
 			}
 		}
 	}
