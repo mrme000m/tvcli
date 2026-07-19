@@ -1539,6 +1539,11 @@ func fetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]ohlcvBar
 	}
 	defer client.Close()
 
+	return fetchOHLCVBarsWithClient(client, symbol, tf, bars)
+}
+
+// fetchOHLCVBarsWithClient fetches OHLCV using an existing WS client (persistent connection).
+func fetchOHLCVBarsWithClient(client *tradingview.Client, symbol, tf string, bars int) ([]ohlcvBar, error) {
 	ch := tradingview.NewChartSession(client)
 	ch.OnError(func(err error) {
 		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
@@ -1740,6 +1745,23 @@ func cmdSync(cfg *config.Config, flags flagSet) {
 		return
 	}
 
+	// Loop mode: use persistent WS connection
+	fmt.Fprintf(os.Stderr, "Persistent mode: WS connection stays open\n")
+	pr := runner.NewPersistentRunner(
+		[]tradingview.ClientOption{
+			tradingview.WithToken(cfg.SessionID),
+			tradingview.WithSignature(cfg.Signature),
+			tradingview.WithDebug(cfg.Debug),
+		},
+		cfg.Debug,
+	)
+	defer pr.Close()
+
+	// Wire reconnection callback
+	pr.OnDisconnected(func() {
+		fmt.Fprintf(os.Stderr, "[sync] ws disconnected, will reconnect on next cycle\n")
+	})
+
 	// Loop: re-fetch and merge periodically
 	for {
 		time.Sleep(time.Duration(loopSecs) * time.Second)
@@ -1749,7 +1771,13 @@ func cmdSync(cfg *config.Config, flags flagSet) {
 			existing = f
 		}
 
-		fresh, err := fetchOHLCVBars(cfg, symbol, tf, bars)
+		// Ensure WS is connected (auto-reconnects if needed)
+		if err := pr.EnsureConnected(); err != nil {
+			fmt.Fprintf(os.Stderr, "Reconnect error: %v\n", err)
+			continue
+		}
+
+		fresh, err := fetchOHLCVBarsWithClient(pr.Client(), symbol, tf, bars)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Loop fetch error: %v\n", err)
 			continue
