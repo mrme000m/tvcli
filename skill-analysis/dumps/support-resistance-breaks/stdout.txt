@@ -1,0 +1,111 @@
+◇ injected env (13) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+
+📊 Running: PUB;NXS6SoOdr880Hrvh9vA36UcAjC14bOkc | BTCUSDT | 1h | 300 bars
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:15:28.844Z",
+  "execution": {
+    "durationMs": 47912,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "support-resistance-breaks",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BTCUSDT",
+    "timeframe": "1h",
+    "htfTimeframe": null
+  },
+  "levels": {
+    "resistance": [
+      65600,
+      64700,
+      64692.83,
+      64504.11,
+      64425
+    ],
+    "support": [
+      57800.19,
+      61306.84,
+      61544.56,
+      61824.97,
+      62436.59
+    ],
+    "nearestResistance": 65600,
+    "nearestSupport": 63656,
+    "positionToSR": 0.64
+  },
+  "breaks": {
+    "totalEvents": 2,
+    "recentBreaks": [
+      {
+        "price": 63412.01,
+        "types": [
+          "break1"
+        ],
+        "supportBroken": 1,
+        "resistanceBroken": 0
+      },
+      {
+        "types": [
+          "break1"
+        ],
+        "supportBroken": 1,
+        "resistanceBroken": 0
+      }
+    ],
+    "maxIntensity": 1,
+    "avgIntensity": 1
+  },
+  "confluence": [
+    {
+      "price": 1,
+      "count": 2
+    }
+  ],
+  "srBroken": [
+    {
+      "supportBroken": 0,
+      "resistanceBroken": 1
+    },
+    {
+      "supportBroken": 1,
+      "resistanceBroken": 0
+    },
+    {
+      "supportBroken": 1,
+      "resistanceBroken": 0
+    },
+    {
+      "supportBroken": 0,
+      "resistanceBroken": 1
+    }
+  ],
+  "opportunities": [
+    {
+      "rank": 1,
+      "setup": "sr_break",
+      "direction": "short",
+      "confidence": "LOW",
+      "confluenceScore": 0.2,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "SHORT break detected. Types: break1. Confluence at 1 (2x)."
+    }
+  ],
+  "narrative": {
+    "marketStructure": "S/R Breaks: 2 events, 2 recent. Intensity: max=1, avg=1. Levels: 12 resistance, 8 support. Confluence clusters: 1. Nearest R: 65600 | S: 63656 | Position: 0.64.",
+    "primaryOpportunity": "SHORT break detected. Types: break1. Confluence at 1 (2x).",
+    "warnings": [],
+    "watchlist": [
+      "Break + retest = highest probability continuation.",
+      "Confluence clusters act as strong magnets for price.",
+      "Monitor break intensity > 2 for momentum confirmation."
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.7
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

@@ -1,0 +1,43 @@
+{
+  "name": "golden-rule-strategy",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/golden-rule-strategy",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/golden-rule-strategy.cjs",
+  "pine_id": "PUB;6daafb2cabe6419d98ae25229d2327f8",
+  "workflow": "golden-rule-strategy",
+  "supports_agent": true,
+  "supports_silent": true,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseSMCGraphic"
+  ],
+  "parse_output_fields": [],
+  "sample_command": "node golden-rule-strategy.cjs BTCUSDT --tf 1h --bars 500 --agent --json --silent",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "delimiter",
+    "schema_hint": null,
+    "stdout_chars": 3554,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "_parserMeta",
+      "agentContext",
+      "execution",
+      "exitCode",
+      "goldenRule",
+      "indicators",
+      "schemaVersion",
+      "status",
+      "timeframes",
+      "timestamp"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: golden-rule-strategy\ndescription: |\n  Execute the Golden Rule Strategy — a multi-timeframe high-probability trading system.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, technical-analysis, multi-timeframe, golden-rule]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Golden Rule Strategy — Multi-Timeframe High-Probability Trading\n\n## When to Use\n\nAutomates the **Golden Rule Strategy**: a disciplined, probability-based trading framework that requires **three timeframes to align** and **four technical signals to confirm** before capital is put at risk. The strategy is designed for serious investors seeking consistent portfolio growth by trading *with* the primary market tide, not against it.\n\n**The Golden Rule:** *Never trade against the weekly momentum.*\n\nThis skill:\n1. Runs **Smart Money Concepts (LuxAlgo)** on Weekly, Daily, and 4-Hour timeframes\n2. Computes **RSI(14)**, **Stochastic(21,5,5)**, and **MACD** from 4H price data locally\n3. Applies the **3-Step Filter** to verify timeframe alignment\n4. Checks the **4-Signal Checklist** for bullish/bearish confirmation\n5. Outputs a **PASS/FAIL verdict** with suggested **Stop Loss** and **Take Profit** levels derived from SMC Order Blocks and Fair Value Gaps\n\n## Dependencies\n\n- `scripts/golden-rule-strategy.cjs` in the skill directory (depends on `tv-optimized.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n- TradingView WebSocket credentials (`SESSION` and `SIGNATURE` env vars)\n\n## Quick Start\n\n```bash\n# Default run (BTCUSDT)\nnode scripts/golden-rule-strategy.cjs BTCUSDT\n\n# Specific symbol\nnode scripts/golden-rule-strategy.cjs ETHUSDT\n\n# JSON output for automation\nnode scripts/golden-rule-strategy.cjs SOLUSDT --json --out golden-rule.json\n\n# Agent mode (deterministic delimited JSON)\nnode scripts/golden-rule-strategy.cjs BTCUSDT --agent\n\n# Silent mode (JSON only, no logs)\nnode scripts/golden-rule-strategy.cj",
+  "help_output": "◇ injected env (13) from .env // tip: ⌘ override existing { override: true }\n\nGolden Rule Strategy — Multi-Timeframe High-Probability Runner\nUsage: node golden-rule-strategy.cjs <SYMBOL> [options]\nOptions: --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --silent, --help\n\nDescription:\n  Runs SMC (Smart Money Concepts) on Weekly → Daily → 4H timeframes.\n  Computes RSI, Stochastic, MACD from 4H price data locally.\n  Applies the Golden Rule 3-step filter + 4-signal checklist.\n  Outputs PASS/FAIL verdict with SL/TP suggestions from nearest OBs/FVGs.\n\n",
+  "stderr_excerpt": ""
+}

@@ -1,0 +1,7 @@
+◇ injected env (13) from .env // tip: ⌘ enable debugging { debug: true }
+
+Smart Money Concepts (LuxAlgo) — Standalone Runner
+Usage: node smart-money-concepts.cjs <SYMBOL> [options]
+Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --silent, --help
+Inputs: modeInput, styleInput, showTrendInput, showInternalsInput, showInternalBullInput, internalBullColorInput, showInternalBearInput, internalBearColorInput, internalFilterConfluenceInput, internalStructureSize, showStructureInput, showSwingBullInput, swingBullColorInput, showSwingBearInput, swingBearColorInput, swingStructureSize, showSwingsInput, swingsLengthInput, showHighLowSwingsInput, showInternalOrderBlocksInput, internalOrderBlocksSizeInput, showSwingOrderBlocksInput, swingOrderBlocksSizeInput, orderBlockFilterInput, orderBlockMitigationInput, internalBullishOrderBlockColor, internalBearishOrderBlockColor, swingBullishOrderBlockColor, swingBearishOrderBlockColor, showEqualHighsLowsInput, equalHighsLowsLengthInput, equalHighsLowsThresholdInput, equalHighsLowsSizeInput, showFairValueGapsInput, fairValueGapsThresholdInput, fairValueGapsTimeframeInput, fairValueGapsBullColorInput, fairValueGapsBearColorInput, fairValueGapsExtendInput, showDailyLevelsInput, dailyLevelsStyleInput, dailyLevelsColorInput, showWeeklyLevelsInput, weeklyLevelsStyleInput, weeklyLevelsColorInput, showMonthlyLevelsInput, monthlyLevelsStyleInput, monthlyLevelsColorInput, showPremiumDiscountZonesInput, premiumZoneColorInput, equilibriumZoneColorInput, discountZoneColorInput
+

@@ -1,0 +1,53 @@
+{
+  "name": "self-aware-trend-system",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/self-aware-trend-system",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/self-aware-trend-system.cjs",
+  "pine_id": "PUB;0f80bcf05d544d4c98fde06faab1c976",
+  "workflow": "adaptive-supertrend-quality",
+  "supports_agent": true,
+  "supports_silent": true,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseOutput"
+  ],
+  "parse_output_fields": [
+    "signals",
+    "narrative",
+    "validation",
+    "agenticScore"
+  ],
+  "sample_command": "node self-aware-trend-system.cjs BTCUSDT --preset default --tf 15m --bars 300 --agent --json --silent",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "delimiter",
+    "schema_hint": null,
+    "stdout_chars": 3730,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "_parserMeta",
+      "agentContext",
+      "conformance",
+      "execution",
+      "exitCode",
+      "market",
+      "narrative",
+      "opportunities",
+      "performance",
+      "schemaVersion",
+      "status",
+      "structure",
+      "timestamp",
+      "tradePlan",
+      "validation"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: self-aware-trend-system\ndescription: |\n  Use the Self-Aware Trend System [WillyAlgoTrader] TradingView indicator to analyze any symbol/timeframe and extract adaptive trend-following signals.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, supertrend, tqi, regime]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Self-Aware Trend System [WillyAlgoTrader] — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `self-aware-trend-system.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface high-probability trend-following setups. The output includes:\n\n- **Trend State** — current direction (bullish/bearish/neutral), TQI quality, regime classification\n- **TQI Breakdown** — Efficiency, Volatility, Structure, Momentum Persistence components\n- **Trade Signals** — BUY/SELL signals with scores (0-30), tooltip metadata (TQI, ER, RSI, Vol Z)\n- **Trade Plan** — ENTRY, SL, TP1-3 with live R-multiples\n- **Performance Stats** — Win Rate, Avg R, Drawdown, Streaks, Regime Edge\n\nThe skill connects raw indicator output to actionable trade logic: trend-aligned entries (with TQI quality filter), dynamic TP scaling, and regime-aware position sizing.\n\n## Dependencies\n\n- `scripts/self-aware-trend-system.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Default preset (Default: ATR 13, Base Mult 2.0, TQI enabled)\nnode scripts/self-aware-trend-system.cjs BTCUSDT\n\n# Scalping preset (tighter bands, higher quality influence)\nnode scripts/self-aware-trend-system.cjs ETHUSDT --preset scalping --tf 5m --bars 200\n\n# Swing preset (wider bands, longer lookback)\nnode scripts/self-aware-trend-system.cjs SOLUSDT --preset swing --tf 1h --bars 1000\n\n# Custom + JSON for downstream processing\nnode scripts/self-aware-trend-system.cjs BTCUSDT --preset crypto ",
+  "help_output": "◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }\n\nSelf-Aware Trend System [WillyAlgoTrader] — Standalone Runner\n===============================================================\n\nUsage:\n  node self-aware-trend-system.cjs <SYMBOL> [options]\n\nArguments:\n  SYMBOL                    Trading pair (default: BTCUSDT)\n\nOptions:\n  --tf <timeframe>          Timeframe: 1m, 5m, 15m, 1h, 4h, 1D (default: 15m)\n  --bars <n>                Number of chart bars (default: 500)\n  --preset <name>           Preset: auto, scalping, default, swing, crypto (default: default)\n  --json                    Output JSON instead of table\n  --agent                   Agent mode (simplified JSON, optimized for AI agents)\n  --out <file>              Write JSON to file\n  --verbose, -v             Verbose output for debugging\n  --silent                  Suppress all non-JSON stdout (use with --json or --agent)\n  --dry-run                 Skip TradingView connection, show parsed args only\n  --help, -h                Show this help\n\nExamples:\n  node self-aware-trend-system.cjs BTCUSDT\n  node self-aware-trend-system.cjs ETHUSDT --tf 1h --bars 1000\n  node self-aware-trend-system.cjs SOLUSDT --preset scalping --json --out sol.json\n  node self-aware-trend-system.cjs BTCUSDT --agent\n\nExit Codes:\n  0  = Success\n  1  = Critical error (missing credentials, connection failed)\n  2  = No data\n  3  = Timeout / cancelled\n  4  = Validation error\n\n",
+  "stderr_excerpt": ""
+}

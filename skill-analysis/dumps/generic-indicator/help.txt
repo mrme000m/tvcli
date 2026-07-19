@@ -1,0 +1,40 @@
+◇ injected env (13) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+
+Generic Pine Script Indicator — Standalone Runner
+=================================================
+
+Usage:
+  node generic-indicator.cjs --pine <PINE_ID> --symbol <SYMBOL> [options]
+  node generic-indicator.cjs --builtin <NAME> --symbol <SYMBOL> [options]
+
+Indicator Sources:
+  --pine <id>               Public Pine script (PUB;xxx, USER;xxx, INV;xxx)
+  --builtin <name>          Built-in TradingView indicator by name or STD ID
+  --list-builtins [term]    List/search available built-in indicators
+
+Options:
+  --pine-version <ver>      Version: "last" or specific version (default: last)
+  --symbol <sym>            Trading pair (default: BTCUSDT)
+  --tf <timeframe>          Timeframe (default: 15m)
+  --bars <n>                Number of chart bars (default: 500)
+  --input <key=value>       Set an indicator input (can repeat)
+  --json                    Output JSON
+  --agent                   Agent mode
+  --out <file>              Write JSON to file
+  --verbose, -v             Verbose output
+  --dry-run                 Skip connection
+  --help, -h                Show this help
+
+Examples:
+  # Public Pine script
+  node generic-indicator.cjs --pine PUB;ff1a0136336340f38e908eeb12ea33aa --symbol BTCUSDT
+
+  # Built-in indicator by name
+  node generic-indicator.cjs --builtin RSI --symbol BTCUSDT --tf 1h
+
+  # Built-in indicator by STD ID
+  node generic-indicator.cjs --pine STD;RSI --symbol BTCUSDT
+
+  # Search built-ins
+  node generic-indicator.cjs --list-builtins Bollinger
+

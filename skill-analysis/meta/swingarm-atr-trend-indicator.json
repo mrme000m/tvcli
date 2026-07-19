@@ -1,0 +1,38 @@
+{
+  "name": "swingarm-atr-trend-indicator",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/swingarm-atr-trend-indicator",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/swingarm-atr-trend-indicator.cjs",
+  "pine_id": "PUB;GdkmXaTINI8knwuCrctQD1pB5dFaRnyr",
+  "workflow": null,
+  "supports_agent": true,
+  "supports_silent": true,
+  "input_map": [],
+  "transform_keys": null,
+  "parsing_functions": [
+    "parseArgs"
+  ],
+  "parse_output_fields": [],
+  "sample_command": "node swingarm-atr-trend-indicator.cjs BTCUSDT --tf 1h --bars 300 --agent --json --silent",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "bracket",
+    "schema_hint": null,
+    "stdout_chars": 529,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "backgroundActive",
+      "confidence",
+      "indicator",
+      "pineId",
+      "price",
+      "rationale",
+      "signal",
+      "trailingStop",
+      "trend"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: swingarm-atr-trend-indicator\ndescription: ATR-based trend indicator for TradingView that uses background colors and trailing stop levels to generate buy/sell signals\nversion: 1.0.0\nauthor: Hermes Agent\ncompatibility: [\"tradingview\", \"tv-optimized.cjs\", \"node >= 16\"]\n---\n\n# SwingArm ATR Trend Indicator Skill\n\n## Overview\nThe SwingArm ATR Trend Indicator is a TradingView indicator (Pine ID: `PUB;GdkmXaTINI8knwuCrctQD1pB5dFaRnyr`) that uses Average True Range (ATR) to identify trend direction. It visualizes trends via chart background colors and trailing stop levels:\n- **GREEN background** + price above green area → BUY signal\n- **RED background** + price below red area → SELL signal\n\nThis skill provides a standalone runner script to fetch indicator data, parse signals, and output structured results for automated trading systems or manual analysis.\n\n## Indicator Behavior (from Video Tutorial)\n- **Core Logic**: Calculates ATR-based trailing stop levels. When price is above the trailing stop, the background turns green (bullish trend). When price is below, background turns red (bearish trend).\n- **Key Input**: ATR Period (default 28, video recommends 21 for better responsiveness)\n- **Additional Features**: Optional Fibonacci entry levels (LS1-LS3 for buy, SS1-SS3 for sell) and modified/unmodified trailing stop calculation.\n- **Signal Confirmation**: Wait for background color to stabilize and price to clearly break above/below the trailing stop area.\n\n## CLI Usage\n```bash\nnode swingarm-atr-trend-indicator.cjs <SYMBOL> [options]\n```\n\n### Options\n| Option | Description | Default |\n|--------|-------------|---------|\n| `--symbol <SYMBOL>` | Trading symbol (e.g., BTCUSDT, ETHUSDT) | BTCUSDT |\n| `--tf <TIMEFRAME>` | Chart timeframe (e.g., 15m, 1h, 1D) | 15m |\n| `--bars <NUMBER>` | Number of bars to fetch | 500 |\n| `--input <key=value>` | Override indicator inputs (e.g., `atrPeriod=21`) | See INPUT_MAP |\n| `--json` | Output full JSON results | false |\n| `--agent` | Output deterministic agent-mode JSON | false |\n| `--out <FILE>` | Write output to file | none |\n| `--dry-run` | Simulate execution without API calls | false |\n| `--silent` | Suppress non-essential output | false |\n| `--verbose`/`-v` | Show detailed error stacks | false |\n| `--help`/`-h` | Show usage instructions | false |\n\n### Indicator Inputs (--input flags)\nMap to TradingView input IDs via `INPUT_MAP` in the runner script:\n- `indicatorTimeframe`: Timeframe override (resolution type, default: \"\")\n",
+  "help_output": "◇ injected env (13) from .env // tip: ⌘ enable debugging { debug: true }\n\nSwingArm ATR Trend Indicator — Standalone Runner\nUsage: node swingarm-atr-trend-indicator.cjs <SYMBOL> [options]\n\nOptions:\n  --symbol <SYMBOL>    Trading symbol (e.g., BTCUSDT, ETHUSDT) [default: BTCUSDT]\n  --tf <TIMEFRAME>     Chart timeframe (e.g., 15m, 1h, 1D) [default: 15m]\n  --bars <NUMBER>       Number of bars to fetch [default: 500]\n  --input <key=value>   Override indicator inputs (e.g., ATRPeriod=21)\n  --json                Output full JSON results\n  --agent               Output deterministic agent-mode JSON\n  --out <FILE>          Write output to file\n  --dry-run             Simulate execution without API calls\n  --silent              Suppress non-essential output\n  --verbose, -v         Show detailed error stacks\n  --help, -h            Show this help message\n\nInputs:\n  trailType         Trail type (modified/unmodified) [default: modified]\n  ATRPeriod         ATR Period (1-100) [default: 28, recommended: 21]\n  ATRFactor         ATR Factor [default: 5]\n  show_fib_entries  Show Fib entries [default: true]\n\nExamples:\n  node swingarm-atr-trend-indicator.cjs BTCUSDT\n  node swingarm-atr-trend-indicator.cjs ETHUSDT --tf 1h --input ATRPeriod=21\n  node swingarm-atr-trend-indicator.cjs BTCUSDT --agent --input ATRPeriod=21\n  node swingarm-atr-trend-indicator.cjs BTCUSDT --dry-run\n\n",
+  "stderr_excerpt": ""
+}

@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ch99q/tvcli/pkg/extract"
+	"github.com/ch99q/tvcli/pkg/pipeline"
 	"github.com/ch99q/tvcli/pkg/schema"
 )
 
@@ -28,7 +28,7 @@ type MultiRunResult struct {
 // SingleRunResult holds the output of one script execution.
 type SingleRunResult struct {
 	Config      RunConfig          `json:"config"`
-	Signals     *extract.Signals   `json:"signals"`
+	Signals     *pipeline.Signals   `json:"signals"`
 	Fields      map[string]any     `json:"fieldValues"` // current values of all named fields
 	GraphicCount map[string]int    `json:"graphicCounts,omitempty"`
 }

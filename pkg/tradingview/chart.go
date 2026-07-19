@@ -9,20 +9,20 @@ import (
 )
 
 type ChartSession struct {
-	client          *Client
-	sessionID       string
-	seriesCreated   bool
-	currentSeries   int
-	periods         map[float64]map[string]any
-	periodsMu       sync.RWMutex
-	infos           map[string]any
-	studyListeners  map[string]func(map[string]any)
-	onSymbolLoaded  []func()
-	onUpdate        []func()
-	onError         []func(error)
+	client         Client
+	sessionID      string
+	seriesCreated  bool
+	currentSeries  int
+	periods        map[float64]map[string]any
+	periodsMu      sync.RWMutex
+	infos          map[string]any
+	studyListeners map[string]func(map[string]any)
+	onSymbolLoaded []func()
+	onUpdate       []func()
+	onError        []func(error)
 }
 
-func NewChartSession(client *Client) *ChartSession {
+func NewChartSession(client Client) *ChartSession {
 	cs := &ChartSession{
 		client:         client,
 		sessionID:      genSessionID("cs"),
@@ -30,11 +30,7 @@ func NewChartSession(client *Client) *ChartSession {
 		studyListeners: make(map[string]func(map[string]any)),
 	}
 
-	client.sessions[cs.sessionID] = &sessionEntry{
-		typ:    "chart",
-		onData: cs.onData,
-	}
-
+	client.RegisterSession(cs.sessionID, "chart", cs.onData)
 	client.Send("chart_create_session", []any{cs.sessionID})
 	return cs
 }
@@ -240,7 +236,7 @@ func (cs *ChartSession) RemoveAllStudies() {
 
 func (cs *ChartSession) Delete() {
 	cs.client.Send("chart_delete_session", []any{cs.sessionID})
-	delete(cs.client.sessions, cs.sessionID)
+	cs.client.UnregisterSession(cs.sessionID)
 }
 
 // GetSymbolInfo returns the resolved symbol info for this chart session.

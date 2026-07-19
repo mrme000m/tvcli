@@ -1,0 +1,67 @@
+{
+  "name": "shemar-smc-confidence",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/shemar-smc-confidence",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/shemar-smc-confidence.cjs",
+  "pine_id": "PUB;70f6e4e05f9c439c9d1f8fe26019357e",
+  "workflow": "shemar-smc-confidence",
+  "supports_agent": true,
+  "supports_silent": false,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseOutput"
+  ],
+  "parse_output_fields": [
+    "time",
+    "hma",
+    "supertrend",
+    "kernel",
+    "buy",
+    "sell",
+    "closeBuy",
+    "closeSell",
+    "filteredBuy",
+    "filteredSell",
+    "open",
+    "time",
+    "rawSignal",
+    "filteredSignal",
+    "closeSignal",
+    "totalBars",
+    "filteredBuySignals",
+    "filterRatio",
+    "latestSqueeze"
+  ],
+  "sample_command": "node shemar-smc-confidence.cjs BTCUSDT --tf 1h --bars 300 --agent --json",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "bracket",
+    "schema_hint": "shemar-smc-confidence",
+    "stdout_chars": 3499,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "agentContext",
+      "conformance",
+      "execution",
+      "exitCode",
+      "latestBars",
+      "narrative",
+      "opportunities",
+      "regime",
+      "schemaVersion",
+      "signals",
+      "status",
+      "structure",
+      "timeline",
+      "timestamp"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: shemar-smc-confidence\ndescription: |\n  Use the SHEMAR HMA ST + SMC Confidence Filter TradingView indicator to analyze HMA, Supertrend, and Kernel convergence for high-confidence filtered trading signals.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, hma, supertrend, kernel]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# SHEMAR HMA ST + SMC Confidence Filter — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `shemar-smc-confidence.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface high-probability trading setups based on multi-indicator convergence. The output includes:\n\n- **Alignment State** — FULLY_ALIGNED_BULLISH / FULLY_ALIGNED_BEARISH / MIXED\n- **Indicator States** — HMA bullish/bearish, Supertrend bullish/bearish, Kernel position\n- **Signal Counts** — raw buy/sell signals vs filtered (high-confidence) signals\n- **Close Signals** — exit signal counts\n\nThe skill connects raw indicator output to actionable trade logic: entry only on filtered signals (highest confidence), trend alignment as directional filter, and kernel as additional confirmation.\n\n## Dependencies\n\n- `scripts/shemar-smc-confidence.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Default run\nnode scripts/shemar-smc-confidence.cjs BTCUSDT\n\n# Specific timeframe\nnode scripts/shemar-smc-confidence.cjs ETHUSDT --tf 1h --bars 800\n\n# JSON output\nnode scripts/shemar-smc-confidence.cjs BTCUSDT --json --out smc.json\n\n# Agent mode\nnode scripts/shemar-smc-confidence.cjs BTCUSDT --agent\n```\n\n## How the Indicator Works\n\n### Core Architecture\n\nThe indicator combines three analysis layers:\n- **HMA (Hull Moving Average)** — fast, smooth trend indicator with color state\n- **Supertrend** — volatility-based trend following with color state\n- **Kernel**",
+  "help_output": "◇ injected env (13) from .env // tip: ⌘ enable debugging { debug: true }\n\nShemar SMC Confidence — Standalone Runner\nUsage: node shemar-smc-confidence.cjs <SYMBOL> [options]\nOptions: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help\nInputs: hmaLength, atrPeriod, factor, enableShorts, useStopEntry, stopEntryOffset, htfPeriod, sqzLength, sqzMult, sqzKCLength, sqzKCMult, sqzThreshold, sqzTF, kernelPeriod, confidenceThresh, showScore\n\n",
+  "stderr_excerpt": ""
+}

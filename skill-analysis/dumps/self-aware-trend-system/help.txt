@@ -1,0 +1,36 @@
+◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }
+
+Self-Aware Trend System [WillyAlgoTrader] — Standalone Runner
+===============================================================
+
+Usage:
+  node self-aware-trend-system.cjs <SYMBOL> [options]
+
+Arguments:
+  SYMBOL                    Trading pair (default: BTCUSDT)
+
+Options:
+  --tf <timeframe>          Timeframe: 1m, 5m, 15m, 1h, 4h, 1D (default: 15m)
+  --bars <n>                Number of chart bars (default: 500)
+  --preset <name>           Preset: auto, scalping, default, swing, crypto (default: default)
+  --json                    Output JSON instead of table
+  --agent                   Agent mode (simplified JSON, optimized for AI agents)
+  --out <file>              Write JSON to file
+  --verbose, -v             Verbose output for debugging
+  --silent                  Suppress all non-JSON stdout (use with --json or --agent)
+  --dry-run                 Skip TradingView connection, show parsed args only
+  --help, -h                Show this help
+
+Examples:
+  node self-aware-trend-system.cjs BTCUSDT
+  node self-aware-trend-system.cjs ETHUSDT --tf 1h --bars 1000
+  node self-aware-trend-system.cjs SOLUSDT --preset scalping --json --out sol.json
+  node self-aware-trend-system.cjs BTCUSDT --agent
+
+Exit Codes:
+  0  = Success
+  1  = Critical error (missing credentials, connection failed)
+  2  = No data
+  3  = Timeout / cancelled
+  4  = Validation error
+

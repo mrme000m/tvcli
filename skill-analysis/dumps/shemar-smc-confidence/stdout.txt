@@ -1,0 +1,146 @@
+◇ injected env (13) from .env // tip: ⌘ override existing { override: true }
+
+📊 Running: PUB;70f6e4e05f9c439c9d1f8fe26019357e | BTCUSDT | 1h | 300 bars
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:14:12.635Z",
+  "execution": {
+    "durationMs": 16698,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "shemar-smc-confidence",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BTCUSDT",
+    "timeframe": "1h",
+    "htfTimeframe": "inferred-same-tf"
+  },
+  "signals": {
+    "rawBuys": 6,
+    "rawSells": 5,
+    "filteredBuys": 6,
+    "filteredSells": 5,
+    "filterRatio": 1
+  },
+  "structure": {
+    "bosEvents": 12,
+    "recentBOS": [
+      {
+        "type": "BOS_BULLISH",
+        "price": 64203.08
+      },
+      {
+        "type": "BOS_BEARISH",
+        "price": 62614.02
+      },
+      {
+        "type": "BOS_BULLISH",
+        "price": 62979.99
+      },
+      {
+        "type": "BOS_BEARISH"
+      },
+      {
+        "type": "BOS_BULLISH"
+      }
+    ],
+    "latestSqueeze": "SQUEEZE_OFF"
+  },
+  "regime": {
+    "kernelTrend": "BULL",
+    "htfAligned": true,
+    "confidenceScore": 0.85
+  },
+  "timeline": [
+    {
+      "rawSignal": "NONE",
+      "filteredSignal": "NONE",
+      "closeSignal": "NONE"
+    },
+    {
+      "rawSignal": "NONE",
+      "filteredSignal": "NONE",
+      "closeSignal": "NONE"
+    },
+    {
+      "rawSignal": "NONE",
+      "filteredSignal": "NONE",
+      "closeSignal": "NONE"
+    },
+    {
+      "rawSignal": "NONE",
+      "filteredSignal": "NONE",
+      "closeSignal": "NONE"
+    },
+    {
+      "rawSignal": "NONE",
+      "filteredSignal": "NONE",
+      "closeSignal": "NONE"
+    }
+  ],
+  "latestBars": [
+    {
+      "hma": 61356.47685621633,
+      "supertrend": 60316.254893941164,
+      "kernel": 60366.85633333332,
+      "filteredBuy": 0,
+      "filteredSell": 0
+    },
+    {
+      "hma": 61242.1441295195,
+      "supertrend": 60316.254893941164,
+      "kernel": 60277.91033333332,
+      "filteredBuy": 0,
+      "filteredSell": 0
+    },
+    {
+      "hma": 61120.74627776341,
+      "supertrend": 60316.254893941164,
+      "kernel": 60187.15633333332,
+      "filteredBuy": 0,
+      "filteredSell": 0
+    },
+    {
+      "hma": 61000.41945862961,
+      "supertrend": 59937.120437712416,
+      "kernel": 60081.476666666655,
+      "filteredBuy": 0,
+      "filteredSell": 0
+    },
+    {
+      "hma": 60896.73582882999,
+      "supertrend": 59808.497153013785,
+      "kernel": 59988.58566666666,
+      "filteredBuy": 0,
+      "filteredSell": 0
+    }
+  ],
+  "opportunities": [
+    {
+      "rank": 1,
+      "setup": "hma_kernel_squeeze",
+      "direction": "long",
+      "confidence": "STRONG",
+      "confluenceScore": 0.85,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "LONG signal. Kernel: BULL. Squeeze: SQUEEZE_OFF. HTF aligned: true. Confidence: 0.85."
+    }
+  ],
+  "narrative": {
+    "marketStructure": "Shemar SMC: 6 raw buys, 5 raw sells. Filtered: 6/5 (ratio: 1). BOS events: 12. Kernel: BULL. Squeeze: SQUEEZE_OFF. HTF aligned: true.",
+    "primaryOpportunity": "LONG signal. Kernel: BULL. Squeeze: SQUEEZE_OFF. HTF aligned: true. Confidence: 0.85.",
+    "warnings": [],
+    "watchlist": [
+      "Squeeze release + BOS = highest probability entry.",
+      "HTF alignment filters out counter-trend signals.",
+      "Kernel regime must match signal direction for confidence."
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.99
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

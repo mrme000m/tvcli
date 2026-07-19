@@ -1,0 +1,178 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:13:44.663Z",
+  "execution": {
+    "durationMs": 10872,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "ema-confluence-sniper",
+    "htfTimeframe": "auto",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "lastPrice": 64903.89,
+    "bias": "bullish",
+    "htfBias": "Bullish",
+    "score": 9,
+    "adx": 56.7,
+    "volatility": "Normal"
+  },
+  "structure": {},
+  "signals": {
+    "grades": [
+      {
+        "direction": "Long",
+        "grade": "B",
+        "price": 63982.34
+      },
+      {
+        "direction": "Short",
+        "grade": "A",
+        "price": 63974.56
+      },
+      {
+        "direction": "Long",
+        "grade": "B",
+        "price": 63965.43
+      },
+      {
+        "direction": "Short",
+        "grade": "B",
+        "price": 63977.4
+      },
+      {
+        "direction": "Long",
+        "grade": "A",
+        "price": 63928.15
+      }
+    ],
+    "markers": {
+      "trail": {
+        "price": 64087.68069167231,
+        "text": "TRAIL 64087.68",
+        "barIndex": 284,
+        "timestamp": 284000
+      },
+      "entry": {
+        "price": 63995,
+        "text": "ENTRY 63995.00",
+        "barIndex": 283,
+        "timestamp": 283000
+      },
+      "sl": {
+        "price": 63902.31930832769,
+        "text": "SL 63902.32",
+        "barIndex": 283,
+        "timestamp": 283000
+      },
+      "tp1": {
+        "price": 64087.68069167231,
+        "text": "TP1 ✓ 64087.68",
+        "barIndex": 283,
+        "timestamp": 283000
+      },
+      "tp2": {
+        "price": 64180.361383344614,
+        "text": "TP2 ✓ 64180.36",
+        "barIndex": 283,
+        "timestamp": 283000
+      },
+      "tp3": {
+        "price": 64273.04207501692,
+        "text": "TP3 64273.04",
+        "barIndex": 283,
+        "timestamp": 283000
+      }
+    }
+  },
+  "opportunities": [
+    {
+      "rank": 1,
+      "setup": "ema_confluence",
+      "direction": "long",
+      "confidence": "STRONG",
+      "confluenceScore": 0.85,
+      "grade": "B",
+      "entryZone": {
+        "min": 63931.01,
+        "max": 64059
+      },
+      "optimalEntry": 63995,
+      "stopLoss": 63902.32,
+      "takeProfits": [
+        {
+          "method": "tp1",
+          "price": 64087.68069167231
+        },
+        {
+          "method": "tp2",
+          "price": 64180.361383344614
+        },
+        {
+          "method": "tp3",
+          "price": 64273.04207501692
+        }
+      ],
+      "riskReward": 1,
+      "distanceFromPrice": 908.89,
+      "isStale": true,
+      "rationale": "Long B grade signal. EMA confluence score 9/10. Aligned to bullish trend. HTF bias: Bullish. ⚠️ Signal is 908.89 away from current price — stale."
+    }
+  ],
+  "tradePlan": {
+    "direction": "long",
+    "entry": 63995,
+    "sl": 63902.31930832769,
+    "tp1": 64087.68069167231,
+    "tp2": 64180.361383344614,
+    "tp3": 64273.04207501692,
+    "riskDistance": 92.68069167230715,
+    "tp1R": 1
+  },
+  "narrative": {
+    "marketStructure": "Market trend is bullish with EMA confluence score 9/10. HTF bias: Bullish. Volatility: Normal. Latest signal: Long B (282 total grades).",
+    "primaryOpportunity": "Active long at 63995.00",
+    "warnings": [],
+    "watchlist": [
+      "Watch for A+ or A grade signals for highest confidence.",
+      "Monitor HTF bias alignment with Bullish."
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "checks": [
+      {
+        "name": "dashboard_present",
+        "passed": true,
+        "detail": "ok"
+      },
+      {
+        "name": "trend_state",
+        "passed": true,
+        "detail": "bullish"
+      },
+      {
+        "name": "grades_present",
+        "passed": true,
+        "detail": "282 grades"
+      }
+    ],
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidStructure": true,
+    "hasQualitySignal": true,
+    "htfAligned": true,
+    "agenticScore": 0.9
+  },
+  "schemaVersion": "agent-ready-v2.0.0",
+  "_parserMeta": {
+    "schemaVersion": "agent-ready-v2.1.0",
+    "emittedAt": "2026-07-19T02:13:44.664Z",
+    "deterministic": true
+  }
+}

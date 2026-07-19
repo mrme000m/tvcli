@@ -1,0 +1,4 @@
+◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }
+<<<AGENT_JSON_START>>>
+{"status":"ok","exitCode":0,"orchestratorVersion":"1.0.0","timestamp":"2026-07-19T02:15:51.080Z","params":{"symbols":["BTCUSDT","ETHUSDT"],"indicators":["precision-sniper"],"tf":"1h","preset":"auto","bars":500},"summary":{"symbolsScanned":2,"indicatorsPerSymbol":1,"alertsTriggered":0},"results":[{"symbol":"BTCUSDT","timestamp":"2026-07-19T02:15:40.644Z","indicators":[{"name":"precision-sniper","direction":"neutral","confidence":0.4,"exitCode":0}],"metaConfluence":{"metaScore":0.5,"consensus":"neutral","bullish":0,"bearish":0,"total":1}},{"symbol":"ETHUSDT","timestamp":"2026-07-19T02:15:45.816Z","indicators":[{"name":"precision-sniper","direction":"neutral","confidence":0.4,"exitCode":0}],"metaConfluence":{"metaScore":0.5,"consensus":"neutral","bullish":0,"bearish":0,"total":1}}]}
+<<<AGENT_JSON_END>>>

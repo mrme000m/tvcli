@@ -1,0 +1,15 @@
+{
+  "error": true,
+  "type": "ValidationError",
+  "message": "Study error",
+  "code": 3,
+  "details": {
+    "error": {
+      "name": "IndicatorError",
+      "type": "indicator",
+      "details": "undefined",
+      "indicatorId": "PUB;ff1a0136336340f38e908eeb12ea33aa"
+    }
+  },
+  "timestamp": "2026-07-19T02:25:39.276Z"
+}

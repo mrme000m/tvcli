@@ -1,0 +1,53 @@
+{
+  "name": "precision-sniper",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/precision-sniper",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/precision-sniper.cjs",
+  "pine_id": "PUB;1fc29950178c42a1a88f52a18161dd53",
+  "workflow": "ema-confluence-sniper",
+  "supports_agent": true,
+  "supports_silent": true,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseOutput"
+  ],
+  "parse_output_fields": [
+    "signals",
+    "narrative",
+    "validation",
+    "agenticScore"
+  ],
+  "sample_command": "node precision-sniper.cjs BTCUSDT --preset auto --tf 15m --bars 300 --agent --json --silent",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "delimiter",
+    "schema_hint": null,
+    "stdout_chars": 2841,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "_parserMeta",
+      "agentContext",
+      "conformance",
+      "execution",
+      "exitCode",
+      "market",
+      "narrative",
+      "opportunities",
+      "schemaVersion",
+      "signals",
+      "status",
+      "structure",
+      "timestamp",
+      "tradePlan",
+      "validation"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: precision-sniper\ndescription: |\n  Use the Precision Sniper TradingView indicator to analyze any symbol/timeframe and extract grade-based confluence signals.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, ema, rsi, confluence, graded-signals]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Precision Sniper — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `precision-sniper.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface grade-based trading setups. The output includes:\n\n- **Grade Signals** — Long/Short with A+, A, B, C letter grades\n- **Trend State** — EMA fast/slow/trend alignment, HTF bias, ADX\n- **Confluence Score** — 0-10 composite score for signal quality\n- **Trade Levels** — ENTRY, SL, TP1-3 with trailing stop logic\n- **EMA Configuration** — Fast, Slow, and Trend EMA values\n\nThe skill connects raw indicator output to actionable trade logic: grade-filtered entries, HTF bias confirmation, and ATR-based risk management.\n\n## Dependencies\n\n- `scripts/precision-sniper.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Auto preset (selects best preset for current timeframe)\nnode scripts/precision-sniper.cjs BTCUSDT\n\n# Scalping preset (fast EMAs, tight stops)\nnode scripts/precision-sniper.cjs ETHUSDT --preset scalping --tf 5m --bars 200\n\n# Swing preset (slow EMAs, wide stops)\nnode scripts/precision-sniper.cjs SOLUSDT --preset swing --tf 1h --bars 1000\n\n# Conservative preset (higher min score, wider stops)\nnode scripts/precision-sniper.cjs BTCUSDT --preset conservative --tf 15m --json --out btc.json\n\n# Agent mode (optimized for AI/agent workflows)\nnode scripts/precision-sniper.cjs BTCUSDT --agent --json\n```\n\n## How the Indicator Works\n\n### Core Architecture\n\nThe indicator is an **EMA confluence system** w",
+  "help_output": "\nPrecision Sniper — Standalone Runner\n=====================================\n\nUsage:\n  node precision-sniper.cjs <SYMBOL> [options]\n\nArguments:\n  SYMBOL                    Trading pair (default: BTCUSDT)\n\nOptions:\n  --tf <timeframe>          Timeframe (default: 15m)\n  --bars <n>                Number of chart bars (default: 500)\n  --preset <name>           Preset: auto, conservative, default, aggressive, scalping, swing, crypto (default: auto)\n  --json                    Output JSON\n  --agent                   Agent mode\n  --out <file>              Write JSON to file\n  --verbose, -v             Verbose output\n  --dry-run                 Skip connection\n  --help, -h                Show this help\n\nExamples:\n  node precision-sniper.cjs BTCUSDT\n  node precision-sniper.cjs ETHUSDT --preset scalping --tf 5m\n  node precision-sniper.cjs BTCUSDT --agent\n\n",
+  "stderr_excerpt": ""
+}

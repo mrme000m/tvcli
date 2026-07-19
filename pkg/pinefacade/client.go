@@ -2,7 +2,6 @@ package pinefacade
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -10,9 +9,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
-	"regexp"
-	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -213,36 +209,6 @@ func (c *Client) Delete(pineID, cookie string) (any, error) {
 	return result, nil
 }
 
-func (c *Client) SearchPublicScripts(query, cookie string) (any, error) {
-	u := fmt.Sprintf("https://www.tradingview.com/pubscripts-suggest-json/?search=%s", url.QueryEscape(query))
-	return c.getPublic(u)
-}
-
-func (c *Client) ListPublicScripts(offset int) (any, error) {
-	u := fmt.Sprintf("https://www.tradingview.com/pubscripts-library/?offset=%d", offset)
-	return c.getPublic(u)
-}
-
-func (c *Client) getPublic(u string) (any, error) {
-	req, _ := http.NewRequest("GET", u, nil)
-	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
-	req.Header.Set("X-Requested-With", "XMLHttpRequest")
-	req.Header.Set("X-Language", "en")
-	req.Header.Set("Origin", "https://www.tradingview.com")
-	req.Header.Set("Referer", "https://www.tradingview.com/")
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	var result any
-	json.Unmarshal(body, &result)
-	return result, nil
-}
 
 func (c *Client) postMultipart(u, source, cookie string) (any, error) {
 	var buf bytes.Buffer
@@ -362,183 +328,3 @@ func decodeIL(il string) string {
 	return string(decoded)
 }
 
-// --- utilities ---
-
-var pineIDRegex = regexp.MustCompile(`(?:USER|PUB|STD|INDIC);[^\s"'<>]+`)
-
-func ExtractPineIDFromSource(source string) string {
-	m := regexp.MustCompile(`(?m)^\s*(?://\s*)?(?:@?pineId\b\s*(?::|=)?\s*)(?:"|')?\s*((?:USER|PUB|STD|INDIC);[^\s"'<>]+)`).FindStringSubmatch(source)
-	if len(m) > 1 {
-		return NormalizePineID(m[1])
-	}
-	return ""
-}
-
-func NormalizePineID(raw string) string {
-	return strings.ReplaceAll(strings.TrimSpace(raw), "%3B", ";")
-}
-
-func LooksLikePineID(s string) bool {
-	return regexp.MustCompile(`(?i)^\s*(USER|PUB|STD|INDIC);`).MatchString(s)
-}
-
-func SHA256(text string) string {
-	h := sha256.Sum256([]byte(text))
-	return fmt.Sprintf("%x", h)
-}
-
-func NormalizeTimeframe(tf string) string {
-	t := strings.TrimSpace(tf)
-	if t == "" {
-		return "5"
-	}
-	// Already a bare number or single-letter D/W/M
-	if regexp.MustCompile(`^\d+$`).MatchString(t) || regexp.MustCompile(`(?i)^[DWM]$`).MatchString(t) {
-		return strings.ToUpper(t)
-	}
-	// Nm → N (minutes) — lowercase m only, must check before NM
-	if m := regexp.MustCompile(`^(\d+)m$`).FindStringSubmatch(t); len(m) > 1 {
-		return m[1]
-	}
-	// NM → M (monthly) — uppercase M only
-	if regexp.MustCompile(`^\d+M$`).MatchString(t) {
-		return "M"
-	}
-	// Nh → N*60 (minutes)
-	if h := regexp.MustCompile(`(?i)^(\d+)h$`).FindStringSubmatch(t); len(h) > 1 {
-		n, _ := strconv.Atoi(h[1])
-		return strconv.Itoa(n * 60)
-	}
-	// Nd → D, Nw → W
-	if d := regexp.MustCompile(`(?i)^(\d+)[dw]$`).FindStringSubmatch(t); len(d) > 0 {
-		letter := d[0][len(d[0])-1]
-		return strings.ToUpper(string(letter))
-	}
-	return t
-}
-
-// ValidateSymbol checks if a symbol has the required exchange prefix format.
-// TradingView requires symbols in the format EXCHANGE:SYMBOL (e.g., OANDA:XAUUSD, BINANCE:BTCUSDT).
-func ValidateSymbol(symbol string) (string, error) {
-	s := strings.TrimSpace(symbol)
-	if s == "" {
-		return "", fmt.Errorf("symbol cannot be empty")
-	}
-
-	// Check if already has exchange prefix
-	if strings.Contains(s, ":") {
-		parts := strings.SplitN(s, ":", 2)
-		if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
-			return strings.ToUpper(parts[0]) + ":" + strings.ToUpper(parts[1]), nil
-		}
-		return "", fmt.Errorf("invalid symbol format: %s (expected EXCHANGE:SYMBOL)", s)
-	}
-
-	// Auto-detect common symbols and add exchange prefix
-	upper := strings.ToUpper(s)
-	autoMap := map[string]string{
-		"XAUUSD":  "OANDA:XAUUSD",
-		"XAGUSD":  "OANDA:XAGUSD",
-		"EURUSD":  "OANDA:EURUSD",
-		"GBPUSD":  "OANDA:GBPUSD",
-		"USDJPY":  "OANDA:USDJPY",
-		"BTCUSDT": "BINANCE:BTCUSDT",
-		"ETHUSDT": "BINANCE:ETHUSDT",
-		"SOLUSDT": "BINANCE:SOLUSDT",
-		"BTCUSD":  "COINBASE:BTCUSD",
-		"ETHUSD":  "COINBASE:ETHUSD",
-	}
-
-	if mapped, ok := autoMap[upper]; ok {
-		return mapped, nil
-	}
-
-	// Try to guess exchange based on symbol type
-	if strings.HasSuffix(upper, "USD") || strings.HasSuffix(upper, "USDT") {
-		return "BINANCE:" + upper, nil
-	}
-	if len(upper) == 6 && !strings.Contains(upper, " ") {
-		// Likely a forex pair
-		return "OANDA:" + upper, nil
-	}
-
-	return "", fmt.Errorf("cannot determine exchange for symbol: %s (use EXCHANGE:SYMBOL format)", s)
-}
-
-func normalizeVersionEntries(raw any) []any {
-	switch v := raw.(type) {
-	case []any:
-		return v
-	case map[string]any:
-		if arr, ok := v["versions"].([]any); ok {
-			return arr
-		}
-		if res, ok := v["result"].(map[string]any); ok {
-			if arr, ok := res["versions"].([]any); ok {
-				return arr
-			}
-		}
-		if arr, ok := v["data"].([]any); ok {
-			return arr
-		}
-	}
-	return nil
-}
-
-func extractVersion(entry any) string {
-	switch v := entry.(type) {
-	case string:
-		return v
-	case map[string]any:
-		for _, key := range []string{"version", "scriptVersion", "sourceVersion"} {
-			if s, ok := v[key].(string); ok {
-				return s
-			}
-		}
-		if res, ok := v["result"].(map[string]any); ok {
-			if s, ok := res["version"].(string); ok {
-				return s
-			}
-		}
-		if mi, ok := v["metaInfo"].(map[string]any); ok {
-			if s, ok := mi["version"].(string); ok {
-				return s
-			}
-		}
-	}
-	return ""
-}
-
-func compareVersions(a, b string) int {
-	aParts := strings.Split(a, ".")
-	bParts := strings.Split(b, ".")
-	maxLen := len(aParts)
-	if len(bParts) > maxLen {
-		maxLen = len(bParts)
-	}
-	for i := 0; i < maxLen; i++ {
-		aVal, _ := strconv.Atoi(loot(aParts, i))
-		bVal, _ := strconv.Atoi(loot(bParts, i))
-		if aVal > bVal {
-			return 1
-		}
-		if aVal < bVal {
-			return -1
-		}
-	}
-	return 0
-}
-
-func loot(parts []string, i int) string {
-	if i < len(parts) {
-		return parts[i]
-	}
-	return "0"
-}
-
-func SortVersions(versions []string) []string {
-	sort.Slice(versions, func(i, j int) bool {
-		return compareVersions(versions[i], versions[j]) > 0
-	})
-	return versions
-}

@@ -10,25 +10,25 @@ import (
 )
 
 type ChartStudy struct {
-	session         *ChartSession
-	studyID         string
-	indicator       any
-	periods         map[float64]map[string]any
-	periodsMu       sync.RWMutex
-	graphic         map[string]map[string]any
-	strategyReport  map[string]any
-	onUpdate        []func()
-	onError         []func(error)
-	onReady         []func()
+	session        *ChartSession
+	studyID        string
+	indicator      any
+	periods        map[float64]map[string]any
+	periodsMu      sync.RWMutex
+	graphic        map[string]map[string]any
+	strategyReport map[string]any
+	onUpdate       []func()
+	onError        []func(error)
+	onReady        []func()
 }
 
 func NewChartStudy(session *ChartSession, indicator any) *ChartStudy {
 	cs := &ChartStudy{
-		session:    session,
-		studyID:    genSessionID("st"),
-		indicator:  indicator,
-		periods:    make(map[float64]map[string]any),
-		graphic:    make(map[string]map[string]any),
+		session:   session,
+		studyID:   genSessionID("st"),
+		indicator: indicator,
+		periods:   make(map[float64]map[string]any),
+		graphic:   make(map[string]map[string]any),
 	}
 
 	session.studyListeners[cs.studyID] = cs.onData
@@ -151,7 +151,7 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 
 	// Process graphics + strategy report
 	if ns, ok := studyData["ns"].(map[string]any); ok {
-		if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+		if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
 			keys := make([]string, 0, len(ns))
 			for k := range ns {
 				keys = append(keys, k)
@@ -163,7 +163,7 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 		// Inline path: ns.d is a JSON string containing graphicsCmds and/or report.
 		if d, ok := ns["d"].(string); ok {
 			if err := json.Unmarshal([]byte(d), &inlineParsed); err == nil {
-				if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+				if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
 					dkeys := make([]string, 0, len(inlineParsed))
 					for k := range inlineParsed {
 						dkeys = append(dkeys, k)
@@ -188,7 +188,7 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 				if graphicsCmds, ok := parsed["graphicsCmds"].(map[string]any); ok {
 					cs.processGraphics(graphicsCmds)
 				}
-			} else if cs.session != nil && cs.session.client != nil && cs.session.client.debug {
+			} else if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
 				log.Printf("[DEBUG] compressed report: %v", err)
 			}
 		}
@@ -204,9 +204,9 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 						}
 					}
 				}
+			}
 		}
 	}
-}
 }
 
 // mergeStrategyReport merges a report object (currency, settings, performance,
@@ -228,12 +228,12 @@ func (cs *ChartStudy) mergeStrategyReport(report any) {
 	// Equity comes paired with buyHold/drawDown series — store them together.
 	if _, ok := r["equity"]; ok {
 		cs.strategyReport["history"] = map[string]any{
-			"equity":           r["equity"],
-			"equityPercent":    r["equityPercent"],
-			"buyHold":          r["buyHold"],
-			"buyHoldPercent":   r["buyHoldPercent"],
-			"drawDown":         r["drawDown"],
-			"drawDownPercent":  r["drawDownPercent"],
+			"equity":          r["equity"],
+			"equityPercent":   r["equityPercent"],
+			"buyHold":         r["buyHold"],
+			"buyHoldPercent":  r["buyHoldPercent"],
+			"drawDown":        r["drawDown"],
+			"drawDownPercent": r["drawDownPercent"],
 		}
 	}
 }

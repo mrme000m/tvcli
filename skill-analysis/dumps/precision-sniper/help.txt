@@ -1,0 +1,26 @@
+
+Precision Sniper — Standalone Runner
+=====================================
+
+Usage:
+  node precision-sniper.cjs <SYMBOL> [options]
+
+Arguments:
+  SYMBOL                    Trading pair (default: BTCUSDT)
+
+Options:
+  --tf <timeframe>          Timeframe (default: 15m)
+  --bars <n>                Number of chart bars (default: 500)
+  --preset <name>           Preset: auto, conservative, default, aggressive, scalping, swing, crypto (default: auto)
+  --json                    Output JSON
+  --agent                   Agent mode
+  --out <file>              Write JSON to file
+  --verbose, -v             Verbose output
+  --dry-run                 Skip connection
+  --help, -h                Show this help
+
+Examples:
+  node precision-sniper.cjs BTCUSDT
+  node precision-sniper.cjs ETHUSDT --preset scalping --tf 5m
+  node precision-sniper.cjs BTCUSDT --agent
+

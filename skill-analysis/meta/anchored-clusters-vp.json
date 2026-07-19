@@ -1,0 +1,52 @@
+{
+  "name": "anchored-clusters-vp",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/anchored-clusters-vp",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/anchored-clusters-vp.cjs",
+  "pine_id": "PUB;92974e0a3cfb481eaf058cdab9f925a3",
+  "workflow": "anchored-clusters-vp",
+  "supports_agent": true,
+  "supports_silent": false,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseGraphicOutput"
+  ],
+  "parse_output_fields": [],
+  "sample_command": "node anchored-clusters-vp.cjs BTCUSDT --tf 1h --bars 300 --agent --json",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "bracket",
+    "schema_hint": "anchored-clusters-vp",
+    "stdout_chars": 6888,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "agentContext",
+      "clusters",
+      "conformance",
+      "currentBar",
+      "dotLabels",
+      "execution",
+      "exitCode",
+      "latest",
+      "narrative",
+      "opportunities",
+      "pocLabels",
+      "pocLevels",
+      "profile",
+      "recentBars",
+      "schemaVersion",
+      "signals",
+      "status",
+      "summary",
+      "timestamp"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: anchored-clusters-vp\ndescription: |\n  Use the Anchored Clusters Volume Profile TradingView indicator to analyze volume distribution, identify Point of Control (POC) levels, and detect cluster extremes for structural trade setups.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, volume-profile, poc]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Anchored Clusters Volume Profile — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `anchored-clusters-vp.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface high-probability trading setups based on volume cluster analysis. The output includes:\n\n- **Cluster Distribution** — price-by-price volume blocks showing where liquidity concentrated\n- **POC Levels** — Point of Control prices where the most volume traded\n- **Cluster Extremes** — range highs and lows that act as structural boundaries\n- **Volume-Weighted POC** — VWAP-style reference for fair value\n\nThe skill connects raw indicator output to actionable trade logic: entry zones (at cluster extremes/POC retests), directional bias (from cluster positioning), and structural context (from volume distribution).\n\n## Dependencies\n\n- `scripts/anchored-clusters-vp.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Default run\nnode scripts/anchored-clusters-vp.cjs BTCUSDT\n\n# Specific timeframe and bars\nnode scripts/anchored-clusters-vp.cjs ETHUSDT --tf 1h --bars 1000\n\n# JSON output for downstream processing\nnode scripts/anchored-clusters-vp.cjs BTCUSDT --json --out clusters.json\n\n# Agent mode (structured JSON for AI consumption)\nnode scripts/anchored-clusters-vp.cjs BTCUSDT --agent\n```\n\n## How the Indicator Works\n\n### Core Architecture\n\nThe indicator draws **anchored volume profile clusters** on the chart using graphic objec",
+  "help_output": "◇ injected env (13) from .env // tip: ⌘ enable debugging { debug: true }\n\nAnchored Clusters Volume Profile — Standalone Runner\nUsage: node anchored-clusters-vp.cjs <SYMBOL> [options]\nOptions: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help\nInputs: startTime, endTime, rangeColor, kInput, iters, rowsInput, vpWidth, vpOffset, showDots, dotSizeInput\n\n",
+  "stderr_excerpt": ""
+}

@@ -7,8 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ch99q/tvcli/pkg/dynparse"
-	"github.com/ch99q/tvcli/pkg/extract"
+	"github.com/ch99q/tvcli/pkg/pipeline"
 	"github.com/ch99q/tvcli/pkg/schema"
 )
 
@@ -29,7 +28,7 @@ type RunOptions struct {
 
 type RunResult struct {
 	Signals         []Signal          `json:"signals,omitempty"`
-	Extracted       *extract.Signals  `json:"extracted,omitempty"`
+	Extracted       *pipeline.Signals  `json:"extracted,omitempty"`
 	Narrative       Narrative         `json:"narrative"`
 	Validation      Validation        `json:"validation"`
 	AgenticScore    float64           `json:"agenticScore"`
@@ -105,31 +104,31 @@ type Signal struct {
 }
 
 // ExtractSignals runs the script-agnostic signal extractor on the raw data.
-func ExtractSignals(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string, symbol string, sch *schema.PineSchema) *extract.Signals {
+func ExtractSignals(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string, symbol string, sch *schema.PineSchema) *pipeline.Signals {
 	if sch != nil && len(sch.Plots) > 0 {
-		parsed := dynparse.Parse(periods, sch)
-		return extract.ExtractWithSchema(pineID, symbol, tf, parsed, graphic, strategyReport)
+		parsed := pipeline.Parse(periods, sch)
+		return pipeline.ExtractWithSchema(pineID, symbol, tf, parsed, graphic, strategyReport)
 	}
-	return extract.Extract(pineID, symbol, tf, periods, graphic, strategyReport)
+	return pipeline.Extract(pineID, symbol, tf, periods, graphic, strategyReport)
 }
 
 func ParseOutput(periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, tf string, pineID string, sch *schema.PineSchema) *RunResult {
 	start := time.Now()
 
 	// Use dynamic parser when schema is available
-	var parsed *dynparse.ParseResult
+	var parsed *pipeline.ParseResult
 	var numData *NumericalData
-	var extracted *extract.Signals
+	var extracted *pipeline.Signals
 
 	if sch != nil && len(sch.Plots) > 0 {
 		// Schema-guided path: rename plot_N → semantic names, classify from metaInfo
-		parsed = dynparse.Parse(periods, sch)
+		parsed = pipeline.Parse(periods, sch)
 		numData = numericalDataFromTyped(parsed)
-		extracted = extract.ExtractWithSchema(pineID, "", tf, parsed, graphic, strategyReport)
+		extracted = pipeline.ExtractWithSchema(pineID, "", tf, parsed, graphic, strategyReport)
 	} else {
 		// Fallback: statistical inference (original path)
 		numData = extractNumericalData(periods)
-		extracted = extract.Extract(pineID, "", tf, periods, graphic, strategyReport)
+		extracted = pipeline.Extract(pineID, "", tf, periods, graphic, strategyReport)
 	}
 
 	stratMetrics := extractStrategyMetrics(strategyReport)
@@ -221,8 +220,8 @@ func extractNumericalData(periods []map[string]any) *NumericalData {
 	}
 }
 
-// numericalDataFromTyped converts dynparse.TypedBar output to NumericalData.
-func numericalDataFromTyped(parsed *dynparse.ParseResult) *NumericalData {
+// numericalDataFromTyped converts pipeline.TypedBar output to NumericalData.
+func numericalDataFromTyped(parsed *pipeline.ParseResult) *NumericalData {
 	if len(parsed.Bars) == 0 {
 		return &NumericalData{FieldMeta: make(map[string]FieldMeta)}
 	}

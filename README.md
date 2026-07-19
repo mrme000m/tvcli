@@ -1,30 +1,29 @@
 # tvcli — TradingView Pine Script CLI (Go)
 
-A Go port of the JavaScript TradingView CLI tools for managing Pine Scripts via HTTP and WebSocket APIs.
+A Go implementation of the TradingView Pine Script CLI. It manages, compiles, and runs Pine Scripts via TradingView's HTTP and WebSocket APIs.
+
+This Go codebase is the authoritative implementation. The JavaScript files in `/Volumes/ExMac/code/tradingview/` are historical reference material only; they are no longer the source of truth for behavior or output.
 
 ## Source Files
 
-This project is a clean port of three JavaScript files:
+The implementation is organized into a few focused Go packages:
 
-| Go Package | JS Source | Lines (JS → Go) |
-|-----------|-----------|-----------------|
-| `cmd/tvcli/` + `pkg/pinefacade/` | `/Volumes/ExMac/code/tradingview/tv-cli.js` | 1,721 → 1,514 |
-| `pkg/tradingview/` | `/Volumes/ExMac/code/tradingview/tv.js` | 2,275 → 1,015 |
-| `pkg/runner/` | `/Volumes/ExMac/code/tradingview/js-experiment06/generic-indicator.cjs` | 1,090 → 357 |
+| Go Package | Responsibility |
+|-----------|----------------|
+| `cmd/tvcli/` + `pkg/pinefacade/` | CLI entry point; Pine Facade HTTP client for script CRUD, search, and compile. |
+| `pkg/tradingview/` | WebSocket client, protocol framing (`~m~<len>~m~<json>`), chart/study lifecycle, indicator types. |
+| `pkg/runner/` | Generic indicator runner and persistent/multi-run orchestration. |
+| `internal/skill/` + `internal/skill/parsers/` | Declarative skill registry and per-Pine-Script output parsers. |
 
-### JS File Reference
+Historical JS reference files (no longer canonical):
 
-- **`/Volumes/ExMac/code/tradingview/tv-cli.js`** — Unified Pine Script Manager CLI. Provides CRUD operations (`create`, `pull`, `push`, `delete`), compilation, search, and YAML input management via the Pine Facade HTTP API. Uses `SESSION`/`SIGNATURE` cookies for auth.
-
-- **`/Volumes/ExMac/code/tradingview/tv.js`** — TradingView WebSocket API client. Implements the `~m~<len>~m~<json>` framing protocol, `Client`/`ChartSession`/`ChartStudy`/`QuoteSession` classes, `PineIndicator`/`BuiltInIndicator` types, and the `PineFacadeClient` HTTP wrapper. Supports SOCKS proxy, gzip, and custom headers.
-
-- **`/Volumes/ExMac/code/tradingview/js-experiment06/generic-indicator.cjs`** — Universal indicator runner. Connects via WebSocket, applies any public Pine Script to a chart, extracts numerical data, graphics, strategy reports, and generates agent-ready JSON output with signals, trends, and confluence scoring.
+- `/Volumes/ExMac/code/tradingview/tv-cli.js`
+- `/Volumes/ExMac/code/tradingview/tv.js`
+- `/Volumes/ExMac/code/tradingview/js-experiment06/generic-indicator.cjs`
 
 ## Project Index
 
-For a full inventory of all JS-based TVCLI projects in `/Volumes/ExMac/code/tradingview/`, see:
-
-- **`/Volumes/ExMac/code/tradingview/Index.md`** — Complete project inventory, ranking, API endpoints, and architecture overview.
+For historical context on earlier JS-based TVCLI projects in `/Volumes/ExMac/code/tradingview/`, see `/Volumes/ExMac/code/tradingview/Index.md`.
 
 ## Structure
 

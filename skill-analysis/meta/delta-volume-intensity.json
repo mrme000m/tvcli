@@ -1,0 +1,62 @@
+{
+  "name": "delta-volume-intensity",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/delta-volume-intensity",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/delta-volume-intensity.cjs",
+  "pine_id": "PUB;bdd3bc54cf9f4dc6b42e6b2879b4eed2",
+  "workflow": "trend-following-sr-break",
+  "supports_agent": true,
+  "supports_silent": false,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseOutput"
+  ],
+  "parse_output_fields": [
+    "time",
+    "support",
+    "resistance",
+    "atr",
+    "roc",
+    "trend",
+    "backgroundTrend",
+    "uptrendAlert",
+    "downtrendAlert",
+    "sidewaysAlert",
+    "totalBars",
+    "avgATR",
+    "latestROC"
+  ],
+  "sample_command": "node delta-volume-intensity.cjs BTCUSDT --tf 1h --bars 300 --agent --json",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "bracket",
+    "schema_hint": "trend-following-sr-break",
+    "stdout_chars": 10032,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "agentContext",
+      "conformance",
+      "currentBar",
+      "execution",
+      "exitCode",
+      "market",
+      "narrative",
+      "recentBars",
+      "schemaVersion",
+      "signals",
+      "status",
+      "structure",
+      "summary",
+      "timestamp",
+      "validation"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: delta-volume-intensity\ndescription: |\n  Use the Delta Volume Intensity TradingView indicator to analyze trend direction, support/resistance levels, and rate-of-change momentum for structural trade setups.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, volume-momentum, trend-alerts]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Delta Volume Intensity — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `delta-volume-intensity.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface high-probability trading setups based on trend + momentum analysis. The output includes:\n\n- **Trend State** — UPTREND / DOWNTREND / SIDEWAYS classification\n- **Support/Resistance Levels** — calculated S/R from volume structure\n- **ROC Momentum** — rate-of-change for momentum confirmation\n- **ATR** — volatility context for position sizing\n- **Alert History** — recent uptrend/downtrend/sideways alert signals\n\nThe skill connects raw indicator output to actionable trade logic: entry timing (on trend alerts), directional bias (from trend state), and risk context (from ATR).\n\n## Dependencies\n\n- `scripts/delta-volume-intensity.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Default run\nnode scripts/delta-volume-intensity.cjs BTCUSDT\n\n# Specific timeframe\nnode scripts/delta-volume-intensity.cjs ETHUSDT --tf 1h --bars 800\n\n# JSON output\nnode scripts/delta-volume-intensity.cjs BTCUSDT --json --out delta.json\n\n# Agent mode\nnode scripts/delta-volume-intensity.cjs BTCUSDT --agent\n```\n\n## How the Indicator Works\n\n### Core Architecture\n\nThe indicator analyzes volume delta (buy vs sell pressure) to determine:\n- **Trend** — 0=NEUTRAL, 1=UPTREND, 2=DOWNTREND, 3=SIDEWAYS\n- **BackgroundTrend** — same states for background coloring\n- **Support/Resista",
+  "help_output": "\nDelta Volume Intensity — Standalone Runner\nUsage: node delta-volume-intensity.cjs <SYMBOL> [options]\nOptions: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help\nInputs: length_volatility, length_momentum, lookback_sr\n\n",
+  "stderr_excerpt": ""
+}

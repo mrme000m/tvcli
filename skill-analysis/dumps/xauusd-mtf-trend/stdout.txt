@@ -1,0 +1,67 @@
+◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }
+
+📊 Running: PUB;d1ad30c0261f49f297357f8aa2a7854a | XAUUSD | 1h | 500 bars
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:20:03.446Z",
+  "execution": {
+    "durationMs": 46960,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "xauusd-mtf-trend",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "XAUUSD",
+    "timeframe": "1h",
+    "htfTimeframe": "M15,M30,H1,H4,D1"
+  },
+  "mtf": {
+    "overallBias": "STRONGLY_BULLISH",
+    "entries": [
+      {
+        "text": "Trend: Weak Uptrend",
+        "timeframe": "Trend",
+        "trend": "weak uptrend",
+        "strength": 0,
+        "isBullish": true,
+        "isBearish": false,
+        "isNeutral": false
+      },
+      {
+        "text": "Strength: 2",
+        "timeframe": "Strength",
+        "trend": "2",
+        "strength": 6,
+        "isBullish": false,
+        "isBearish": false,
+        "isNeutral": false
+      }
+    ],
+    "trendLabels": [],
+    "levels": [],
+    "avgStrength": 3,
+    "netStrength": 0
+  },
+  "counts": {
+    "bullish": 1,
+    "bearish": 0,
+    "neutral": 1
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "MTF Dashboard: 2 entries across timeframes. Bias: STRONGLY_BULLISH. Bull: 1, Bear: 0, Neutral: 1. Avg strength: 3, Net strength: 0.",
+    "primaryOpportunity": "Wait for MTF alignment.",
+    "warnings": [],
+    "watchlist": [
+      "Confirm MTF alignment before entry.",
+      "Check highest timeframe bias for macro direction.",
+      "Watch for strength > 4 as strong consensus."
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.6
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

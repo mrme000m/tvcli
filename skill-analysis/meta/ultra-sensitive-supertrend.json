@@ -1,0 +1,58 @@
+{
+  "name": "ultra-sensitive-supertrend",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/ultra-sensitive-supertrend",
+  "script": "/Volumes/ExMac/code/tradingview/js-experiment06/ultra-sensitive-supertrend.cjs",
+  "pine_id": "PUB;fc33f2d98699414a8585923116dbd959",
+  "workflow": "ultra-sensitive-supertrend",
+  "supports_agent": true,
+  "supports_silent": false,
+  "input_map": [],
+  "transform_keys": [
+    "durationMs",
+    "attempts"
+  ],
+  "parsing_functions": [
+    "parseArgs",
+    "parseOutput"
+  ],
+  "parse_output_fields": [
+    "timestamp",
+    "st1",
+    "st2",
+    "st1Color",
+    "st2Color",
+    "background",
+    "buySignal",
+    "sellSignal",
+    "ultraBuy",
+    "ultraSell",
+    "close"
+  ],
+  "sample_command": "node ultra-sensitive-supertrend.cjs BTCUSDT --tf 1h --bars 300 --agent --json",
+  "sample_run": {
+    "rc": 0,
+    "parsed_via": "bracket",
+    "schema_hint": "ultra-sensitive-supertrend",
+    "stdout_chars": 1220,
+    "stderr_chars": 0,
+    "payload_keys": [
+      "agentContext",
+      "conformance",
+      "execution",
+      "exitCode",
+      "narrative",
+      "opportunities",
+      "schemaVersion",
+      "signalHistory",
+      "signals",
+      "st1Crosses",
+      "status",
+      "timestamp",
+      "trend"
+    ]
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: ultra-sensitive-supertrend\ndescription: |\n  Use the Ultra Sensitive SuperTrend TradingView indicator to analyze dual SuperTrend alignment, detect ultra buy/sell signals, and identify high-confidence trend entries based on double confirmation.\nversion: 1.0.0\nlicense: MIT\nauthor: TradingView Pine Skills\ncompatibility: Node.js 18+ with tv-optimized.cjs, tv.cjs, agent-output.cjs and .env (SESSION, SIGNATURE) at project root\nmetadata:\n  hermes:\n    tags: [trading, tradingview, pine-script, supertrend, dual]\n    category: trading\nrequired_environment_variables:\n  - name: SESSION\n    prompt: TradingView session cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid\n    required_for: full functionality\n  - name: SIGNATURE\n    prompt: TradingView signature cookie\n    help: Extract from browser DevTools → Application → Cookies → tradingview.com → sessionid_sign\n    required_for: full functionality\n---\n\n# Ultra Sensitive SuperTrend — Trading Opportunity Finder\n\n## When to Use\n\nHelps the user run the standalone `ultra-sensitive-supertrend.cjs` script against any TradingView symbol and timeframe, then interprets the structured output to surface high-probability trading setups based on dual SuperTrend confirmation. The output includes:\n\n- **Combined Trend** — BULLISH/BEARISH/MIXED from dual ST alignment\n- **Alignment Status** — whether ST1 and ST2 agree\n- **Signal Counts** — buy, sell, ultraBuy, ultraSell in lookback\n- **Signal History** — timestamps of last signals\n- **Background Trend** — additional trend filter\n\nThe skill connects raw indicator output to actionable trade logic: entry only when both STs align (highest confidence), ultra signals for early reversal detection, and background trend as additional filter.\n\n## Dependencies\n\n- `scripts/ultra-sensitive-supertrend.cjs` in the skill directory (depends on `tv.cjs` + `.env` with SESSION/SIGNATURE)\n- `node` (v18+)\n\n## Quick Start\n\n```bash\n# Default run\nnode scripts/ultra-sensitive-supertrend.cjs BTCUSDT\n\n# Specific timeframe\nnode scripts/ultra-sensitive-supertrend.cjs ETHUSDT --tf 1h --bars 800\n\n# JSON output\nnode scripts/ultra-sensitive-supertrend.cjs BTCUSDT --json --out supertrend.json\n\n# Agent mode\nnode scripts/ultra-sensitive-supertrend.cjs BTCUSDT --agent\n```\n\n## How the Indicator Works\n\n### Core Architecture\n\nThe indicator uses **two SuperTrend calculations** for confirmation:\n- **ST1** — primary SuperTrend with color state (1=green/bull, 0=red/bear)\n- ",
+  "help_output": "\nUltra Sensitive SuperTrend — Standalone Runner\nUsage: node ultra-sensitive-supertrend.cjs <SYMBOL> [options]\nOptions: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help\nInputs: atrPeriod1, multiplier1, atrPeriod2, multiplier2, useHeikenAshi, showLabels, showBG\n\n",
+  "stderr_excerpt": ""
+}

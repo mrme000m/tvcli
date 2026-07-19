@@ -1,0 +1,7 @@
+◇ injected env (13) from .env // tip: ⌘ suppress logs { quiet: true }
+
+Quantum Ribbon Lite — Standalone Runner
+Usage: node quantum-ribbon.cjs <SYMBOL> [options]
+Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help
+Inputs: i_sensitivity, i_stop_distance, i_target_rr, i_show_table, i_table_size, i_show_ribbon_state, i_show_lines, i_entry_line_color, i_entry_line_opacity, i_entry_line_width, i_stop_line_color, i_stop_line_opacity, i_stop_line_width, i_tp_line_color, i_tp_line_opacity, i_tp_line_width, i_table_bg_color, i_table_bg_opacity, i_table_text_color, i_table_border_color, i_table_border_width
+

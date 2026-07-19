@@ -11,3 +11,8 @@ authenticated_cookies.json
 
 # OS
 .DS_Store
+
+# Tool caches
+.mimocode/
+__pycache__/
+*.pyc

@@ -1,0 +1,46 @@
+◇ injected env (13) from .env // tip: ◈ secrets for agents [www.dotenvx.com]
+
+Volume Gaps & Imbalances (Zeiierman) — Standalone Runner
+===========================================================
+
+Usage:
+  node volume-gaps-imbalances-zeiierman.cjs <SYMBOL> [options]
+
+Arguments:
+  SYMBOL                    Trading pair (default: BTCUSDT)
+
+Options:
+  --tf <timeframe>          Timeframe: 1m, 5m, 15m, 1h, 4h, 1D (default: 15m)
+  --bars <n>                Number of chart bars (default: 500)
+  --preset <name>           Preset: default, scalping, swing (default: default)
+  --lookback <n>            Override preset lookback
+  --rows <n>                Override preset rows
+  --json                    Output JSON instead of table
+  --agent                   Agent mode (simplified JSON, optimized for AI agents)
+  --out <file>              Write JSON to file
+  --verbose, -v             Verbose output for debugging
+  --dry-run                 Skip TradingView connection, show parsed args only
+  --help, -h                Show this help
+
+Examples:
+  node volume-gaps-imbalances-zeiierman.cjs BTCUSDT
+  node volume-gaps-imbalances-zeiierman.cjs ETHUSDT --tf 1h --bars 1000
+  node volume-gaps-imbalances-zeiierman.cjs SOLUSDT --preset scalping --json --out sol.json
+  node volume-gaps-imbalances-zeiierman.cjs BTCUSDT --agent
+  node volume-gaps-imbalances-zeiierman.cjs BTCUSDT --lookback 100 --rows 20 --json
+
+Exit Codes:
+  0  = Success (normal run)
+  1  = Critical error (missing credentials, connection failed)
+  2  = No data (empty profile, no gaps)
+  3  = Timeout / cancelled
+  4  = Validation error
+
+Agent Mode Enhancements:
+  --agent enables simplified JSON output with:
+    - Status object with exit codes
+    - Timestamps in ISO format
+    - Confidence scores for trading signals
+    - Machine-readable conformance checks
+    - Agentic-specific metadata
+

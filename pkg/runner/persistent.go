@@ -14,7 +14,7 @@ import (
 // reconnecting and re-authenticating each time.
 type PersistentRunner struct {
 	opts   []tradingview.ClientOption
-	client *tradingview.Client
+	client tradingview.Client
 	mu     sync.Mutex
 
 	// Callbacks
@@ -89,7 +89,7 @@ func (pr *PersistentRunner) EnsureConnected() error {
 }
 
 // Client returns the underlying WS client.
-func (pr *PersistentRunner) Client() *tradingview.Client {
+func (pr *PersistentRunner) Client() tradingview.Client {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
 	return pr.client
@@ -206,12 +206,12 @@ func (pr *PersistentRunner) Run(opts RunOnceOptions) (*RunResult, error) {
 
 // RunOnceOptions configures a single run on the persistent connection.
 type RunOnceOptions struct {
-	PineID     string
-	Symbol     string
-	Timeframe  string
-	Bars       int
-	Indicator  *tradingview.PineIndicator
-	SettleMs   int
+	PineID      string
+	Symbol      string
+	Timeframe   string
+	Bars        int
+	Indicator   *tradingview.PineIndicator
+	SettleMs    int
 	CalcTimeout time.Duration
-	Debug      bool
+	Debug       bool
 }

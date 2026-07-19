@@ -1,0 +1,7 @@
+◇ injected env (13) from .env // tip: ⌁ auth for agents [www.vestauth.com]
+
+Support Resistance Breaks — Standalone Runner
+Usage: node support-resistance-breaks.cjs <SYMBOL> [options]
+Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help
+Inputs: pivotLookback, pivotStrength, showSupport, showResistance, showBreaks, breakIntensity, alertOnBreak, srColor, breakColor, lineWidth
+

@@ -1,0 +1,234 @@
+{
+  "status": "no_trade",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:12:45.550Z",
+  "execution": {
+    "durationMs": 30161,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "golden-rule-strategy",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BTCUSDT"
+  },
+  "goldenRule": {
+    "verdict": "FAIL",
+    "direction": null,
+    "score": 60,
+    "checklist": {
+      "weeklyMomentum": true,
+      "dailyAlignment": false,
+      "smcGreen": false,
+      "rsiCrossover": true,
+      "stochasticCrossover": true,
+      "macdHistogram": true
+    },
+    "sltp": null,
+    "rationale": [
+      "✅ WEEKLY: Bullish momentum confirmed.",
+      "❌ DAILY: Swing window not aligned bullishly.",
+      "❌ 4H: Trigger timeframe not bullish.",
+      "❌ SMC: No bullish CHoCH — structure not yet green.",
+      "✅ RSI: 60.34 > 53.94 (bullish crossover).",
+      "✅ Stochastic: K(64.45) > D(54.61) — bullish momentum shift.",
+      "✅ MACD: Histogram 93.92 > 0 (trend confirmation).",
+      "\n🚫 VERDICT: FAIL — Timeframe alignment missing or signals incomplete."
+    ],
+    "warnings": []
+  },
+  "timeframes": {
+    "weekly": {
+      "bias": "BULLISH",
+      "bosCount": 12,
+      "chochCount": 8,
+      "activeOBs": 4,
+      "activeFVGs": 7
+    },
+    "daily": {
+      "bias": "NEUTRAL",
+      "bosCount": 91,
+      "chochCount": 91,
+      "activeOBs": 4,
+      "activeFVGs": 24
+    },
+    "h4": {
+      "bias": "BEARISH",
+      "bosCount": 146,
+      "chochCount": 179,
+      "activeOBs": 3,
+      "activeFVGs": 38,
+      "currentPrice": 64873.48,
+      "recentBOS": [
+        {
+          "text": "BOS",
+          "x": 1095,
+          "y": 63461.99,
+          "color": 0,
+          "type": "BOS",
+          "isBullish": false,
+          "isBearish": true,
+          "scope": "internal",
+          "lineStyle": "dashed"
+        },
+        {
+          "text": "BOS",
+          "x": 1097,
+          "y": 63999,
+          "color": 0,
+          "type": "BOS",
+          "isBullish": false,
+          "isBearish": true,
+          "scope": "internal",
+          "lineStyle": "dashed"
+        },
+        {
+          "text": "BOS",
+          "x": 1110,
+          "y": 64387.99,
+          "color": 0,
+          "type": "BOS",
+          "isBullish": false,
+          "isBearish": true,
+          "scope": "internal",
+          "lineStyle": "dashed"
+        }
+      ],
+      "recentCHoCH": [
+        {
+          "text": "CHoCH",
+          "x": 1084,
+          "y": 60780.57,
+          "color": 0,
+          "type": "CHoCH",
+          "isBullish": false,
+          "isBearish": true,
+          "scope": "internal",
+          "lineStyle": "dashed"
+        },
+        {
+          "text": "CHoCH",
+          "x": 1103,
+          "y": 63656,
+          "color": 0,
+          "type": "CHoCH",
+          "isBullish": true,
+          "isBearish": false,
+          "scope": null,
+          "lineStyle": "dotted"
+        },
+        {
+          "text": "CHoCH",
+          "x": 1106,
+          "y": 64504.11,
+          "color": 0,
+          "type": "CHoCH",
+          "isBullish": false,
+          "isBearish": true,
+          "scope": null,
+          "lineStyle": "dotted"
+        }
+      ],
+      "activeOBsDetail": [
+        {
+          "top": 61962.43,
+          "bottom": 61108.99,
+          "left": 1091,
+          "right": 1112,
+          "color": null,
+          "text": "",
+          "size": 853.4400000000023,
+          "isBullish": true,
+          "isBearish": false,
+          "direction": "bullish",
+          "isMitigated": false
+        },
+        {
+          "top": 59318,
+          "bottom": 57800.19,
+          "left": 1085,
+          "right": 1112,
+          "color": null,
+          "text": "",
+          "size": 1517.8099999999977,
+          "isBullish": true,
+          "isBearish": false,
+          "direction": "bullish",
+          "isMitigated": false
+        },
+        {
+          "top": 67292.15,
+          "bottom": 66106,
+          "left": 1066,
+          "right": 1112,
+          "color": null,
+          "text": "",
+          "size": 1186.1499999999942,
+          "isBullish": false,
+          "isBearish": true,
+          "direction": "bearish",
+          "isMitigated": false
+        }
+      ],
+      "activeFVGsDetail": [
+        {
+          "top": 59439.67,
+          "bottom": 59091.99,
+          "left": 1086,
+          "right": 1087,
+          "color": 37,
+          "text": "",
+          "size": 347.6800000000003,
+          "isMitigated": false
+        },
+        {
+          "top": 61147.23,
+          "bottom": 61102.615000000005,
+          "left": 1089,
+          "right": 1091,
+          "color": 37,
+          "text": "",
+          "size": 44.61499999999796,
+          "isMitigated": false
+        },
+        {
+          "top": 61102.615000000005,
+          "bottom": 61058,
+          "left": 1089,
+          "right": 1091,
+          "color": 37,
+          "text": "",
+          "size": 44.61500000000524,
+          "isMitigated": false
+        }
+      ]
+    }
+  },
+  "indicators": {
+    "rsi": {
+      "value": 60.34,
+      "signal": 53.94,
+      "isBullish": true,
+      "seriesLength": 500
+    },
+    "stochastic": {
+      "K": 64.45,
+      "D": 54.61,
+      "isBullish": true,
+      "seriesLength": 500
+    },
+    "macd": {
+      "histogram": 93.9199,
+      "macdLine": 161.4245,
+      "signalLine": 67.5046,
+      "isBullish": true,
+      "seriesLength": 500
+    },
+    "latestClose": 64873.48
+  },
+  "schemaVersion": "agent-ready-v2.1.0",
+  "_parserMeta": {
+    "schemaVersion": "agent-ready-v2.1.0",
+    "emittedAt": "2026-07-19T02:12:45.551Z",
+    "deterministic": true
+  }
+}

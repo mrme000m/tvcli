@@ -1,0 +1,26 @@
+{
+  "name": "nlm-cli-skill",
+  "skill_dir": "/Volumes/ExMac/code/tradingview/js-experiment06/nlm-cli-skill",
+  "script": "None",
+  "pine_id": null,
+  "workflow": null,
+  "supports_agent": false,
+  "supports_silent": false,
+  "input_map": [],
+  "transform_keys": null,
+  "parsing_functions": [],
+  "parse_output_fields": [],
+  "sample_command": "node N/A ",
+  "sample_run": {
+    "rc": -1,
+    "parsed_via": "none",
+    "schema_hint": null,
+    "stdout_chars": 0,
+    "stderr_chars": 0,
+    "payload_keys": null
+  },
+  "pine_files": [],
+  "skill_md_excerpt": "---\nname: nlm-cli-skill\ndescription: \"Expert guide for the NotebookLM CLI (`nlm`) - a command-line interface for Google NotebookLM. Use this skill when users want to interact with NotebookLM programmatically, including: creating/managing notebooks, adding sources (URLs, YouTube, text, Google Drive), generating content (podcasts, reports, quizzes, flashcards, mind maps, slides, infographics, videos, data tables), conducting research, chatting with sources, or automating NotebookLM workflows. Triggers on mentions of \\\"nlm\\\", \\\"notebooklm\\\", \\\"notebook lm\\\", \\\"podcast generation\\\", \\\"audio overview\\\", or any NotebookLM-related automation task.\"\n---\n\n# NotebookLM CLI Expert\n\nThis skill provides comprehensive guidance for using the `nlm` CLI to automate Google NotebookLM workflows.\n\n## Quick Reference\n\n```bash\nnlm --help              # List all commands\nnlm <command> --help    # Help for specific command\nnlm --ai                # Full AI-optimized documentation\nnlm --version           # Check installed version\n```\n\n## Critical Rules (Read First!)\n\n1. **Always authenticate first**: Run `nlm login` before any operations\n2. **Sessions expire in ~20 minutes**: Re-run `nlm login` if commands start failing\n3. **`--confirm` is REQUIRED**: All generation and delete commands need `--confirm` or `-y`\n4. **Research requires `--notebook-id`**: The flag is mandatory, not positional\n5. **Capture IDs from output**: Create/start commands return IDs needed for subsequent operations\n6. **Use aliases**: Simplify long UUIDs with `nlm alias set <name> <uuid>`\n7. **⚠️ ALWAYS ASK USER BEFORE DELETE**: Before executing ANY delete command, ask the user for explicit confirmation. Deletions are **irreversible**. Show what will be deleted and warn about permanent data loss.\n8. **Check aliases before creating**: Run `nlm alias list` before creating a new alias to avoid conflicts with existing names.\n9. **DO NOT launch REPL**: Never use `nlm chat start` - it opens an interactive REPL that AI tools cannot control. Use `nlm notebook query` for one-shot Q&A instead.\n10. **Choose output format wisely**: Default output (no flags) is compact and token-efficient—use it for status checks. Use `--quiet` to capture IDs for piping. Only use `--json` when you need to parse specific fields programmatically.\n\n## Workflow Decision Tree\n\nUse this to determine the right sequence of commands:\n\n```\nUser wants to...\n│\n├─► Work with NotebookLM for the first time\n│   └─► nlm login → nlm notebook create \"Title\"\n│",
+  "help_output": "",
+  "stderr_excerpt": ""
+}

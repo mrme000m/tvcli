@@ -1,0 +1,6 @@
+
+Delta Volume Intensity — Standalone Runner
+Usage: node delta-volume-intensity.cjs <SYMBOL> [options]
+Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help
+Inputs: length_volatility, length_momentum, lookback_sr
+

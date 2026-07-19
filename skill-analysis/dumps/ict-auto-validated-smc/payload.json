@@ -1,0 +1,190 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T02:13:33.698Z",
+  "execution": {
+    "durationMs": 48059,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "ict-smc-structure",
+    "htfTimeframe": "240",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64894.09,
+    "bias": "bullish",
+    "zone": "PREMIUM"
+  },
+  "structure": {
+    "direction": "bullish",
+    "text": "BULLISH",
+    "lastBreak": "choch",
+    "lastBreakText": "CHoCH ▲",
+    "htf": {
+      "direction": "bullish",
+      "break": "BOS ▲"
+    },
+    "alignment": {
+      "raw": "✓ ALIGNED",
+      "aligned": true,
+      "counterTrend": false,
+      "score": {
+        "current": 3,
+        "max": 8
+      }
+    },
+    "counts": {
+      "activeOBs": 3,
+      "breakers": 1,
+      "activeFVGs": 2
+    }
+  },
+  "zones": {
+    "orderBlocks": [
+      {
+        "top": 58676,
+        "bottom": 58326,
+        "left": 579,
+        "right": 587,
+        "height": 350,
+        "mid": 58501,
+        "borderColor": 73,
+        "bgColor": 69,
+        "text": "",
+        "side": "unknown",
+        "active": null
+      },
+      {
+        "top": 61922,
+        "bottom": 61544.56,
+        "left": 642,
+        "right": 651,
+        "height": 377.44,
+        "mid": 61733.28,
+        "borderColor": 73,
+        "bgColor": 69,
+        "text": "",
+        "side": "unknown",
+        "active": null
+      },
+      {
+        "top": 63025.01,
+        "bottom": 62497.24,
+        "left": 721,
+        "right": 729,
+        "height": 527.77,
+        "mid": 62761.13,
+        "borderColor": 55,
+        "bgColor": 2580855808,
+        "text": "",
+        "side": "bear",
+        "active": null
+      },
+      {
+        "top": 65341.49,
+        "bottom": 65138.55,
+        "left": 739,
+        "right": 750,
+        "height": 202.94,
+        "mid": 65240.02,
+        "borderColor": 56,
+        "bgColor": 2583380192,
+        "text": "",
+        "side": "bear",
+        "active": null
+      },
+      {
+        "top": 65600,
+        "bottom": 65261.71,
+        "left": 735,
+        "right": 743,
+        "height": 338.29,
+        "mid": 65430.86,
+        "borderColor": 74,
+        "bgColor": 70,
+        "text": "",
+        "side": "unknown",
+        "active": null
+      }
+    ],
+    "fvgs": [
+      {
+        "top": 62272.2,
+        "bottom": 62224,
+        "left": 715,
+        "right": 718,
+        "height": 48.2,
+        "mid": 62248.1,
+        "borderColor": 71,
+        "bgColor": 69,
+        "text": "",
+        "side": "unknown",
+        "active": null
+      },
+      {
+        "top": 64333.33,
+        "bottom": 64330,
+        "left": 773,
+        "right": 777,
+        "height": 3.33,
+        "mid": 64331.67,
+        "borderColor": 26,
+        "bgColor": 2566969087,
+        "text": "",
+        "side": "unknown",
+        "active": null
+      }
+    ],
+    "breakers": [],
+    "oteZones": []
+  },
+  "signals": {
+    "grades": [],
+    "markers": {
+      "sl": {
+        "price": 63894,
+        "text": "SL",
+        "barIndex": 776
+      }
+    }
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Structure is BULLISH with last break CHoCH ▲. HTF structure: bullish. Alignment: ✓ ALIGNED. Active zones: 3 OBs, 1 breakers, 2 FVGs.",
+    "primaryOpportunity": "No grade signal. Look for OB + FVG confluence.",
+    "warnings": [
+      "Price in premium zone — bullish setups less favorable."
+    ],
+    "watchlist": [
+      "Wait for price to enter discount/premium zone aligned with structure.",
+      "Confirm with FVG or breaker block as confluence.",
+      "Watch 2 FVGs for displacement confirmation."
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "checks": [
+      {
+        "name": "dashboard_present",
+        "passed": true,
+        "detail": "ok"
+      },
+      {
+        "name": "structure_detected",
+        "passed": true,
+        "detail": "bullish"
+      }
+    ],
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidStructure": true,
+    "htfAligned": true,
+    "hasStructuralZones": true,
+    "agenticScore": 0.85
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

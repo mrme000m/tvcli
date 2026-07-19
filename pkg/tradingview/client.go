@@ -3,32 +3,29 @@ package tradingview
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net/http"
-	"regexp"
 	"sync"
 	"time"
 
+	"github.com/ch99q/tvcli/pkg/tradingview/auth"
 	"github.com/gorilla/websocket"
 )
 
-type Client struct {
-	conn       *websocket.Conn
-	server     string
-	token      string
-	signature  string
-	location   string
-	loggedIn   bool
-	connected  bool
-	mu         sync.Mutex
-	sessions   map[string]*sessionEntry
-	sendQueue  [][]byte
-	debug      bool
-	onConnected    []func()
-	onDisconnected []func()
-	onError        []func(error)
+type Client interface {
+	Connect() error
+	Close()
+	IsConnected() bool
+	WaitForConnected(timeout time.Duration) bool
+	OnConnected(fn func())
+	OnDisconnected(fn func())
+	OnError(fn func(error))
+	Send(msgType string, params []any)
+	Debug() bool
+
+	RegisterSession(id, typ string, onData func(map[string]any))
+	UnregisterSession(id string)
 }
 
 type sessionEntry struct {
@@ -36,8 +33,25 @@ type sessionEntry struct {
 	onData func(map[string]any)
 }
 
-func NewClient(opts ...ClientOption) *Client {
-	c := &Client{
+type WSClient struct {
+	conn           *websocket.Conn
+	server         string
+	token          string
+	signature      string
+	location       string
+	loggedIn       bool
+	connected      bool
+	mu             sync.Mutex
+	sessions       map[string]*sessionEntry
+	sendQueue      [][]byte
+	debug          bool
+	onConnected    []func()
+	onDisconnected []func()
+	onError        []func(error)
+}
+
+func NewClient(opts ...ClientOption) Client {
+	c := &WSClient{
 		server:   "data",
 		location: "https://www.tradingview.com/",
 		sessions: make(map[string]*sessionEntry),
@@ -48,19 +62,34 @@ func NewClient(opts ...ClientOption) *Client {
 	return c
 }
 
-type ClientOption func(*Client)
+type ClientOption func(*WSClient)
 
-func WithServer(s string) ClientOption   { return func(c *Client) { c.server = s } }
-func WithToken(t string) ClientOption    { return func(c *Client) { c.token = t } }
-func WithSignature(s string) ClientOption { return func(c *Client) { c.signature = s } }
-func WithLocation(l string) ClientOption { return func(c *Client) { c.location = l } }
-func WithDebug(d bool) ClientOption      { return func(c *Client) { c.debug = d } }
+func WithServer(s string) ClientOption    { return func(c *WSClient) { c.server = s } }
+func WithToken(t string) ClientOption     { return func(c *WSClient) { c.token = t } }
+func WithSignature(s string) ClientOption { return func(c *WSClient) { c.signature = s } }
+func WithLocation(l string) ClientOption  { return func(c *WSClient) { c.location = l } }
+func WithDebug(d bool) ClientOption       { return func(c *WSClient) { c.debug = d } }
 
-func (c *Client) OnConnected(fn func())    { c.onConnected = append(c.onConnected, fn) }
-func (c *Client) OnDisconnected(fn func()) { c.onDisconnected = append(c.onDisconnected, fn) }
-func (c *Client) OnError(fn func(error))   { c.onError = append(c.onError, fn) }
+func (c *WSClient) OnConnected(fn func())    { c.onConnected = append(c.onConnected, fn) }
+func (c *WSClient) OnDisconnected(fn func()) { c.onDisconnected = append(c.onDisconnected, fn) }
+func (c *WSClient) OnError(fn func(error))   { c.onError = append(c.onError, fn) }
 
-func (c *Client) Connect() error {
+// Debug reports whether the client is in debug logging mode.
+func (c *WSClient) Debug() bool { return c.debug }
+
+func (c *WSClient) RegisterSession(id, typ string, onData func(map[string]any)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.sessions[id] = &sessionEntry{typ: typ, onData: onData}
+}
+
+func (c *WSClient) UnregisterSession(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.sessions, id)
+}
+
+func (c *WSClient) Connect() error {
 	uri := fmt.Sprintf("wss://%s.tradingview.com/socket.io/websocket?from=chart&type=chart", c.server)
 
 	headers := http.Header{}
@@ -72,7 +101,7 @@ func (c *Client) Connect() error {
 	headers.Set("Pragma", "no-cache")
 
 	if c.token != "" {
-		cookie := genAuthCookies(c.token, c.signature)
+		cookie := auth.GenCookies(c.token, c.signature)
 		if cookie != "" {
 			headers.Set("Cookie", cookie)
 		}
@@ -94,7 +123,7 @@ func (c *Client) Connect() error {
 	// Fetch auth token from TradingView page when cookies are present
 	authToken := "unauthorized_user_token"
 	if c.token != "" {
-		if token, err := fetchAuthToken(c.token, c.signature, c.location); err == nil && token != "" {
+		if token, err := auth.FetchToken(c.token, c.signature, c.location); err == nil && token != "" {
 			authToken = token
 			if c.debug {
 				log.Printf("[DEBUG] fetched auth_token: %s...", token[:min(20, len(token))])
@@ -119,7 +148,7 @@ func (c *Client) Connect() error {
 	return nil
 }
 
-func (c *Client) readLoop() {
+func (c *WSClient) readLoop() {
 	defer func() {
 		c.connected = false
 		c.loggedIn = false
@@ -179,7 +208,7 @@ func (c *Client) readLoop() {
 	}
 }
 
-func (c *Client) Send(msgType string, params []any) {
+func (c *WSClient) Send(msgType string, params []any) {
 	pkt := Protocol{}.FormatWSPacket(map[string]any{
 		"m": msgType,
 		"p": params,
@@ -198,7 +227,7 @@ func truncateStr(s string, n int) string {
 	return s[:n] + "..."
 }
 
-func (c *Client) sendRaw(data string) {
+func (c *WSClient) sendRaw(data string) {
 	if c.conn == nil {
 		return
 	}
@@ -207,7 +236,7 @@ func (c *Client) sendRaw(data string) {
 	c.conn.WriteMessage(websocket.TextMessage, []byte(data))
 }
 
-func (c *Client) Close() {
+func (c *WSClient) Close() {
 	// Send delete messages for all active sessions before closing,
 	// so TradingView's server can release indicator slots.
 	// Matches JS tv-optimized end() behavior.
@@ -235,13 +264,13 @@ func (c *Client) Close() {
 }
 
 // IsConnected returns true if the WebSocket connection is alive and authenticated.
-func (c *Client) IsConnected() bool {
+func (c *WSClient) IsConnected() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connected && c.loggedIn
 }
 
-func (c *Client) WaitForConnected(timeout time.Duration) bool {
+func (c *WSClient) WaitForConnected(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		if c.connected && c.loggedIn {
@@ -259,75 +288,4 @@ func genSessionID(prefix string) string {
 		b[i] = chars[rand.Intn(len(chars))]
 	}
 	return prefix + "_" + string(b)
-}
-
-func genAuthCookies(session, signature string) string {
-	if session == "" {
-		return ""
-	}
-	cookie := "sessionid=" + session
-	if signature != "" {
-		cookie += ";sessionid_sign=" + signature
-	}
-	return cookie
-}
-
-// fetchAuthToken scrapes auth_token from TradingView's page using session cookies.
-// This is equivalent to the JS getUser() function.
-func fetchAuthToken(session, signature, location string) (string, error) {
-	if location == "" {
-		location = "https://www.tradingview.com/"
-	}
-
-	cookie := genAuthCookies(session, signature)
-	if cookie == "" {
-		return "", fmt.Errorf("no session cookies")
-	}
-
-	req, _ := http.NewRequest("GET", location, nil)
-	req.Header.Set("Cookie", cookie)
-	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
-	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("fetch page: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, _ := io.ReadAll(resp.Body)
-	page := string(body)
-
-	if !contains(page, "auth_token") {
-		return "", fmt.Errorf("no auth_token in page (status=%d)", resp.StatusCode)
-	}
-
-	// Extract auth_token from JSON embedded in page
-	re := regexp.MustCompile(`"auth_token":"([^"]+)"`)
-	matches := re.FindStringSubmatch(page)
-	if len(matches) > 1 {
-		return matches[1], nil
-	}
-
-	return "", fmt.Errorf("auth_token regex match failed")
-}
-
-func contains(s, substr string) bool {
-	return len(s) > 0 && len(substr) > 0 && (len(s) >= len(substr)) && findSubstring(s, substr)
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
