@@ -2,12 +2,26 @@
 
 **Generated:** 2026-07-19  
 **Go parsers:** `/Volumes/ExMac/code/tradingview/go/internal/skill/parsers`  
-**Dumps:** `skill-analysis/dumps/<skill>/` (stdout.txt, stderr.txt, help.txt, payload.json)  
+**Dumps:** `skill-analysis/dumps/<skill>/` (`payload.json` plus historical JS runner `stdout.txt`, `stderr.txt`, `help.txt`)  
 **Meta:** `skill-analysis/meta/<skill>.json`
 
 Use this index to fix and verify Go skill commands. For each Go skill command (`tv <name>`),
 this doc shows the Pine Script ID, the Go parser file, the captured reference payload,
 and concrete discrepancies between the captured reference and the current Go parser output.
+
+**New:** before editing a custom parser, try the generic schema-guided extractor:
+
+```bash
+./tvcli <skill> --symbol BTCUSDT --tf 1h --bars 50 --signals --agent --json
+```
+
+If this produces a usable agent-ready payload, the hand-coded parser may not need fixing.
+
+See:
+
+- [`PINE_RESPONSE_SKILL.md`](PINE_RESPONSE_SKILL.md) for raw response anatomy, schema usage, and input filtering.
+- [`PARSING_PROTOCOL_FOR_GO.md`](PARSING_PROTOCOL_FOR_GO.md) for skill command invocation and the `--signals` path.
+- [`README.md`](README.md) for an overview of this workspace.
 
 The historical JS runner files (`/Volumes/ExMac/code/tradingview/js-experiment06/*.cjs`)
 were used only as loose reference material during the initial port; they are not the source of truth.
@@ -3576,21 +3590,28 @@ is the reference target schema; the Go parser must reproduce the equivalent `Ski
 
 ## 6. How to Use This Index When Fixing a Go Skill
 
-**Companion doc:** [`PARSING_PROTOCOL_FOR_GO.md`](PARSING_PROTOCOL_FOR_GO.md) — describes how to run skills through the Go CLI, the common payload envelope, and the skill routing/dispatch rules. Read it first.
+**Companion docs:**
+- [`PARSING_PROTOCOL_FOR_GO.md`](PARSING_PROTOCOL_FOR_GO.md) — skill command invocation, payload envelope, routing.
+- [`PINE_RESPONSE_SKILL.md`](PINE_RESPONSE_SKILL.md) — raw response anatomy, schema usage, input filtering.
 
 Steps:
 
 1. Open the per-skill section above (e.g. `2.5 tv sniper — precision-sniper`).
-2. Confirm Pine ID and Workflow match. Fix the constants in the Go parser file if not.
-3. Diff the Go `Inputs` table vs the historical JS `INPUT_MAP` table. Fix names/TV input IDs/defaults/types.
-4. Read `skill-analysis/dumps/<pine-script-name>/payload.json` to see the captured reference payload.
-5. Identify rich reference payload keys that have no Go `Structure`/`Raw` counterpart — decide whether to port them.
-6. Run the Go skill and diff against the captured reference:
+2. **Try the generic extractor first.** It uses Pine `metaInfo` and often bypasses field-name alias bugs.
+   ```
+   ./tvcli <go-skill> --symbol <SYM> --tf <TF> --signals --agent --json > /tmp/generic.json
+   ```
+   If this output is good enough for your use case, you can stop here or use it as the target while fixing the custom parser.
+3. Confirm Pine ID and Workflow match. Fix the constants in the Go parser file if not.
+4. Diff the Go `Inputs` table vs the historical JS `INPUT_MAP` table. Fix names/TV input IDs/defaults/types. Skip cosmetic color/visibility inputs (see `PINE_RESPONSE_SKILL.md`).
+5. Read `skill-analysis/dumps/<pine-script-name>/payload.json` to see the captured reference payload.
+6. Identify rich reference payload keys that have no Go `Structure`/`Raw` counterpart — decide whether to port them.
+7. Run the Go skill and diff against the captured reference:
    ```
    ./tvcli <go-skill> --symbol <SYM> --tf <TF> --json --agent > /tmp/go.json
    diff <(jq -S . /tmp/go.json) <(jq -S . skill-analysis/dumps/<pine-script-name>/payload.json)
    ```
-7. Iterate the Go `ParseOutput` function until the diff converges (allow for live data drift).
+8. Iterate the Go `ParseOutput` function until the diff converges (allow for live data drift).
 
 ### Regenerating this index
 

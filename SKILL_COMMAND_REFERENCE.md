@@ -4,11 +4,15 @@ This workspace documents the TradingView skill commands implemented in Go. Use i
 
 ## Quick links
 
+- **Workspace overview:**
+  [`skill-analysis/README.md`](skill-analysis/README.md)
+- **Raw response anatomy, schema usage, and input filtering:**
+  [`skill-analysis/PINE_RESPONSE_SKILL.md`](skill-analysis/PINE_RESPONSE_SKILL.md)
 - **Per-skill index, Pine IDs, parser locations, and sample payloads:**
   [`skill-analysis/SKILL_REFERENCE_INDEX.md`](skill-analysis/SKILL_REFERENCE_INDEX.md)
-- **How the Go skill layer parses raw TradingView responses:**
+- **Skill command protocol and the `--signals` generic extractor:**
   [`skill-analysis/PARSING_PROTOCOL_FOR_GO.md`](skill-analysis/PARSING_PROTOCOL_FOR_GO.md)
-- **Captured raw response dumps + parsed payloads:**
+- **Captured reference payloads + JS runner stdout dumps:**
   [`skill-analysis/dumps/`](skill-analysis/dumps/)
 - **Machine-readable metadata per skill:**
   [`skill-analysis/meta/`](skill-analysis/meta/)
@@ -17,9 +21,10 @@ This workspace documents the TradingView skill commands implemented in Go. Use i
 
 1. Enumerated every Go skill registered in `internal/skill/parsers/`.
 2. For each skill, captured its Pine Script ID, friendly name, inputs, presets, and workflow ID from the Go source.
-3. Captured raw TradingView responses (periods, graphics, strategy reports) for sample runs and stored them under `skill-analysis/dumps/`.
+3. Captured reference agent payloads (via the historical JS runners) for sample runs and stored them under `skill-analysis/dumps/`.
 4. Extracted the resulting JSON payloads and generated `SKILL_REFERENCE_INDEX.md` + `PARSING_PROTOCOL_FOR_GO.md` + structured JSON metadata under `skill-analysis/meta/`.
-5. The historical JS runner files (`/Volumes/ExMac/code/tradingview/js-experiment06/*.cjs`) were used only as loose reference material during the initial port; the Go source and the captured raw dumps are now the source of truth.
+5. Added a generic schema-guided extractor (`--signals`) so any Pine script can be converted to an agent-ready skill payload without a hand-coded parser. See `PARSING_PROTOCOL_FOR_GO.md` and `PINE_RESPONSE_SKILL.md`.
+6. The historical JS runner files (`/Volumes/ExMac/code/tradingview/js-experiment06/*.cjs`) were used only as loose reference material during the initial port; the Go source and the captured reference dumps are now the source of truth.
 
 ## Regenerating
 
