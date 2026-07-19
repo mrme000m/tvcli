@@ -1,6 +1,6 @@
 # Volume Profile Skill
 
-Based on the YouTube video **"The Secret To Using The Volume Profile"** and the public TradingView Pine scripts that implement it.
+Based on the YouTube video **"The Secret To Using The Volume Profile"** and the public TradingView Pine script that implements it.
 
 ## What the video teaches
 
@@ -26,9 +26,9 @@ The speaker uses TradingView's **Fixed Range Volume Profile** to find the price 
 
 File: [`internal/skill/parsers/vp.go`](../internal/skill/parsers/vp.go)
 
-Pine script: **`PUB;aea729456b7a44e09661b70ce9e4e987`** (Volume Profile / Fixed Range by LonesomeTheBlue)
+Pine script: **`PUB;a4e251b831084685afecaa9192f2a3c5`** — *Fixed Range Volume Profile Zones (with Dynamic Percentile Buffers)* by RWCS_LTD
 
-Because this indicator only draws graphic objects (no numeric `periods[]`), the skill rebuilds the profile from the `dwgboxes` in the raw response. Each box's `x2-x1` encodes the relative volume and its `y1-y2` band encodes the price level.
+This script exposes the levels as regular Pine `plot` values (`POC`, `VAH`, `VAL`, `Max_Price`, `Min_Price`, `Above_VAH_Buffer`, `Below_VAL_Buffer`) instead of only drawing graphics. It also embeds the underlying chart OHLC, so the parser can read the current close and produce a directional bias plus mean-reversion / breakout opportunities.
 
 ### CLI usage
 
@@ -37,98 +37,94 @@ Because this indicator only draws graphic objects (no numeric `periods[]`), the 
 ./tvcli vp --symbol BTCUSDT --tf 1W --bars 52 --preset weekly --agent --json
 
 # Intraday profile
-./tvcli vp --symbol BTCUSDT --tf 1h --bars 48 --length 48 --agent --json
+./tvcli vp --symbol BTCUSDT --tf 1h --bars 48 --preset intraday --agent --json
 
-# Default run
+# Default run (1h lookback)
 ./tvcli vp --symbol BTCUSDT --tf 1h --bars 50
 ```
 
 ### Inputs mapped from the script
 
+The script has four inputs that control the fixed range and percentile buffers:
+
 | CLI flag | Pine input | Default | What it controls |
 |---|---|---|---|
-| `--rows` | `in_0` | `150` | Histogram rows (price granularity) |
-| `--length` | `in_1` | `24` | Lookback bars for the fixed range |
-| `--value-area` | `in_2` | `70` | Value-area percentage (`70` = 70%) |
-| `--show-poc` | `in_9` | `true` | Show the POC label/line |
+| `--lookback` | `in_0` | `30` | Bars back over which to build the profile |
+| `--percentile` | `in_1` | `30` | Percentile window used inside the value-area calculation |
+| `--upper-buffer` | `in_2` | `95` | Upper dynamic percentile buffer (triggers `Above_VAH_Buffer`) |
+| `--lower-buffer` | `in_3` | `5` | Lower dynamic percentile buffer (triggers `Below_VAL_Buffer`) |
 
 ### Presets
 
 ```bash
-./tvcli vp --preset weekly   # rows=150, length=52
-./tvcli vp --preset daily    # rows=150, length=30
-./tvcli vp --preset intraday # rows=100, length=24
-./tvcli vp --preset scalping # rows=100, length=12
+./tvcli vp --preset weekly   # lookback=52,  percentile=30
+./tvcli vp --preset daily    # lookback=30,  percentile=30
+./tvcli vp --preset intraday # lookback=24,  percentile=30
+./tvcli vp --preset scalping # lookback=12,  percentile=30
 ```
 
 ### Example output
 
+```bash
+./tvcli vp --symbol BTCUSDT --tf 1h --bars 50 --agent --json
+```
+
 ```json
 {
+  "market": {
+    "lastPrice": 64720.17,
+    "bias": "bullish"
+  },
   "structure": {
-    "poc": 64734.89,
-    "vah": 65049.47,
-    "val": 62847.37,
-    "valueArea": 70,
-    "hvn": [...],
-    "lvn": [...]
+    "poc": 64141.09,
+    "vah": 64818.82,
+    "val": 63925.44,
+    "maxPrice": 64834.22,
+    "minPrice": 63910.04,
+    "rangeMid": 64372.13,
+    "aboveVAHBuffer": false,
+    "belowVALBuffer": false,
+    "bias": "bullish"
   },
   "opportunities": [
     {
+      "rank": 2,
       "setup": "vp_levels",
-      "rationale": "POC=64734.89 VAH=65049.47 VAL=62847.37 HVN=8 LVN=8"
+      "direction": "bullish",
+      "confidence": "MED",
+      "confluenceScore": 0.45,
+      "rationale": "POC=64141.09 VAH=64818.82 VAL=63925.44 range[63910.04-64834.22]"
     }
   ],
-  "conformance": { "agenticScore": 0.75 }
+  "conformance": {
+    "agenticScore": 0.70
+  }
 }
 ```
 
-### Known limitation
+### Trading logic
 
-The `PUB;aea...` script has no numeric price output, so the skill **cannot receive the current market price** and therefore cannot automatically bias itself as bullish/bearish/oversold/overbought. It always reports the structural levels; you compare them to the current price yourself.
+Price relative to the value area drives the bias and opportunities:
 
-## Better volume-profile script (recommended)
+- Price **below VAL** (or `Below_VAL_Buffer` triggered) → long mean-reversion to POC → VAH.
+- Price **above VAH** (or `Above_VAH_Buffer` triggered) → short mean-reversion to POC → VAL.
+- Price **inside** the value area → neutral, watch for a move toward POC or a breakout.
 
-Search surfaced a script that exposes **numeric POC, VAH, and VAL** fields directly, which makes it much easier to consume than parsing graphics:
+## Why this script was chosen
 
-- **Pine ID:** `PUB;a4e251b831084685afecaa9192f2a3c5`
-- **Title:** *Fixed Range Volume Profile Zones (with Dynamic Percentile Buffers)*
-- **Author:** RWCS_LTD
+The original video script (`PUB;aea729456b7a44e09661b70ce9e4e987`) is graphics-only and has no numeric output. To use it in the CLI we had to reconstruct the profile by decoding box widths and labels, which is brittle and could not receive the current market price.
 
-It emits clean period fields named `POC`, `VAH`, `VAL`, `Max_Price`, `Min_Price`, `Above_VAH_Buffer`, and `Below_VAL_Buffer`.
+The new script (`PUB;a4e251b831084685afecaa9192f2a3c5`) is better because:
 
-### Quick test
+1. **Numeric levels** — `POC`, `VAH`, `VAL` are plain period fields.
+2. **Includes OHLC** — the current close is available as `plotcandle_0_ohlc_close`, so the parser can bias itself.
+3. **Buffers** — `Above_VAH_Buffer` / `Below_VAL_Buffer` give explicit breakout/mean-reversion signals.
+4. **More robust** — no graphic parsing, no manual label matching.
 
-```bash
-./tvcli run "PUB;a4e251b831084685afecaa9192f2a3c5" \
-  --symbol BTCUSDT --tf 1h --bars 50 --signals --json
-```
-
-Sample values (BTCUSDT, 1h):
-
-```text
-POC  = 64141.09
-VAH  = 64818.82
-VAL  = 63925.44
-Max  = 64834.22
-Min  = 63910.04
-```
-
-### Why it is better
-
-1. No graphic parsing — the levels are regular Pine `plot` values.
-2. `periods[]` contain 150+ bars, so generic signal extraction works out of the box.
-3. Built-in buffers (`Above_VAH_Buffer`, `Below_VAL_Buffer`) can be used as breakout/mean-reversion triggers.
-4. Less fragile than parsing box widths and labels.
-
-### Other candidates found
+## Alternative candidates
 
 | Pine ID | Title | Why it is interesting |
 |---|---|---|
-| `PUB;c500dd16982849b48caf2123c919c81c` | Anchored Volume Profile Confluence — POC, Value Area, HVN/LVN & Value Migration | Also numeric; emits `EXP_POC`, `EXP_VAH`, `EXP_VAL`, plus VWAP and migration signals |
+| `PUB;c500dd16982849b48caf2123c919c81c` | Anchored Volume Profile Confluence — POC, Value Area, HVN/LVN & Value Migration | Numeric `EXP_POC`, `EXP_VAH`, `EXP_VAL`, plus VWAP and value-migration signals |
 | `PUB;TFpVVPsMEJV84zM8wHIBQVCZ79v6beC8` | Volume Profile Free Ultra SLI by RRB | Very popular, but data arrives as per-price volume arrays; needs custom reconstruction |
 | `PUB;a7xsrJkK2RpZFIR18wBX02FVlE3wpHW2` | Volume Profile Free Pro by RRB | Similar to above; requires reconstruction |
-
-## Future work
-
-The current `vp` skill could be upgraded to use the numeric `PUB;a4e251b831084685afecaa9192f2a3c5` script and a much smaller parser that simply reads `POC`, `VAH`, `VAL` from the last bar and adds mean-reversion/breakout opportunities using the built-in buffer fields.

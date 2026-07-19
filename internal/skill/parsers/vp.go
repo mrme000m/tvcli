@@ -3,255 +3,163 @@ package parsers
 import (
 	"fmt"
 	"math"
-	"sort"
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
 )
 
-// VPSkill wraps TradingView's "Volume Profile / Fixed Range" public indicator.
+// VPSkill wraps the numeric "Fixed Range Volume Profile Zones" public indicator.
 //
-// The indicator does not emit numeric periods[]; instead it draws a histogram of
-// volume-at-price as dwgboxes and marks the POC with a label/line. We compute
-// POC, VAH, VAL and HVN/LVN directly from the box widths (x2-x1 == relative
-// volume) and price levels (midpoint of y1-y2).
+// Unlike the older graphics-only fixed-range script, this Pine script exposes
+// the levels as regular plot values in periods[]:
+//   POC, VAH, VAL, Max_Price, Min_Price, Above_VAH_Buffer, Below_VAL_Buffer.
 //
-// Usage examples:
-//   ./tvcli vp --symbol BTCUSDT --tf 1W --bars 52
-//   ./tvcli vp --symbol BTCUSDT --tf 1h  --bars 48 --length 48 --value-area 70
+// Recommended usage from the video:
+//   - Use a weekly timeframe for the institutional bias.
+//   - Draw / set the range from a recent swing low to swing high.
+//   - 70% value area is the default for most volume-profile work.
+//
+// CLI examples:
+//   ./tvcli vp --symbol BTCUSDT --tf 1W --bars 52 --preset weekly --agent --json
+//   ./tvcli vp --symbol BTCUSDT --tf 1h  --bars 48 --preset intraday --agent --json
 var VPSkill = &skill.Skill{
 	Name:     "vp",
-	Synopsis: "Volume Profile Fixed Range — POC, VAH, VAL, HVN/LVN levels",
-	PineID:   "PUB;aea729456b7a44e09661b70ce9e4e987",
+	Synopsis: "Volume Profile Zones — numeric POC, VAH, VAL, buffers",
+	PineID:   "PUB;a4e251b831084685afecaa9192f2a3c5",
 	Inputs: []skill.InputDef{
-		{Name: "rows", TVInputID: "in_0", Type: "int", Default: 150},
-		{Name: "length", TVInputID: "in_1", Type: "int", Default: 24},
-		{Name: "valueArea", TVInputID: "in_2", Type: "float", Default: 70},
-		{Name: "showPoc", TVInputID: "in_9", Type: "bool", Default: true},
+		{Name: "lookback", TVInputID: "in_0", Type: "int", Default: 30},
+		{Name: "percentile", TVInputID: "in_1", Type: "int", Default: 30},
+		{Name: "upperBuffer", TVInputID: "in_2", Type: "float", Default: 95},
+		{Name: "lowerBuffer", TVInputID: "in_3", Type: "float", Default: 5},
 	},
 	Presets: map[string]map[string]any{
-		"weekly":    {"rows": 150, "length": 52, "valueArea": 70},
-		"daily":     {"rows": 150, "length": 30, "valueArea": 70},
-		"intraday":  {"rows": 100, "length": 24, "valueArea": 70},
-		"scalping":  {"rows": 100, "length": 12, "valueArea": 70},
+		"weekly":   {"lookback": 52, "percentile": 30, "upperBuffer": 95, "lowerBuffer": 5},
+		"daily":    {"lookback": 30, "percentile": 30, "upperBuffer": 95, "lowerBuffer": 5},
+		"intraday": {"lookback": 24, "percentile": 30, "upperBuffer": 95, "lowerBuffer": 5},
+		"scalping": {"lookback": 12, "percentile": 30, "upperBuffer": 95, "lowerBuffer": 5},
 	},
 	ParseOutput: parseVP,
 	FormatText:  formatVP,
 }
 
-// vpNode aggregates volume-at-price data extracted from a box graphic.
-type vpNode struct {
-	price  float64
-	volume float64
-}
-
 func parseVP(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
-	boxes, ok := graphic["dwgboxes"]
-	if !ok || len(boxes) == 0 {
-		return skill.SkillResult{
-			Status:   "no_data",
-			Workflow: "volume-profile",
-			Narrative: skill.Narrative{
-				MarketStructure: "No volume profile histogram received",
-				Warnings:        []string{"Indicator produced no graphic histogram (try a larger --bars/--length)"},
-			},
-		}
-	}
-
-	// Aggregate volume per price level. Box width (x2-x1) encodes volume;
-	// y1/y2 encode the price band.
-	volByPrice := map[float64]float64{}
-	var totalVol float64
-	for _, raw := range boxes {
-		obj, ok := raw.(map[string]any)
-		if !ok {
-			continue
-		}
-		y1 := toFloat(obj["y1"])
-		y2 := toFloat(obj["y2"])
-		x1 := toFloat(obj["x1"])
-		x2 := toFloat(obj["x2"])
-		if y1 == 0 && y2 == 0 {
-			continue
-		}
-		price := round2((y1 + y2) / 2)
-		vol := math.Abs(x2 - x1)
-		if vol <= 0 {
-			continue
-		}
-		volByPrice[price] += vol
-		totalVol += vol
-	}
-
-	if len(volByPrice) == 0 || totalVol == 0 {
-		return skill.SkillResult{
-			Status:   "no_data",
-			Workflow: "volume-profile",
-			Narrative: skill.Narrative{
-				MarketStructure: "Could not decode volume profile histogram",
-				Warnings:        []string{"Graphic boxes had no usable volume/price data"},
-			},
-		}
-	}
-
-	nodes := make([]vpNode, 0, len(volByPrice))
-	for p, v := range volByPrice {
-		nodes = append(nodes, vpNode{price: p, volume: v})
-	}
-
-	// POC = highest-volume price.
-	sort.Slice(nodes, func(i, j int) bool { return nodes[i].volume > nodes[j].volume })
-	poc := nodes[0]
-
-	// Value Area: expand outward from POC until cumulative volume >= valueArea%.
-	valueAreaPct := 0.7
-	if vaStr, ok := args["valueArea"]; ok {
-		fmt.Sscanf(vaStr, "%f", &valueAreaPct)
-		valueAreaPct /= 100
-	}
-	if valueAreaPct <= 0 || valueAreaPct > 1 {
-		valueAreaPct = 0.7
-	}
-
-	byPrice := make([]vpNode, len(nodes))
-	copy(byPrice, nodes)
-	sort.Slice(byPrice, func(i, j int) bool { return byPrice[i].price < byPrice[j].price })
-
-	pocIdx := 0
-	for i, n := range byPrice {
-		if math.Abs(n.price-poc.price) < 1e-9 {
-			pocIdx = i
-			break
-		}
-	}
-
-	selected := map[int]bool{pocIdx: true}
-	cumulative := byPrice[pocIdx].volume
-	lo, hi := pocIdx, pocIdx
-	target := totalVol * valueAreaPct
-	for cumulative < target && (lo > 0 || hi < len(byPrice)-1) {
-		var candidates []int
-		if lo > 0 {
-			candidates = append(candidates, lo-1)
-		}
-		if hi < len(byPrice)-1 {
-			candidates = append(candidates, hi+1)
-		}
-		if len(candidates) == 0 {
-			break
-		}
-		// Add the adjacent level with larger volume first (greedy expansion).
-		best := candidates[0]
-		for _, idx := range candidates[1:] {
-			if byPrice[idx].volume > byPrice[best].volume {
-				best = idx
-			}
-		}
-		selected[best] = true
-		cumulative += byPrice[best].volume
-		if best < lo {
-			lo = best
-		} else if best > hi {
-			hi = best
-		}
-	}
-
-	// byPrice is sorted low->high, so lo index = lowest price, hi index = highest price.
-	val := byPrice[lo].price
-	vah := byPrice[hi].price
-
-	// HVN = top 30% volume nodes; LVN = bottom 30% volume nodes.
-	sort.Slice(byPrice, func(i, j int) bool { return byPrice[i].volume < byPrice[j].volume })
-	cutLow := int(math.Ceil(float64(len(byPrice)) * 0.3))
-	cutHigh := int(math.Floor(float64(len(byPrice)) * 0.7))
-	var lvn []float64
-	for i := 0; i < cutLow && i < len(byPrice); i++ {
-		lvn = append(lvn, byPrice[i].price)
-	}
-	var hvn []float64
-	for i := cutHigh; i < len(byPrice); i++ {
-		hvn = append(hvn, byPrice[i].price)
-	}
-	sort.Float64s(lvn)
-	sort.Float64s(hvn)
-
-	// Current price, if available from chart periods provided alongside the indicator.
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close"}))
-	if price == 0 && len(periods) > 0 {
-		price = toFloat(getField(periods[0], []string{"Close", "close"}))
+	if last == nil && len(periods) > 0 {
+		last = periods[0]
+	}
+	if last == nil {
+		return skill.SkillResult{
+			Status:   "no_data",
+			Workflow: "volume-profile",
+			Narrative: skill.Narrative{
+				MarketStructure: "No period data received",
+				Warnings:        []string{"Volume Profile script returned no bars"},
+			},
+		}
 	}
 
-	// Bias relative to value area.
+	// The script embeds the underlying chart OHLC as plotcandle_0_ohlc_* fields,
+	// so we can read the current closing price directly from the indicator output.
+	price := toFloat(getField(last, []string{"plotcandle_0_ohlc_close", "Close", "close"}))
+	poc := toFloat(getField(last, []string{"POC"}))
+	vah := toFloat(getField(last, []string{"VAH"}))
+	val := toFloat(getField(last, []string{"VAL"}))
+	maxPrice := toFloat(getField(last, []string{"Max_Price"}))
+	minPrice := toFloat(getField(last, []string{"Min_Price"}))
+	aboveVAH := toFloat(getField(last, []string{"Above_VAH_Buffer"})) != 0
+	belowVAL := toFloat(getField(last, []string{"Below_VAL_Buffer"})) != 0
+
+	if poc == 0 || vah == 0 || val == 0 {
+		return skill.SkillResult{
+			Status:   "no_data",
+			Workflow: "volume-profile",
+			Narrative: skill.Narrative{
+				MarketStructure: "Volume Profile levels missing",
+				Warnings:        []string{"POC/VAH/VAL fields were not present in the response"},
+			},
+		}
+	}
+
+	// Bias relative to the value area.
 	bias := "neutral"
 	if price > 0 {
-		if price < val {
-			bias = "bearish-oversold"
-		} else if price > vah {
-			bias = "bullish-overbought"
-		} else if price < poc.price {
-			bias = "bearish"
-		} else if price > poc.price {
+		switch {
+		case aboveVAH || price > vah:
+			bias = "bullish-breakout"
+		case belowVAL || price < val:
+			bias = "bearish-breakout"
+		case price > poc:
 			bias = "bullish"
+		case price < poc:
+			bias = "bearish"
 		}
 	}
 
-	// Opportunities based on mean-reversion to POC/VAH/VAL.
-	var opps []skill.Opportunity
+	// Mean-reversion distance gives a rough confidence score.
 	score := 0.55
-	if len(hvn) > 0 && len(lvn) > 0 {
-		score += 0.1
-	}
 	if price > 0 {
-		score += 0.1
+		if price < val || price > vah {
+			score += 0.2
+		}
+		if aboveVAH || belowVAL {
+			score += 0.1
+		}
 	}
 	score = math.Min(score, 0.95)
 
-	if price > 0 {
-		if price < val {
-			opps = append(opps, skill.Opportunity{
-				Rank:            1,
-				Setup:           "vp_mean_reversion_long",
-				Direction:       "long",
-				Confidence:      confidenceLabel(score),
-				ConfluenceScore: round2(score),
-				Rationale:       fmt.Sprintf("price %.2f below VAL %.2f — target POC %.2f then VAH %.2f", price, val, poc.price, vah),
-			})
-		} else if price > vah {
-			opps = append(opps, skill.Opportunity{
-				Rank:            1,
-				Setup:           "vp_mean_reversion_short",
-				Direction:       "short",
-				Confidence:      confidenceLabel(score),
-				ConfluenceScore: round2(score),
-				Rationale:       fmt.Sprintf("price %.2f above VAH %.2f — target POC %.2f then VAL %.2f", price, vah, poc.price, val),
-			})
-		}
+	var opps []skill.Opportunity
+	if price > 0 && (price < val || belowVAL) {
+		dist := ((val - price) / price) * 100
+		opps = append(opps, skill.Opportunity{
+			Rank:            1,
+			Setup:           "vp_mean_reversion_long",
+			Direction:       "long",
+			Confidence:      confidenceLabel(score),
+			ConfluenceScore: round2(score),
+			DistanceFromPrice: round2(dist),
+			Rationale:       fmt.Sprintf("price %.2f is below VAL %.2f — target POC %.2f then VAH %.2f", price, val, poc, vah),
+		})
 	}
-	// Always surface the key structural levels.
+	if price > 0 && (price > vah || aboveVAH) {
+		dist := ((price - vah) / price) * 100
+		opps = append(opps, skill.Opportunity{
+			Rank:            1,
+			Setup:           "vp_mean_reversion_short",
+			Direction:       "short",
+			Confidence:      confidenceLabel(score),
+			ConfluenceScore: round2(score),
+			DistanceFromPrice: round2(dist),
+			Rationale:       fmt.Sprintf("price %.2f is above VAH %.2f — target POC %.2f then VAL %.2f", price, vah, poc, val),
+		})
+	}
+
+	// Always surface the structural levels.
 	opps = append(opps, skill.Opportunity{
 		Rank:            2,
 		Setup:           "vp_levels",
 		Direction:       bias,
 		Confidence:      confidenceLabel(score - 0.1),
 		ConfluenceScore: round2(score - 0.1),
-		Rationale:       fmt.Sprintf("POC=%.2f VAH=%.2f VAL=%.2f HVN=%d LVN=%d", poc.price, vah, val, len(hvn), len(lvn)),
+		Rationale:       fmt.Sprintf("POC=%.2f VAH=%.2f VAL=%.2f range[%.2f-%.2f]", poc, vah, val, minPrice, maxPrice),
 	})
 
 	narrative := skill.Narrative{
-		MarketStructure: fmt.Sprintf("Volume Profile over %d price levels | POC: %.2f | VAH: %.2f | VAL: %.2f", len(volByPrice), poc.price, vah, val),
+		MarketStructure: fmt.Sprintf("POC: %.2f | VAH: %.2f | VAL: %.2f | Range: %.2f - %.2f", poc, vah, val, minPrice, maxPrice),
 		PrimaryOpp:      primaryOppFromOpps(opps),
 	}
 
-	agenticScore := 0.35
-	if poc.volume > 0 {
-		agenticScore += 0.25
+	agenticScore := 0.4
+	if poc > 0 {
+		agenticScore += 0.15
+	}
+	if vah > 0 && val > 0 {
+		agenticScore += 0.15
 	}
 	if price > 0 && (price < val || price > vah) {
 		agenticScore += 0.25
 	}
-	if len(hvn) > 0 && len(lvn) > 0 {
-		agenticScore += 0.15
+	if aboveVAH || belowVAL {
+		agenticScore += 0.1
 	}
 	agenticScore = math.Min(agenticScore, 0.99)
 
@@ -263,16 +171,15 @@ func parseVP(periods []map[string]any, graphic map[string]map[string]any, tf str
 			Bias:      bias,
 		},
 		Structure: map[string]any{
-			"poc":       poc.price,
-			"pocVolume": round2(poc.volume),
-			"vah":       vah,
-			"val":       val,
-			"valueArea": round2(valueAreaPct * 100),
-			"hvn":       hvn,
-			"lvn":       lvn,
-			"totalVol":  round2(totalVol),
-			"levels":    len(volByPrice),
-			"bias":      bias,
+			"poc":            poc,
+			"vah":            vah,
+			"val":            val,
+			"maxPrice":       maxPrice,
+			"minPrice":       minPrice,
+			"rangeMid":       round2((maxPrice + minPrice) / 2),
+			"aboveVAHBuffer": aboveVAH,
+			"belowVALBuffer": belowVAL,
+			"bias":           bias,
 		},
 		Opportunities: opps,
 		Narrative:     narrative,
@@ -284,13 +191,12 @@ func parseVP(periods []map[string]any, graphic map[string]map[string]any, tf str
 func formatVP(result skill.SkillResult) string {
 	var sb strings.Builder
 	sb.WriteString("\n======================================================================\n")
-	sb.WriteString("  VOLUME PROFILE (Fixed Range)\n")
+	sb.WriteString("  VOLUME PROFILE ZONES (numeric)\n")
 	sb.WriteString("======================================================================\n\n")
 	sb.WriteString(fmt.Sprintf("  POC: %.2f  |  VAH: %.2f  |  VAL: %.2f\n",
 		result.Structure["poc"], result.Structure["vah"], result.Structure["val"]))
-	sb.WriteString(fmt.Sprintf("  Price: %.2f  |  Bias: %s\n", result.Market.LastPrice, result.Market.Bias))
-	sb.WriteString(fmt.Sprintf("  HVN levels: %v\n", result.Structure["hvn"]))
-	sb.WriteString(fmt.Sprintf("  LVN levels: %v\n", result.Structure["lvn"]))
+	sb.WriteString(fmt.Sprintf("  Range: %.2f - %.2f  |  Price: %.2f  |  Bias: %s\n",
+		result.Structure["minPrice"], result.Structure["maxPrice"], result.Market.LastPrice, result.Market.Bias))
 	for _, o := range result.Opportunities {
 		sb.WriteString(fmt.Sprintf("  -> %s %s [%s] %.2f: %s\n", o.Direction, o.Setup, o.Confidence, o.ConfluenceScore, o.Rationale))
 	}
