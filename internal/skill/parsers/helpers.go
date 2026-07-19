@@ -143,3 +143,26 @@ func confidenceLabel(score float64) string {
 func round2(f float64) float64 {
 	return math.Round(f*100) / 100
 }
+
+// latestGraphicPrice extracts the most recent label price from the graphic layer.
+// Some scripts do not emit a Close plot; every drawing label anchored to price
+// carries its y-coordinate as the price (raw TV data sets yl == "pr").
+func latestGraphicPrice(graphic map[string]map[string]any) float64 {
+	labels, ok := graphic["dwglabels"]
+	if !ok || len(labels) == 0 {
+		return 0
+	}
+	var latestID, price float64
+	for _, v := range labels {
+		item, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		id := toFloat(item["id"])
+		if id > latestID {
+			latestID = id
+			price = toFloat(item["y"])
+		}
+	}
+	return price
+}

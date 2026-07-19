@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -142,6 +143,14 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	result.Status = "ok"
 	if result.Workflow == "" {
 		result.Workflow = c.skill.Name
+	}
+
+	// Some Pine scripts do not emit a Close plot, so the parser cannot report
+	// a price. Fetch the latest underlying close and back-fill it when missing.
+	if lastPriceMissing(result.Market.LastPrice) {
+		if bars, err := service.FetchOHLCVBars(cfg, symbol, tf, 2); err == nil && len(bars) > 0 {
+			result.Market.LastPrice = roundPrice(bars[len(bars)-1].Close)
+		}
 	}
 
 	if flags.Has("json") {
@@ -310,6 +319,25 @@ func defaultTextFormat(result skill.SkillResult, s *skill.Skill) string {
 	sb.WriteString(fmt.Sprintf("\n  Agentic Score: %.2f\n", result.Conformance.AgenticScore))
 	sb.WriteString("======================================================================\n")
 	return sb.String()
+}
+
+// lastPriceMissing returns true when a skill parser did not provide a price.
+func lastPriceMissing(v any) bool {
+	if v == nil {
+		return true
+	}
+	switch n := v.(type) {
+	case float64:
+		return n == 0
+	case int:
+		return n == 0
+	default:
+		return false
+	}
+}
+
+func roundPrice(f float64) float64 {
+	return math.Round(f*100) / 100
 }
 
 var reservedSkillKeys = []string{

@@ -9,7 +9,7 @@ okf_publish: false
 
 # XAUUSD Skill Commands Implementation Plan
 
-**Status:** In progress. The first skill (`liq-sweep`) is implemented and tested. Remaining skills are planned below.
+**Status:** Done. All four planned skills (`liq-sweep`, `order-flow`, `gold-divergence`, `xau-trend`) are implemented, tested, and registered.
 
 This document uses the existing `tvcli` skill-framework code and the research captured in:
 
@@ -42,9 +42,9 @@ This document uses the existing `tvcli` skill-framework code and the research ca
 | Skill | Status | Files changed | Notes |
 |---|---|---|---|
 | `liq-sweep` | ✅ Done | `internal/skill/parsers/liq_sweep.go`, `liq_sweep_test.go`, `testdata/liq_sweep_fixture.json`, `internal/cmd/help.go`, `internal/skill/parsers/helpers.go` | Script has no `Close` plot; price is derived from the latest `dwglabels` price. Tests pass. |
-| `order-flow` | Planned | — | Clear event flags; straightforward parser. |
-| `xau-trend` | Planned | — | Numeric EMA/BB fields; slightly richer parser. |
-| `gold-divergence` | Planned | — | Clear divergence flags + RSI. |
+| `order-flow` | ✅ Done | `internal/skill/parsers/order_flow.go`, `order_flow_test.go`, `testdata/order_flow_fixture.json`, `internal/cmd/help.go` | Uses `bell` and `sell` 0/1 alert flags; no price plot, so `lastPrice` is 0. |
+| `gold-divergence` | ✅ Done | `internal/skill/parsers/gold_divergence.go`, `gold_divergence_test.go`, `testdata/gold_divergence_fixture.json`, `internal/cmd/help.go` | Uses `Bullish_Divergence`/`Bearish_Divergence` (sentinel `1e100` = none) and `RSI`. No price plot. |
+| `xau-trend` | ✅ Done | `internal/skill/parsers/xau_trend.go`, `xau_trend_test.go`, `testdata/xau_trend_fixture.json`, `internal/cmd/help.go` | Uses `EMA_Court_Terme`, `EMA_Long_Terme`, and Bollinger bands; trend bias from EMA spread. No price plot. |
 | Composite stack | Proposed | — | Shell or Go wrapper after individual skills are stable. |
 
 ## 3. What already exists in the skill registry

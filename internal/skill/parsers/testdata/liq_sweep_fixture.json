@@ -1,0 +1,287 @@
+{
+  "pineId": "PUB;b9372355c2e6483f952ca49a21d2ebbb",
+  "symbol": "OANDA:XAUUSD",
+  "timeframe": "1h",
+  "bars": 50,
+  "periods": [
+    {
+      "$time": 1784318400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784314800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784311200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784307600,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784304000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784300400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784296800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784293200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 1,
+      "plot_0": 1,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784289600,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784286000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784282400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784278800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784275200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784271600,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784268000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784264400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784260800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784257200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784253600,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784250000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784246400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784242800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784239200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784232000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784228400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784224800,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784221200,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784217600,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784214000,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    },
+    {
+      "$time": 1784210400,
+      "Bearish_Sweep_Shape": 0,
+      "Bullish_Sweep_Shape": 0,
+      "plot_0": 0,
+      "plot_1": 0
+    }
+  ],
+  "graphic": {
+    "dwglabels": {
+      "0": {
+        "ci": 1,
+        "id": 5060,
+        "st": "lup",
+        "sz": "small",
+        "t": "BULLISH SWEEP",
+        "ta": "center",
+        "tci": 2,
+        "tt": "",
+        "x": 400,
+        "y": 3959.8,
+        "yl": "pr"
+      },
+      "1": {
+        "ci": 0,
+        "id": 5042,
+        "st": "ldn",
+        "sz": "small",
+        "t": "BEARISH SWEEP",
+        "ta": "center",
+        "tci": 2,
+        "tt": "",
+        "x": 375,
+        "y": 4074.175,
+        "yl": "pr"
+      },
+      "2": {
+        "ci": 1,
+        "id": 5023,
+        "st": "lup",
+        "sz": "small",
+        "t": "BULLISH SWEEP",
+        "ta": "center",
+        "tci": 2,
+        "tt": "",
+        "x": 348,
+        "y": 3983.545,
+        "yl": "pr"
+      },
+      "3": {
+        "ci": 1,
+        "id": 5010,
+        "st": "lup",
+        "sz": "small",
+        "t": "BULLISH SWEEP",
+        "ta": "center",
+        "tci": 2,
+        "tt": "",
+        "x": 330,
+        "y": 4061.115,
+        "yl": "pr"
+      },
+      "4": {
+        "ci": 1,
+        "id": 5004,
+        "st": "lup",
+        "sz": "small",
+        "t": "BULLISH SWEEP",
+        "ta": "center",
+        "tci": 2,
+        "tt": "",
+        "x": 324,
+        "y": 4072.8,
+        "yl": "pr"
+      }
+    }
+  }
+}

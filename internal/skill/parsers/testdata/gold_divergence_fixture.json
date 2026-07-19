@@ -1,0 +1,3187 @@
+{
+  "bars": 180,
+  "graphic": {},
+  "periodCount": 280,
+  "periods": [
+    {
+      "$time": 1784440800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.83455199347493,
+      "plot_0": 55.83455199347493,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784437200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.9506333492406,
+      "plot_0": 55.9506333492406,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784433600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.74841121324831,
+      "plot_0": 55.74841121324831,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784430000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.14861877547371,
+      "plot_0": 56.14861877547371,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784426400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.79985839716466,
+      "plot_0": 56.79985839716466,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784422800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.530087454763745,
+      "plot_0": 56.530087454763745,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784419200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.98222942294832,
+      "plot_0": 56.98222942294832,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784415600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.780628585892565,
+      "plot_0": 56.780628585892565,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784412000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.63976632555442,
+      "plot_0": 56.63976632555442,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784408400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.2282374237915,
+      "plot_0": 56.2282374237915,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784404800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.55222325535119,
+      "plot_0": 55.55222325535119,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784401200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.87194772167298,
+      "plot_0": 54.87194772167298,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784397600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.833432424845164,
+      "plot_0": 54.833432424845164,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784394000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.77935970237124,
+      "plot_0": 53.77935970237124,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784390400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.38729160265782,
+      "plot_0": 52.38729160265782,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784386800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.63235062323766,
+      "plot_0": 51.63235062323766,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784383200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.79716456699147,
+      "plot_0": 51.79716456699147,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784379600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.751649336597666,
+      "plot_0": 51.751649336597666,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784376000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.98807538106792,
+      "plot_0": 51.98807538106792,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784372400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.17452023976643,
+      "plot_0": 51.17452023976643,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784368800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.82448457250966,
+      "plot_0": 50.82448457250966,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784365200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.583889876021864,
+      "plot_0": 50.583889876021864,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784361600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.7804138111289,
+      "plot_0": 50.7804138111289,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784358000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.771074519218914,
+      "plot_0": 50.771074519218914,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784354400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.624369248935665,
+      "plot_0": 50.624369248935665,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784350800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.54576926911894,
+      "plot_0": 50.54576926911894,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784347200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.71166838580389,
+      "plot_0": 50.71166838580389,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784343600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.67765903853672,
+      "plot_0": 50.67765903853672,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784340000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.59484355701834,
+      "plot_0": 50.59484355701834,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784336400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.36469817584711,
+      "plot_0": 50.36469817584711,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784332800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.3642741125235,
+      "plot_0": 50.3642741125235,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784329200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.4722823295189,
+      "plot_0": 50.4722823295189,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784325600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.03597612343175,
+      "plot_0": 51.03597612343175,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784322000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.655055765534605,
+      "plot_0": 51.655055765534605,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784318400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.52947362423548,
+      "plot_0": 51.52947362423548,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784314800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.915088108469405,
+      "plot_0": 51.915088108469405,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784311200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.807278886662075,
+      "plot_0": 51.807278886662075,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784307600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.03335346645989,
+      "plot_0": 50.03335346645989,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784304000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.67508257280738,
+      "plot_0": 47.67508257280738,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784300400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.6396884806354,
+      "plot_0": 45.6396884806354,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784296800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.572660819360785,
+      "plot_0": 45.572660819360785,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784293200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 43.83952070795952,
+      "plot_0": 43.83952070795952,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784289600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.12604784534839,
+      "plot_0": 45.12604784534839,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784286000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.26300649608549,
+      "plot_0": 45.26300649608549,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784282400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.24233634518649,
+      "plot_0": 44.24233634518649,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784278800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 43.16401905291136,
+      "plot_0": 43.16401905291136,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784275200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.227967379059464,
+      "plot_0": 42.227967379059464,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784271600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.57242796779751,
+      "plot_0": 42.57242796779751,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784268000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.44915338256598,
+      "plot_0": 42.44915338256598,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784264400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.08206870135699,
+      "plot_0": 44.08206870135699,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784260800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.16540388699013,
+      "plot_0": 46.16540388699013,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784257200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.655532381723674,
+      "plot_0": 46.655532381723674,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784253600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.30753998197837,
+      "plot_0": 46.30753998197837,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784250000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.79472811391517,
+      "plot_0": 47.79472811391517,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784246400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 48.23845339679725,
+      "plot_0": 48.23845339679725,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784242800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 48.77079571943204,
+      "plot_0": 48.77079571943204,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784239200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.0793510728533,
+      "plot_0": 50.0793510728533,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784235600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.62323175418239,
+      "plot_0": 50.62323175418239,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784232000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.867172455867525,
+      "plot_0": 50.867172455867525,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784228400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.21823965301959,
+      "plot_0": 51.21823965301959,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784224800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.763279693725195,
+      "plot_0": 50.763279693725195,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784221200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.318401090238886,
+      "plot_0": 51.318401090238886,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784217600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.47125006978947,
+      "plot_0": 53.47125006978947,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784214000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.89315073764503,
+      "plot_0": 53.89315073764503,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784210400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.34414222519154,
+      "plot_0": 53.34414222519154,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784206800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.16231383074812,
+      "plot_0": 51.16231383074812,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784203200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.36408320414809,
+      "plot_0": 50.36408320414809,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784199600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.303954935214435,
+      "plot_0": 51.303954935214435,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784196000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.98244924726073,
+      "plot_0": 50.98244924726073,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784192400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.583830085651115,
+      "plot_0": 50.583830085651115,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784188800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.94689979220672,
+      "plot_0": 50.94689979220672,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784185200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.17198611010169,
+      "plot_0": 53.17198611010169,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784181600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.91773249459439,
+      "plot_0": 55.91773249459439,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784178000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.6885629158708,
+      "plot_0": 55.6885629158708,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784174400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.64640012796077,
+      "plot_0": 54.64640012796077,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784170800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.75600976767893,
+      "plot_0": 54.75600976767893,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784167200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.9838956566817,
+      "plot_0": 54.9838956566817,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784163600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.75751842309507,
+      "plot_0": 54.75751842309507,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784160000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.038560048387744,
+      "plot_0": 55.038560048387744,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784156400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.11120481644073,
+      "plot_0": 56.11120481644073,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784152800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.4979354432085,
+      "plot_0": 56.4979354432085,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784149200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.792869059219846,
+      "plot_0": 56.792869059219846,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784145600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.340374560703964,
+      "plot_0": 57.340374560703964,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784142000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.881903141111394,
+      "plot_0": 56.881903141111394,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784138400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.503393082415975,
+      "plot_0": 57.503393082415975,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784134800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.331048835469666,
+      "plot_0": 58.331048835469666,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784131200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.20961086370434,
+      "plot_0": 59.20961086370434,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784127600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 60.953320129252596,
+      "plot_0": 60.953320129252596,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784124000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 60.19305881953864,
+      "plot_0": 60.19305881953864,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784120400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.72069057507604,
+      "plot_0": 59.72069057507604,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784116800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.37017746104938,
+      "plot_0": 58.37017746104938,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784113200,
+      "Bearish_Divergence": 59.18870672786977,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.98257409753999,
+      "plot_0": 56.98257409753999,
+      "plot_1": 1e+100,
+      "plot_2": 59.18870672786977
+    },
+    {
+      "$time": 1784109600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.03206151258265,
+      "plot_0": 57.03206151258265,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784106000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.42512818358856,
+      "plot_0": 57.42512818358856,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784102400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.93443774567197,
+      "plot_0": 56.93443774567197,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784098800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.0473752846535,
+      "plot_0": 57.0473752846535,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784095200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.18870672786977,
+      "plot_0": 59.18870672786977,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784091600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.38052216540384,
+      "plot_0": 58.38052216540384,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784088000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.21621089452432,
+      "plot_0": 58.21621089452432,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784084400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.49242922651097,
+      "plot_0": 57.49242922651097,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784080800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.20806646373744,
+      "plot_0": 57.20806646373744,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784077200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.30941991809788,
+      "plot_0": 58.30941991809788,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784073600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.65989976561152,
+      "plot_0": 59.65989976561152,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784070000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.729967446030514,
+      "plot_0": 59.729967446030514,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784066400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.96868411535359,
+      "plot_0": 58.96868411535359,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784062800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.32211435945119,
+      "plot_0": 58.32211435945119,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784059200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.63409924188417,
+      "plot_0": 57.63409924188417,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784055600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.953133728466675,
+      "plot_0": 57.953133728466675,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784052000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.93527955816592,
+      "plot_0": 57.93527955816592,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784048400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.927044795265495,
+      "plot_0": 57.927044795265495,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784044800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.1260039462309,
+      "plot_0": 59.1260039462309,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784041200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.141653530368174,
+      "plot_0": 58.141653530368174,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784037600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.183044226612296,
+      "plot_0": 55.183044226612296,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784034000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.60519461026493,
+      "plot_0": 54.60519461026493,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784030400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.28304748468052,
+      "plot_0": 51.28304748468052,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784026800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.139243932074905,
+      "plot_0": 47.139243932074905,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784023200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.48782668869818,
+      "plot_0": 46.48782668869818,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784019600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.8427414193228,
+      "plot_0": 45.8427414193228,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784016000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.77029611140006,
+      "plot_0": 45.77029611140006,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784012400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.33314949202604,
+      "plot_0": 45.33314949202604,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784008800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.88589206931761,
+      "plot_0": 45.88589206931761,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784005200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.46046639447146,
+      "plot_0": 46.46046639447146,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1784001600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.653098625487395,
+      "plot_0": 45.653098625487395,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783998000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.50755209237339,
+      "plot_0": 44.50755209237339,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783994400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.54577094173682,
+      "plot_0": 44.54577094173682,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783990800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.747199416748145,
+      "plot_0": 44.747199416748145,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783987200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.04797717869337,
+      "plot_0": 44.04797717869337,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783983600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 41.397701907385624,
+      "plot_0": 41.397701907385624,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783980000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 40.642305089906735,
+      "plot_0": 40.642305089906735,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783976400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 41.021039635650425,
+      "plot_0": 41.021039635650425,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783972800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 41.71911037264751,
+      "plot_0": 41.71911037264751,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783969200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 41.14297238136881,
+      "plot_0": 41.14297238136881,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783965600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 39.60888318712969,
+      "plot_0": 39.60888318712969,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783962000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 40.44967561550242,
+      "plot_0": 40.44967561550242,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783958400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.33813975582544,
+      "plot_0": 42.33813975582544,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783954800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.26518595145372,
+      "plot_0": 44.26518595145372,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783951200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.25465362838233,
+      "plot_0": 42.25465362838233,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783947600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 41.96717874814732,
+      "plot_0": 41.96717874814732,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783944000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 43.94028708476329,
+      "plot_0": 43.94028708476329,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783940400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.11961802028352,
+      "plot_0": 45.11961802028352,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783936800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.49532300936255,
+      "plot_0": 45.49532300936255,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783933200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.58816526197414,
+      "plot_0": 46.58816526197414,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783929600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.233395821353874,
+      "plot_0": 46.233395821353874,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783926000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.493653793251895,
+      "plot_0": 44.493653793251895,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783922400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 43.57974545647616,
+      "plot_0": 43.57974545647616,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783918800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 42.89792430226441,
+      "plot_0": 42.89792430226441,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783915200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 43.11812537566045,
+      "plot_0": 43.11812537566045,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783911600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.34777085334707,
+      "plot_0": 45.34777085334707,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783908000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.707895677810555,
+      "plot_0": 47.707895677810555,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783904400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.50706873639391,
+      "plot_0": 50.50706873639391,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783900800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.53260017187399,
+      "plot_0": 52.53260017187399,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783897200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.405463434073965,
+      "plot_0": 51.405463434073965,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783893600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.60963935744443,
+      "plot_0": 51.60963935744443,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783890000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.55072715293943,
+      "plot_0": 53.55072715293943,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783886400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.03737899402732,
+      "plot_0": 55.03737899402732,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783882800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.906319292959374,
+      "plot_0": 54.906319292959374,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783879200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.10604477620951,
+      "plot_0": 54.10604477620951,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783875600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.267072583821545,
+      "plot_0": 54.267072583821545,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783872000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.60319653903626,
+      "plot_0": 54.60319653903626,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783868400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.963941314363126,
+      "plot_0": 54.963941314363126,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783864800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.417003292155016,
+      "plot_0": 54.417003292155016,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783861200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.75529488984809,
+      "plot_0": 53.75529488984809,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783857600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.7891430832539,
+      "plot_0": 53.7891430832539,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783854000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.99459111319174,
+      "plot_0": 52.99459111319174,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783850400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.785323967652104,
+      "plot_0": 52.785323967652104,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783846800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.085174836202135,
+      "plot_0": 53.085174836202135,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783843200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.261234815595145,
+      "plot_0": 53.261234815595145,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783839600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.203170407003775,
+      "plot_0": 52.203170407003775,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783836000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.265488429074516,
+      "plot_0": 52.265488429074516,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783832400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.439920152605666,
+      "plot_0": 53.439920152605666,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783828800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.58241679928414,
+      "plot_0": 54.58241679928414,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783825200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.88862229169032,
+      "plot_0": 54.88862229169032,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783821600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.55561616253458,
+      "plot_0": 54.55561616253458,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783818000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.79936795783685,
+      "plot_0": 53.79936795783685,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783814400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.52954529003246,
+      "plot_0": 52.52954529003246,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783810800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.29670714341076,
+      "plot_0": 54.29670714341076,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783807200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.65309671146963,
+      "plot_0": 56.65309671146963,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783803600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.54168319063062,
+      "plot_0": 57.54168319063062,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783800000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.3919113222244,
+      "plot_0": 57.3919113222244,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783796400,
+      "Bearish_Divergence": 57.62932903550325,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.9866994044066,
+      "plot_0": 56.9866994044066,
+      "plot_1": 1e+100,
+      "plot_2": 57.62932903550325
+    },
+    {
+      "$time": 1783792800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.31415521038576,
+      "plot_0": 57.31415521038576,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783789200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.858759535306156,
+      "plot_0": 56.858759535306156,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783785600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.2580110136514,
+      "plot_0": 56.2580110136514,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783782000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.6873842081228,
+      "plot_0": 56.6873842081228,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783778400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.62932903550325,
+      "plot_0": 57.62932903550325,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783774800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.841979263657585,
+      "plot_0": 56.841979263657585,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783771200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.66446295201611,
+      "plot_0": 56.66446295201611,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783767600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.719477323343845,
+      "plot_0": 56.719477323343845,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783764000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.5878821822678,
+      "plot_0": 56.5878821822678,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783760400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.004986365607365,
+      "plot_0": 57.004986365607365,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783756800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.98747530527134,
+      "plot_0": 56.98747530527134,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783753200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.84245387378863,
+      "plot_0": 56.84245387378863,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783749600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.857336442007984,
+      "plot_0": 56.857336442007984,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783746000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.66418616334126,
+      "plot_0": 56.66418616334126,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783742400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.550598074753765,
+      "plot_0": 56.550598074753765,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783738800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.51356150349554,
+      "plot_0": 56.51356150349554,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783735200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.141269793939976,
+      "plot_0": 56.141269793939976,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783731600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.38746800962179,
+      "plot_0": 56.38746800962179,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783728000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.446854779149966,
+      "plot_0": 56.446854779149966,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783724400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.51702198670177,
+      "plot_0": 56.51702198670177,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783720800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.1706972845325,
+      "plot_0": 56.1706972845325,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783717200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.47895457762067,
+      "plot_0": 55.47895457762067,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783713600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.86596352100792,
+      "plot_0": 54.86596352100792,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783710000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.25892246520192,
+      "plot_0": 55.25892246520192,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783706400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.95465394596025,
+      "plot_0": 54.95465394596025,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783702800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.954312326960185,
+      "plot_0": 55.954312326960185,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783699200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.45078022889723,
+      "plot_0": 56.45078022889723,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783695600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.22919993584564,
+      "plot_0": 56.22919993584564,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783692000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.36078410957197,
+      "plot_0": 57.36078410957197,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783688400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.00347678441656,
+      "plot_0": 59.00347678441656,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783684800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.62170294006221,
+      "plot_0": 58.62170294006221,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783681200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.23429663547664,
+      "plot_0": 59.23429663547664,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783677600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 59.118506078247925,
+      "plot_0": 59.118506078247925,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783674000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 58.68350088169348,
+      "plot_0": 58.68350088169348,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783670400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.86374191780266,
+      "plot_0": 57.86374191780266,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783666800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.648841129151705,
+      "plot_0": 56.648841129151705,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783663200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.235513843557825,
+      "plot_0": 57.235513843557825,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783659600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.82815722568698,
+      "plot_0": 57.82815722568698,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783656000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.472849480657544,
+      "plot_0": 57.472849480657544,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783652400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.15712860303725,
+      "plot_0": 57.15712860303725,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783648800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.73983689434196,
+      "plot_0": 56.73983689434196,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783645200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.57330069237903,
+      "plot_0": 54.57330069237903,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783641600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.71455544220204,
+      "plot_0": 52.71455544220204,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783638000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.22385334819957,
+      "plot_0": 53.22385334819957,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783634400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.711378909115176,
+      "plot_0": 53.711378909115176,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783630800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.81747988115749,
+      "plot_0": 53.81747988115749,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783627200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.643234917726524,
+      "plot_0": 53.643234917726524,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783623600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.4938155137889,
+      "plot_0": 53.4938155137889,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783620000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.46729049220063,
+      "plot_0": 53.46729049220063,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783616400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.70812193769933,
+      "plot_0": 51.70812193769933,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783612800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.912018990273474,
+      "plot_0": 50.912018990273474,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783609200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.18727071420218,
+      "plot_0": 52.18727071420218,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783605600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.04490474473243,
+      "plot_0": 52.04490474473243,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783602000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.40650569371772,
+      "plot_0": 51.40650569371772,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783598400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.56148886480509,
+      "plot_0": 50.56148886480509,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783594800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.85633512017388,
+      "plot_0": 50.85633512017388,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783591200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.5494938093306,
+      "plot_0": 51.5494938093306,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783587600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 51.78928454510599,
+      "plot_0": 51.78928454510599,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783584000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.10441901037628,
+      "plot_0": 52.10441901037628,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783580400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.35668137782027,
+      "plot_0": 52.35668137782027,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783576800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.977170340054336,
+      "plot_0": 50.977170340054336,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783573200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 49.40174238029782,
+      "plot_0": 49.40174238029782,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783569600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.82424844976219,
+      "plot_0": 47.82424844976219,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783566000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.81693499411687,
+      "plot_0": 45.81693499411687,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783562400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.777304907989375,
+      "plot_0": 45.777304907989375,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783558800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.13466629604247,
+      "plot_0": 47.13466629604247,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783555200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.50161950090442,
+      "plot_0": 47.50161950090442,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783551600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.993657476371546,
+      "plot_0": 47.993657476371546,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783548000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.850849680243414,
+      "plot_0": 47.850849680243414,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783544400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.01753559747106,
+      "plot_0": 47.01753559747106,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783540800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.38554161483454,
+      "plot_0": 47.38554161483454,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783537200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.46125730307256,
+      "plot_0": 47.46125730307256,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783533600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.26147125913417,
+      "plot_0": 47.26147125913417,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783530000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.199007719914086,
+      "plot_0": 47.199007719914086,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783526400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.778965282448745,
+      "plot_0": 45.778965282448745,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783522800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 44.85732095537575,
+      "plot_0": 44.85732095537575,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783519200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.67965510699412,
+      "plot_0": 45.67965510699412,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783515600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.53781778080697,
+      "plot_0": 45.53781778080697,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783512000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.844894473108695,
+      "plot_0": 46.844894473108695,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783508400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 47.18962268819305,
+      "plot_0": 47.18962268819305,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783504800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 46.341003665475974,
+      "plot_0": 46.341003665475974,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783501200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 45.853292616336624,
+      "plot_0": 45.853292616336624,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783497600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 48.027534193467616,
+      "plot_0": 48.027534193467616,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783494000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 49.79276168071273,
+      "plot_0": 49.79276168071273,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783490400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 49.11819524038414,
+      "plot_0": 49.11819524038414,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783486800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 49.60957507174698,
+      "plot_0": 49.60957507174698,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783483200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 49.985402716788286,
+      "plot_0": 49.985402716788286,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783479600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.53717035250714,
+      "plot_0": 50.53717035250714,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783476000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 50.633188416147085,
+      "plot_0": 50.633188416147085,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783472400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 52.93451268018921,
+      "plot_0": 52.93451268018921,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783468800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.17171318087975,
+      "plot_0": 54.17171318087975,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783465200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.03954299809866,
+      "plot_0": 54.03954299809866,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783461600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 53.92541473185437,
+      "plot_0": 53.92541473185437,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783458000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 54.58861551713097,
+      "plot_0": 54.58861551713097,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783454400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 55.6423816448549,
+      "plot_0": 55.6423816448549,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783450800,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 53.58618408311909,
+      "RSI": 55.36407210410531,
+      "plot_0": 55.36407210410531,
+      "plot_1": 53.58618408311909,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783447200,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.81450545101695,
+      "plot_0": 56.81450545101695,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783443600,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.70528937834463,
+      "plot_0": 57.70528937834463,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783440000,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 57.325413738845135,
+      "plot_0": 57.325413738845135,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    },
+    {
+      "$time": 1783436400,
+      "Bearish_Divergence": 1e+100,
+      "Bullish_Divergence": 1e+100,
+      "RSI": 56.15932474318991,
+      "plot_0": 56.15932474318991,
+      "plot_1": 1e+100,
+      "plot_2": 1e+100
+    }
+  ],
+  "pineId": "PUB;779d25a800b242cf9e2ecbe6f350c366",
+  "strategyReport": {
+    "currency": "USDT",
+    "performance": {
+      "all": {
+        "avgBarsInLossTrade": 381.1111111111111,
+        "avgBarsInTrade": 424.93333333333334,
+        "avgBarsInWinTrade": 980.3333333333334,
+        "avgLosTrade": 7778.995556,
+        "avgLosTradePercent": 0.08246804674662402,
+        "avgTrade": -2180.517333,
+        "avgTradePercent": -0.020712658045573946,
+        "avgWinTrade": 12434.4,
+        "avgWinTradePercent": 0.14384085001200234,
+        "commissionPaid": 0,
+        "grossLoss": 70010.95999999999,
+        "grossLossPercent": 0.07001096,
+        "grossLossWC": 70010.95999999999,
+        "grossProfit": 37303.200000000004,
+        "grossProfitPercent": 0.0373032,
+        "grossProfitWC": 37303.200000000004,
+        "largestLosTrade": 15203.240000000005,
+        "largestLosTradePercent": 0.163016369711,
+        "largestWinTrade": 20999.649999999994,
+        "largestWinTradePercent": 0.224491872885,
+        "marginCalls": 0,
+        "maxContractsHeld": 1,
+        "netProfit": -32707.759999999987,
+        "netProfitPercent": -0.03270775999999999,
+        "numberOfLosingTrades": 9,
+        "numberOfWiningTrades": 3,
+        "percentProfitable": 0.2,
+        "profitFactor": 0.5328194328430864,
+        "ratioAvgWinAvgLoss": 1.5984582984379327,
+        "totalOpenTrades": 0,
+        "totalTrades": 15
+      },
+      "avgMarginUsed": 0,
+      "buyHoldGainPercent": -0.36228445618027755,
+      "buyHoldReturn": -362284.2870568001,
+      "buyHoldReturnPercent": -0.3622842870568001,
+      "long": {
+        "avgBarsInLossTrade": 463,
+        "avgBarsInTrade": 336,
+        "avgBarsInWinTrade": 498,
+        "avgLosTrade": 8019.7075,
+        "avgLosTradePercent": 0.0868821995948935,
+        "avgTrade": -3189.355714,
+        "avgTradePercent": -0.027930502377998566,
+        "avgWinTrade": 9753.34,
+        "avgWinTradePercent": 0.15201528173358406,
+        "commissionPaid": 0,
+        "grossLoss": 32078.83000000001,
+        "grossLossPercent": 0.03207883000000001,
+        "grossLossWC": 32078.83000000001,
+        "grossProfit": 9753.340000000004,
+        "grossProfitPercent": 0.009753340000000004,
+        "grossProfitWC": 9753.340000000004,
+        "largestLosTrade": 15203.240000000005,
+        "largestLosTradePercent": 0.157855531394,
+        "largestWinTrade": 9753.340000000004,
+        "largestWinTradePercent": 0.152015281734,
+        "marginCalls": 0,
+        "maxContractsHeld": 1,
+        "netProfit": -22325.490000000005,
+        "netProfitPercent": -0.022325490000000007,
+        "numberOfLosingTrades": 4,
+        "numberOfWiningTrades": 1,
+        "percentProfitable": 0.14285714285714285,
+        "profitFactor": 0.30404288435706667,
+        "ratioAvgWinAvgLoss": 1.2161715374282664,
+        "totalOpenTrades": 0,
+        "totalTrades": 7
+      },
+      "maxMarginUsed": 0,
+      "maxStrategyDrawDown": 54632.55999999994,
+      "maxStrategyDrawDownPercent": 0.05463255999999994,
+      "maxStrategyRunUp": 32525.969999999972,
+      "maxStrategyRunUpPercent": 0.03311290046542672,
+      "openMarginUsed": 0,
+      "openPL": 0,
+      "openPLPercent": 0,
+      "sharpeRatio": -0.3686987177962878,
+      "short": {
+        "avgBarsInLossTrade": 315.6,
+        "avgBarsInTrade": 502.75,
+        "avgBarsInWinTrade": 1221.5,
+        "avgLosTrade": 7586.426,
+        "avgLosTradePercent": 0.07893672446800842,
+        "avgTrade": -1297.78375,
+        "avgTradePercent": -0.0143970442547024,
+        "avgWinTrade": 13774.93,
+        "avgWinTradePercent": 0.13975363415121148,
+        "commissionPaid": 0,
+        "grossLoss": 37932.12999999999,
+        "grossLossPercent": 0.03793212999999999,
+        "grossLossWC": 37932.12999999999,
+        "grossProfit": 27549.86,
+        "grossProfitPercent": 0.02754986,
+        "grossProfitWC": 27549.86,
+        "largestLosTrade": 14423.169999999998,
+        "largestLosTradePercent": 0.163016369711,
+        "largestWinTrade": 20999.649999999994,
+        "largestWinTradePercent": 0.224491872885,
+        "marginCalls": 0,
+        "maxContractsHeld": 1,
+        "netProfit": -10382.26999999999,
+        "netProfitPercent": -0.01038226999999999,
+        "numberOfLosingTrades": 5,
+        "numberOfWiningTrades": 2,
+        "percentProfitable": 0.25,
+        "profitFactor": 0.7262935142318664,
+        "ratioAvgWinAvgLoss": 1.8157337855796656,
+        "totalOpenTrades": 0,
+        "totalTrades": 8
+      },
+      "sortinoRatio": -0.4089633042385121
+    },
+    "settings": {
+      "dateRange": {
+        "backtest": {
+          "from": 1735689600000,
+          "to": 1784444400000
+        },
+        "trade": {
+          "from": 1737100800000,
+          "to": 1784444400000
+        }
+      }
+    },
+    "trades": [
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.00642614,
+          "v": -6426.14
+        },
+        "dd": {
+          "p": 0.080317914,
+          "v": 8147.49
+        },
+        "e": {
+          "b": 392,
+          "c": "Short",
+          "p": 101440.51,
+          "tm": 1737100800000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.018636638,
+          "v": 1890.51
+        },
+        "tp": {
+          "p": -0.06334885,
+          "v": -6426.14
+        },
+        "v": 101440.51000000001,
+        "x": {
+          "b": 471,
+          "c": "TP/SL",
+          "p": 107866.65,
+          "tm": 1737385200000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.002340299,
+          "v": -8751.4
+        },
+        "dd": {
+          "p": 0.09623569,
+          "v": 8157.25
+        },
+        "e": {
+          "b": 1370,
+          "c": "Long",
+          "p": 84763.25,
+          "tm": 1740621600000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.120768726,
+          "v": 10236.75
+        },
+        "tp": {
+          "p": -0.027432408,
+          "v": -2325.26
+        },
+        "v": 84763.25,
+        "x": {
+          "b": 2135,
+          "c": "TP/SL",
+          "p": 82437.99,
+          "tm": 1743375600000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.014550507,
+          "v": -23174.57
+        },
+        "dd": {
+          "p": 0.17953268,
+          "v": 15884.48
+        },
+        "e": {
+          "b": 2672,
+          "c": "Short",
+          "p": 88476.82,
+          "tm": 1745308800000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.0026616012,
+          "v": 235.49
+        },
+        "tp": {
+          "p": -0.16301636,
+          "v": -14423.17
+        },
+        "v": 88476.82,
+        "x": {
+          "b": 3085,
+          "c": "TP/SL",
+          "p": 102899.99,
+          "tm": 1746795600000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.008042604,
+          "v": -31030.79
+        },
+        "dd": {
+          "p": 0.07838983,
+          "v": 8140
+        },
+        "e": {
+          "b": 3126,
+          "c": "Short",
+          "p": 103840,
+          "tm": 1746943200000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.030061923,
+          "v": 3121.63
+        },
+        "tp": {
+          "p": -0.07565697,
+          "v": -7856.22
+        },
+        "v": 103840,
+        "x": {
+          "b": 3408,
+          "c": "TP/SL",
+          "p": 111696.22,
+          "tm": 1747958400000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.00787637,
+          "v": -38662.75
+        },
+        "dd": {
+          "p": 0.08588754,
+          "v": 9401.94
+        },
+        "e": {
+          "b": 3870,
+          "c": "Short",
+          "p": 109468.04,
+          "tm": 1749621600000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.10293452,
+          "v": 11268.04
+        },
+        "tp": {
+          "p": -0.069718614,
+          "v": -7631.96
+        },
+        "v": 109468.04000000001,
+        "x": {
+          "b": 4624,
+          "c": "TP/SL",
+          "p": 117100,
+          "tm": 1752336000000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0.0068136444,
+          "v": -32112.54
+        },
+        "dd": {
+          "p": 0.045460578,
+          "v": 5412.6
+        },
+        "e": {
+          "b": 4657,
+          "c": "Short",
+          "p": 119061.4,
+          "tm": 1752454800000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.059980817,
+          "v": 7141.4
+        },
+        "tp": {
+          "p": 0.055015396,
+          "v": 6550.21
+        },
+        "v": 119061.40000000001,
+        "x": {
+          "b": 5591,
+          "c": "Long",
+          "p": 112511.19,
+          "tm": 1755817200000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0,
+          "v": -32112.54
+        },
+        "dd": {
+          "p": -0,
+          "v": -0
+        },
+        "e": {
+          "b": 5591,
+          "c": "Long",
+          "p": 112511.19,
+          "tm": 1755817200000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0,
+          "v": 0
+        },
+        "tp": {
+          "p": 0,
+          "v": 0
+        },
+        "v": 112511.19,
+        "x": {
+          "b": 5591,
+          "c": "TP/SL",
+          "p": 112511.19,
+          "tm": 1755817200000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.0030327078,
+          "v": -35047.86
+        },
+        "dd": {
+          "p": 0.03358903,
+          "v": 3775.25
+        },
+        "e": {
+          "b": 6361,
+          "c": "Long",
+          "p": 112395.32,
+          "tm": 1758589200000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.013743277,
+          "v": 1544.68
+        },
+        "tp": {
+          "p": -0.026116034,
+          "v": -2935.32
+        },
+        "v": 112395.32,
+        "x": {
+          "b": 6449,
+          "c": "TP/SL",
+          "p": 109460,
+          "tm": 1758906000000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.015755434,
+          "v": -50251.1
+        },
+        "dd": {
+          "p": 0.15824334,
+          "v": 17673.57
+        },
+        "e": {
+          "b": 6823,
+          "c": "Long",
+          "p": 111686.02,
+          "tm": 1760252400000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.04220743,
+          "v": 4713.98
+        },
+        "tp": {
+          "p": -0.13612482,
+          "v": -15203.24
+        },
+        "v": 111686.02,
+        "x": {
+          "b": 7635,
+          "c": "TP/SL",
+          "p": 96482.78,
+          "tm": 1763175600000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0.02211074,
+          "v": -29251.45
+        },
+        "dd": {
+          "p": 0.04683898,
+          "v": 4381.46
+        },
+        "e": {
+          "b": 8092,
+          "c": "Short",
+          "p": 93543.03,
+          "tm": 1764820800000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.23149806,
+          "v": 21655.03
+        },
+        "tp": {
+          "p": 0.22449188,
+          "v": 20999.65
+        },
+        "v": 93543.03,
+        "x": {
+          "b": 9599,
+          "c": "Long",
+          "p": 72543.38,
+          "tm": 1770246000000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0,
+          "v": -29251.45
+        },
+        "dd": {
+          "p": -0,
+          "v": -0
+        },
+        "e": {
+          "b": 9599,
+          "c": "Long",
+          "p": 72543.38,
+          "tm": 1770246000000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0,
+          "v": 0
+        },
+        "tp": {
+          "p": 0,
+          "v": 0
+        },
+        "v": 72543.38,
+        "x": {
+          "b": 9599,
+          "c": "TP/SL",
+          "p": 72543.38,
+          "tm": 1770246000000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0.010047236,
+          "v": -19498.11
+        },
+        "dd": {
+          "p": 0.025716541,
+          "v": 1649.98
+        },
+        "e": {
+          "b": 10058,
+          "c": "Long",
+          "p": 64160.26,
+          "tm": 1771898400000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.16130327,
+          "v": 10349.26
+        },
+        "tp": {
+          "p": 0.15201528,
+          "v": 9753.34
+        },
+        "v": 64160.26,
+        "x": {
+          "b": 10555,
+          "c": "Short",
+          "p": 73913.6,
+          "tm": 1773687600000,
+          "tp": "lx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": 0,
+          "v": -19498.11
+        },
+        "dd": {
+          "p": -0,
+          "v": -0
+        },
+        "e": {
+          "b": 10555,
+          "c": "Short",
+          "p": 73913.6,
+          "tm": 1773687600000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0,
+          "v": 0
+        },
+        "tp": {
+          "p": -0,
+          "v": -0
+        },
+        "v": 73913.6,
+        "x": {
+          "b": 10555,
+          "c": "TP/SL",
+          "p": 73913.6,
+          "tm": 1773687600000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.0016263508,
+          "v": -21092.75
+        },
+        "dd": {
+          "p": 0.048226897,
+          "v": 3352.01
+        },
+        "e": {
+          "b": 11062,
+          "c": "Short",
+          "p": 69504.99,
+          "tm": 1775512800000,
+          "tp": "se"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.025508672,
+          "v": 1772.98
+        },
+        "tp": {
+          "p": -0.022942813,
+          "v": -1594.64
+        },
+        "v": 69504.99,
+        "x": {
+          "b": 11107,
+          "c": "TP/SL",
+          "p": 71099.63,
+          "tm": 1775674800000,
+          "tp": "sx"
+        }
+      },
+      {
+        "cm": 0,
+        "cp": {
+          "p": -0.0118652815,
+          "v": -32707.76
+        },
+        "dd": {
+          "p": 0.16925782,
+          "v": 12453.99
+        },
+        "e": {
+          "b": 12309,
+          "c": "Long",
+          "p": 73580,
+          "tm": 1780002000000,
+          "tp": "le"
+        },
+        "q": 1,
+        "rn": {
+          "p": 0.012695026,
+          "v": 934.1
+        },
+        "tp": {
+          "p": -0.15785553,
+          "v": -11615.01
+        },
+        "v": 73580,
+        "x": {
+          "b": 12492,
+          "c": "TP/SL",
+          "p": 61964.99,
+          "tm": 1780660800000,
+          "tp": "lx"
+        }
+      }
+    ]
+  },
+  "symbol": "BINANCE:BTCUSDT",
+  "timeframe": "1h"
+}

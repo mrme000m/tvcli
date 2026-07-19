@@ -42,11 +42,11 @@ After capturing raw TradingView responses with `./tvcli run <pine-id> --raw`, fo
 | Aspect | Status | Notes |
 |---|---|---|
 | Volume Profile | ⚠️ Graphics-only | Returns 0 periods; all output is in `dwgboxes`/`dwglabels`. Use the existing numeric `vp` skill instead. |
-| Liquidity | ✅ CLI-ready | `Bullish_Sweep_Shape` / `Bearish_Sweep_Shape` event flags. Implemented as `tv liq-sweep`. |
+| Liquidity | ✅ Implemented | `Bullish_Sweep_Shape` / `Bearish_Sweep_Shape` event flags. Skill: `tv liq-sweep`. |
 | Market Structure | ❌ Timeout | `Mistab XAUUSD Strength Dashboard` fails to return data within 100 s. Use existing `smc`/`ict`. |
-| Order Flow | ✅ CLI-ready | `Buy`/`Sell`/`bell` event flags. Candidate for `tv order-flow`. |
-| Volatility/Trend | ✅ CLI-ready | EMA + Bollinger numeric plots. Candidate for `tv xau-trend`. |
-| Price Action | ✅ CLI-ready | Bullish/bearish divergence flags + RSI. Candidate for `tv gold-divergence`. |
+| Order Flow | ✅ Implemented | `bell` / `sell` 0/1 alert flags. Skill: `tv order-flow`. |
+| Volatility/Trend | ✅ Implemented | `EMA_Court_Terme`, `EMA_Long_Terme`, `Bollinger_*` numeric plots. Skill: `tv xau-trend`. |
+| Price Action | ✅ Implemented | `Bullish_Divergence` / `Bearish_Divergence` flags + `RSI`. Skill: `tv gold-divergence`. |
 | Sentiment/Gap | ❌ Timeout | `XAUUSD Weekly Gap` fails to return data. Use existing `vgaps` or a custom script. |
 
 Field maps were captured during load testing.

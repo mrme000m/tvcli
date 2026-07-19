@@ -96,6 +96,10 @@ Commands:
     tv golden       Golden Rule Strategy
     tv trend        Self-Aware Trend System
     tv ict          ICT Auto-Validated SMC
+    tv liq-sweep    Institutional Liquidity Sweep & Volume Breakout
+    tv order-flow   Volume Spike Order Flow
+    tv gold-divergence  Gold RSI Divergence
+    tv xau-trend    XAUUSD EMA + Bollinger Trend
 
     Use --help on any skill for details (e.g. tv sniper --help)
     Use --json --agent for agent-ready JSON output
