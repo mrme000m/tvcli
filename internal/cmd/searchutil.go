@@ -53,6 +53,15 @@ func NormalizeSearchResults(data any, limit int) []map[string]any {
 			source = s
 		}
 
+		statsCount := 0
+		if stats != nil {
+			for _, v := range stats {
+				if n, ok := v.(float64); ok {
+					statsCount += int(n)
+				}
+			}
+		}
+
 		normalized := map[string]any{
 			"scriptIdPart": item["scriptIdPart"],
 			"title":        FirstNonEmptyStr(item, "title", "scriptName"),
@@ -68,6 +77,14 @@ func NormalizeSearchResults(data any, limit int) []map[string]any {
 			"imageUrl":     item["imageUrl"],
 			"version":      item["version"],
 			"stats":        stats,
+			"qualitySignals": map[string]any{
+				"likes":            intOrZero(item["agreeCount"]),
+				"weight":           intOrZero(item["weight"]),
+				"recommended":      item["isRecommended"],
+				"sourceAvailable":  access == 1 && source != "",
+				"version":          item["version"],
+				"outputCount":      statsCount,
+			},
 		}
 		if source != "" {
 			normalized["scriptSource"] = source
@@ -133,9 +150,18 @@ func PrintSearchTable(w io.Writer, items []map[string]any) {
 		if n, ok := it["agreeCount"].(int); ok {
 			likes = n
 		}
+		weight := 0
+		if n, ok := it["weight"].(int); ok {
+			weight = n
+		}
+		recommended := ""
+		if r, ok := it["isRecommended"].(bool); ok && r {
+			recommended = " ★ recommended"
+		}
 
-		fmt.Fprintf(w, "%3d. %s\n", i+1, title)
+		fmt.Fprintf(w, "%3d. %s%s\n", i+1, title, recommended)
 		fmt.Fprintf(w, "     id: %s\n", id)
-		fmt.Fprintf(w, "     author: %s | kind: %s | access: %s | likes: %d\n", author, kind, access, likes)
+		fmt.Fprintf(w, "     author: %s | kind: %s | access: %s\n", author, kind, access)
+		fmt.Fprintf(w, "     quality: likes=%d | weight=%d\n", likes, weight)
 	}
 }
