@@ -12,6 +12,8 @@ var ICTSkill = &skill.Skill{
 	Name:     "ict",
 	Synopsis: "ICT Auto-Validated SMC — full ICT system with OTE zones",
 	PineID:   "PUB;789a5c79bfe9443585da09e85ece73de",
+	Tier:        "plus",
+	KnownBroken: "Heavy indicator; requires a paid TradingView tier to return data.",
 	Inputs: []skill.InputDef{
 		{Name: "swingLen", TVInputID: "in_0", Type: "int", Default: 10},
 		{Name: "internalLen", TVInputID: "in_1", Type: "int", Default: 5},

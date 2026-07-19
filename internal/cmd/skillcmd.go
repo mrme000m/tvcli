@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"encoding/json"
+	"context"
 	"fmt"
 	"math"
 	"os"
@@ -54,8 +54,24 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	bars := flags.GetInt("bars", 500)
 	inputs := c.resolveInputs(flags)
 
+	if flags.Has("schema") {
+		indicator, err := service.LoadIndicator(cfg, c.skill.PineID, inputs, reservedSkillKeys)
+		if err != nil {
+			return fmt.Errorf("%s: %w", c.skill.Name, err)
+		}
+		if indicator.Schema != nil {
+			fmt.Fprintln(env.Stdout, indicator.Schema.Summary())
+			if flags.Has("json") {
+				emitJSON(env, indicator.Schema, flags.Get("out"))
+			}
+		} else {
+			fmt.Fprintf(env.Stderr, "No schema available for %s (metaInfo had no plots/styles)\n", c.skill.PineID)
+		}
+		return nil
+	}
+
 	start := time.Now()
-	res, err := service.RunScript(nil, cfg, service.RunRequest{
+	res, err := service.RunScript(context.Background(), cfg, service.RunRequest{
 		PineID:       c.skill.PineID,
 		Symbol:       symbol,
 		Timeframe:    tf,
@@ -74,72 +90,30 @@ func (c *skillCmd) Run(env *cli.Env) error {
 
 	// --raw / --raw-out: dump the raw periods + graphic before parsing, so the
 	// parser logic can be debugged against the actual TradingView response.
-	// Mirrors `tv run --raw`. The dump goes to --raw-out (or <out>.raw.json);
-	// if neither is set, it goes to stdout and parsing is skipped.
-	if rawOut := flags.Get("raw-out"); flags.Has("raw") || rawOut != "" {
-		rawPayload := map[string]any{
-			"pineId":      c.skill.PineID,
-			"workflow":    c.skill.Name,
-			"symbol":      symbol,
-			"timeframe":   tf,
-			"bars":        bars,
-			"inputs":      inputs,
-			"periodCount": len(res.Periods),
-			"periods":     res.Periods,
-			"graphic":     res.Graphic,
-		}
-		rawJSON, _ := json.MarshalIndent(rawPayload, "", "  ")
-		dest := ""
-		switch {
-		case rawOut != "" && rawOut != "true":
-			dest = rawOut
-		case flags.Get("out") != "":
-			dest = flags.Get("out") + ".raw.json"
-		}
-		if dest != "" {
-			os.WriteFile(dest, rawJSON, 0644)
-			fmt.Fprintf(env.Stderr, "✓ Raw dump: %s\n", dest)
-			// fall through to normal parsing unless --json is also set
-			if !flags.Has("json") {
-				return nil
-			}
-		} else {
-			fmt.Fprintln(env.Stdout, string(rawJSON))
-			return nil
-		}
-	}
-
-	// --signals: bypass the per-skill parser and use the generic schema-guided
-	// signal extractor. This is the script-agnostic path: it works for any
-	// Pine script where metaInfo is available, including the broken field-name
-	// parsers whose hand-coded aliases no longer match the actual TV output.
-	if flags.Has("signals") {
-		signals := runner.ExtractSignals(res.Periods, res.Graphic, res.StrategyReport, tf, c.skill.PineID, symbol, res.Indicator.Schema)
-		var output any = signals
-		if flags.Has("agent") {
-			output = signalsToAgent(signals, c.skill.Name, symbol, tf, duration.Milliseconds())
-		}
-		if flags.Has("json") || flags.Has("agent") {
-			b, _ := json.MarshalIndent(output, "", "  ")
-			if outFile := flags.Get("out"); outFile != "" {
-				os.WriteFile(outFile, b, 0644)
-				fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
-			} else {
-				fmt.Fprintln(env.Stdout, string(b))
-			}
-		} else {
-			text := signals.Compact()
-			if outFile := flags.Get("out"); outFile != "" {
-				os.WriteFile(outFile, []byte(text), 0644)
-				fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
-			} else {
-				fmt.Fprintln(env.Stdout, text)
-			}
-		}
+	// Mirrors `tv run --raw`.
+	if execRaw(env, map[string]any{
+		"pineId":      c.skill.PineID,
+		"workflow":    c.skill.Name,
+		"symbol":      symbol,
+		"timeframe":   tf,
+		"bars":        bars,
+		"inputs":      inputs,
+		"periodCount": len(res.Periods),
+		"periods":     res.Periods,
+		"graphic":     res.Graphic,
+	}, flags) {
 		return nil
 	}
 
-	result := c.skill.ParseOutput(res.Periods, res.Graphic, tf, symbol, flags.All())
+	// Parse the raw data with the skill's parser. Prefer the schema-aware
+	// variant when present so plot names are resolved from metaInfo rather
+	// than guessed plot_N indices; fall back to ParseOutput otherwise.
+	var result skill.SkillResult
+	if c.skill.ParseWithSchema != nil {
+		result = c.skill.ParseWithSchema(res.Periods, res.Graphic, res.Indicator.Schema, tf, symbol, flags.All())
+	} else {
+		result = c.skill.ParseOutput(res.Periods, res.Graphic, tf, symbol, flags.All())
+	}
 	if result.Status == "" {
 		result.Status = "ok"
 	}
@@ -149,12 +123,34 @@ func (c *skillCmd) Run(env *cli.Env) error {
 
 	// Some Pine scripts do not emit a Close plot, so the parser cannot report
 	// a price. Fetch the latest underlying close and back-fill it when missing,
-	// but only when the parser actually produced data so we don't mask a no_data
-	// result with a fake price.
+	// but only when the parser actually produced data so we don't mask a
+	// no_data result with a fake price.
 	if result.Status == "ok" && lastPriceMissing(result.Market.LastPrice) {
 		if bars, err := service.FetchOHLCVBars(cfg, symbol, tf, 2); err == nil && len(bars) > 0 {
 			result.Market.LastPrice = roundPrice(bars[len(bars)-1].Close)
 		}
+	}
+
+	// --signals: bypass the per-skill parser and use the generic schema-guided
+	// signal extractor. This is the script-agnostic path: it works for any
+	// Pine script where metaInfo is available. We also fall back to it when a
+	// hand-coded parser yields no_data but a schema exists, so a renamed or
+	// mismatched script still produces structured output instead of silently
+	// reporting no_data.
+	useSignals := flags.Has("signals")
+	if !useSignals && result.Status == "no_data" && res.Indicator != nil && res.Indicator.Schema != nil {
+		useSignals = true
+	}
+	if useSignals {
+		signals := runner.ExtractSignals(res.Periods, res.Graphic, res.StrategyReport, tf, c.skill.PineID, symbol, res.Indicator.Schema)
+		if flags.Has("agent") {
+			emitJSON(env, signalsToAgent(signals, c.skill.Name, symbol, tf, duration.Milliseconds()), flags.Get("out"))
+		} else if flags.Has("json") {
+			emitJSON(env, signals, flags.Get("out"))
+		} else {
+			emitText(env, signals.Compact(), flags.Get("out"))
+		}
+		return nil
 	}
 
 	if flags.Has("json") {
@@ -164,13 +160,7 @@ func (c *skillCmd) Run(env *cli.Env) error {
 		} else {
 			output = result
 		}
-		b, _ := json.MarshalIndent(output, "", "  ")
-		if outFile := flags.Get("out"); outFile != "" {
-			os.WriteFile(outFile, b, 0644)
-			fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
-		} else {
-			fmt.Fprintln(env.Stdout, string(b))
-		}
+		emitJSON(env, output, flags.Get("out"))
 	} else {
 		var text string
 		if c.skill.FormatText != nil {
@@ -178,12 +168,7 @@ func (c *skillCmd) Run(env *cli.Env) error {
 		} else {
 			text = defaultTextFormat(result, c.skill)
 		}
-		if outFile := flags.Get("out"); outFile != "" {
-			os.WriteFile(outFile, []byte(text), 0644)
-			fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
-		} else {
-			fmt.Fprintln(env.Stdout, text)
-		}
+		emitText(env, text, flags.Get("out"))
 	}
 	return nil
 }

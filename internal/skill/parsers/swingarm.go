@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 var SwingArmSkill = &skill.Skill{
@@ -18,23 +19,28 @@ var SwingArmSkill = &skill.Skill{
 		{Name: "ATRFactor", TVInputID: "in_2", Type: "int", Default: 5},
 		{Name: "show_fib_entries", TVInputID: "in_3", Type: "bool", Default: true},
 	},
-	ParseOutput: parseSwingArm,
-	FormatText:  formatSwingArm,
+	ParseOutput:     parseSwingArm,
+	ParseWithSchema: parseSwingArmSchema,
+	FormatText:      formatSwingArm,
 }
 
 func parseSwingArm(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
+	return parseSwingArmSchema(periods, graphic, nil, tf, symbol, args)
+}
+
+func parseSwingArmSchema(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
 		return skill.SkillResult{Status: "no_data", Workflow: "swingarm-atr-trend",
 			Narrative: skill.Narrative{MarketStructure: "No data", Warnings: []string{"No period data"}}}
 	}
 	last := latestClosed(periods)
-	trailingStop := toFloat(getField(last, []string{"Trailingstop", "plot_0"}))
-	extremum := toFloat(getField(last, []string{"Extremum", "plot_2"}))
-	fib1 := toFloat(getField(last, []string{"Fib_1", "plot_4"}))
-	fib2 := toFloat(getField(last, []string{"Fib_2", "plot_5"}))
-	fib3 := toFloat(getField(last, []string{"Fib_3", "plot_6"}))
-	signal := toFloat(getField(last, []string{"plot_8"}))
-	bgColor := toFloat(getField(last, []string{"plot_9"}))
+	trailingStop := SchemaFloat(last, sch, "Trailingstop", "plot_0")
+	extremum := SchemaFloat(last, sch, "Extremum", "plot_2")
+	fib1 := SchemaFloat(last, sch, "Fib_1", "plot_4")
+	fib2 := SchemaFloat(last, sch, "Fib_2", "plot_5")
+	fib3 := SchemaFloat(last, sch, "Fib_3", "plot_6")
+	signal := SchemaFloat(last, sch, "plot_8")
+	bgColor := SchemaFloat(last, sch, "plot_9")
 
 	// bgColor: 4 = bullish, 5 = bearish
 	bias := "neutral"

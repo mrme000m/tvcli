@@ -33,32 +33,6 @@ func historicalBars(periods []map[string]any) []map[string]any {
 	return periods[1:]
 }
 
-// barTime returns the $time field of a period as a float64 (unix seconds).
-func barTime(p map[string]any) float64 {
-	return toFloat(getField(p, []string{"$time", "time", "timestamp"}))
-}
-
-// isInProgress returns true if periods[0] looks like the in-progress bar.
-// Heuristic: it is in-progress when a critical volume/price field is zero
-// where periods[1] has a non-zero value. Pass the field name candidates
-// (same form as getField). If periods has fewer than 2 entries, returns
-// false (nothing to compare against).
-func isInProgress(periods []map[string]any, criticalFields ...string) bool {
-	if len(periods) < 2 {
-		return false
-	}
-	cur := periods[0]
-	prev := periods[1]
-	for _, name := range criticalFields {
-		cv := toFloat(cur[name])
-		pv := toFloat(prev[name])
-		if cv == 0 && pv != 0 {
-			return true
-		}
-	}
-	return false
-}
-
 func getField(obj map[string]any, names []string) any {
 	for _, n := range names {
 		if v, ok := obj[n]; ok && v != nil {
@@ -84,36 +58,6 @@ func toFloat(v any) float64 {
 		return 0
 	default:
 		return 0
-	}
-}
-
-func resolveBarColor(code float64) string {
-	switch int(code) {
-	case 0:
-		return "both_above_mas"
-	case 1:
-		return "both_below_mas"
-	case 2:
-		return "mixed"
-	case 3:
-		return "neutral"
-	default:
-		return "unknown"
-	}
-}
-
-func resolveBGColor(code float64) string {
-	switch int(code) {
-	case 4:
-		return "bull"
-	case 5:
-		return "bear"
-	case 6:
-		return "mixed"
-	case 7:
-		return "neutral"
-	default:
-		return "unknown"
 	}
 }
 

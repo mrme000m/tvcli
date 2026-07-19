@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 // InputDef describes one configurable input for a Pine indicator.
@@ -115,11 +117,57 @@ type Skill struct {
 	Inputs   []InputDef
 	Presets  map[string]map[string]any // "scalping" -> {inputs}
 
+	// Tier is the minimum TradingView subscription tier needed for this script
+	// to return data (e.g. "essential", "plus"). Empty means it works on free.
+	// Informational: not yet used to hard-gate execution.
+	Tier string
+	// Category groups skills for listing/discovery. Inferred from Name when
+	// empty (see EffectiveCategory).
+	Category string
+	// RequiresGraphic is true when the script emits only graphic drawings and
+	// no period/plot data; the parser must read the graphic layer.
+	RequiresGraphic bool
+	// KnownBroken documents a known issue (wrong PineID, no period data on some
+	// symbols, paid-tier requirement). Skills are still registered but flagged
+	// so agents can avoid or handle them explicitly.
+	KnownBroken string
+
 	// ParseOutput processes raw indicator data into a SkillResult.
 	ParseOutput func(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) SkillResult
 
+	// ParseWithSchema is the schema-aware alternative to ParseOutput. When set,
+	// the command layer prefers it and passes the script's PineSchema so the
+	// parser can resolve plot names from metaInfo instead of guessing
+	// plot_N indices. Falls back to ParseOutput when nil.
+	ParseWithSchema func(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) SkillResult
+
 	// FormatText renders SkillResult as human-readable text.
 	FormatText func(result SkillResult) string
+}
+
+// EffectiveCategory returns the explicit Category, or one inferred from the
+// skill name when Category is empty. Used for grouping in `skills` listings.
+func (s *Skill) EffectiveCategory() string {
+	if s.Category != "" {
+		return s.Category
+	}
+	n := strings.ToLower(s.Name)
+	switch {
+	case strings.Contains(n, "trend"), strings.Contains(n, "mtf"):
+		return "trend"
+	case strings.Contains(n, "smc"), strings.Contains(n, "ict"),
+		strings.Contains(n, "liq"), strings.Contains(n, "order"),
+		strings.Contains(n, "swing"):
+		return "smc"
+	case strings.Contains(n, "vp"), strings.Contains(n, "vgaps"),
+		strings.Contains(n, "anchored"), strings.Contains(n, "bsv"),
+		strings.Contains(n, "dvi"):
+		return "volume"
+	case strings.Contains(n, "sr"), strings.Contains(n, "support"):
+		return "levels"
+	default:
+		return "other"
+	}
 }
 
 // ToAgent converts a SkillResult into the agent-ready-v2 envelope.

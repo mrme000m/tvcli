@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 // OrderFlowSkill wraps the "Volume Spike / Order Flow" public Pine Script.
@@ -26,11 +27,19 @@ var OrderFlowSkill = &skill.Skill{
 		"scalping": {"vmaLength": 10, "volumeMultiplier": 300, "coinMaLength": 5, "showSells": true},
 		"swing":    {"vmaLength": 50, "volumeMultiplier": 700, "coinMaLength": 5, "showSells": true},
 	},
-	ParseOutput: parseOrderFlow,
-	FormatText:  formatOrderFlow,
+	ParseOutput:     parseOrderFlow,
+	ParseWithSchema: parseOrderFlowSchema,
+	FormatText:      formatOrderFlow,
 }
 
 func parseOrderFlow(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
+	// ParseOutput has no schema available; delegate with a nil schema. A nil
+	// schema makes SchemaField/SchemaFloat behave exactly like the old
+	// getField lookup, so behavior is unchanged until ParseWithSchema runs.
+	return parseOrderFlowSchema(periods, graphic, nil, tf, symbol, args)
+}
+
+func parseOrderFlowSchema(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
 		return skill.SkillResult{
 			Status:    "no_data",
@@ -41,15 +50,15 @@ func parseOrderFlow(periods []map[string]any, graphic map[string]map[string]any,
 
 	last := latestClosed(periods)
 
-	bullNow := toFloat(getField(last, []string{"Buy", "bell", "plot_0", "plot_2"})) == 1
-	bearNow := toFloat(getField(last, []string{"Sell", "sell", "plot_1", "plot_3"})) == 1
+	bullNow := SchemaFloat(last, sch, "Buy", "bell", "plot_0", "plot_2") == 1
+	bearNow := SchemaFloat(last, sch, "Sell", "sell", "plot_1", "plot_3") == 1
 
 	bullSpikes, bearSpikes := 0, 0
 	for _, p := range historicalBars(periods) {
-		if toFloat(getField(p, []string{"Buy", "bell", "plot_0", "plot_2"})) == 1 {
+		if SchemaFloat(p, sch, "Buy", "bell", "plot_0", "plot_2") == 1 {
 			bullSpikes++
 		}
-		if toFloat(getField(p, []string{"Sell", "sell", "plot_1", "plot_3"})) == 1 {
+		if SchemaFloat(p, sch, "Sell", "sell", "plot_1", "plot_3") == 1 {
 			bearSpikes++
 		}
 	}

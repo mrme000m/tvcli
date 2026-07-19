@@ -152,58 +152,33 @@ func (c *runCmd) Run(env *cli.Env) error {
 	graphicData := res.Graphic
 	stratReport := res.StrategyReport
 
-	if rawOut := flags.Get("raw-out"); flags.Has("raw") || rawOut != "" {
-		rawPayload := map[string]any{
-			"pineId":         pineID,
-			"symbol":         symbol,
-			"timeframe":      tf,
-			"bars":           bars,
-			"periodCount":    len(periods),
-			"periods":        periods,
-			"graphic":        graphicData,
-			"strategyReport": stratReport,
-		}
-		rawJSON, _ := json.MarshalIndent(rawPayload, "", "  ")
-		dest := ""
-		switch {
-		case rawOut != "" && rawOut != "true":
-			dest = rawOut
-		case flags.Get("out") != "":
-			dest = flags.Get("out") + ".raw.json"
-		}
-		if dest != "" {
-			os.WriteFile(dest, rawJSON, 0644)
-			fmt.Fprintf(env.Stderr, "✓ Raw dump: %s\n", dest)
-		} else {
-			fmt.Fprintln(env.Stdout, string(rawJSON))
-			if !flags.Has("json") {
-				return nil
-			}
-		}
+	if execRaw(env, map[string]any{
+		"pineId":         pineID,
+		"symbol":         symbol,
+		"timeframe":      tf,
+		"bars":           bars,
+		"periodCount":    len(periods),
+		"periods":        periods,
+		"graphic":        graphicData,
+		"strategyReport": stratReport,
+	}, flags) {
+		return nil
 	}
 
 	durationMs := time.Since(start).Milliseconds()
 
 	if flags.Has("signals") {
 		signals := runner.ExtractSignals(periods, graphicData, stratReport, tf, pineID, symbol, indicator.Schema)
-		var output any = signals
 		if flags.Has("agent") {
 			workflow := pineID
 			if indicator.Schema != nil && indicator.Schema.Name != "" {
 				workflow = indicator.Schema.Name
 			}
-			output = signalsToAgent(signals, workflow, symbol, tf, durationMs)
-		}
-		if flags.Has("json") || flags.Has("agent") {
-			b, _ := json.MarshalIndent(output, "", "  ")
-			fmt.Fprintln(env.Stdout, string(b))
+			emitJSON(env, signalsToAgent(signals, workflow, symbol, tf, durationMs), flags.Get("out"))
+		} else if flags.Has("json") {
+			emitJSON(env, signals, flags.Get("out"))
 		} else {
-			fmt.Fprintln(env.Stdout, signals.Compact())
-		}
-		if outFile := flags.Get("out"); outFile != "" {
-			b, _ := json.MarshalIndent(output, "", "  ")
-			os.WriteFile(outFile, b, 0644)
-			fmt.Fprintf(env.Stdout, "✓ Saved: %s\n", outFile)
+			emitText(env, signals.Compact(), flags.Get("out"))
 		}
 		return nil
 	}

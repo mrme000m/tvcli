@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 var BSVSkill = &skill.Skill{
@@ -22,11 +23,16 @@ var BSVSkill = &skill.Skill{
 		"default":  {"lengthMA1": 10, "lengthMA2": 10, "maType": "SMA"},
 		"swing":    {"lengthMA1": 50, "lengthMA2": 200, "maType": "SMA"},
 	},
-	ParseOutput: parseBSV,
-	FormatText:  formatBSV,
+	ParseOutput:     parseBSV,
+	ParseWithSchema: parseBSVSchema,
+	FormatText:      formatBSV,
 }
 
 func parseBSV(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
+	return parseBSVSchema(periods, graphic, nil, tf, symbol, args)
+}
+
+func parseBSVSchema(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
 		return skill.SkillResult{
 			Status: "no_data", Workflow: "buying-selling-volume",
@@ -48,9 +54,9 @@ func parseBSV(periods []map[string]any, graphic map[string]map[string]any, tf st
 	hist := historicalBars(periods)
 	bars := make([]barData, 0, len(hist))
 	for i, p := range hist {
-		buyRaw := math.Abs(toFloat(getField(p, []string{"BuyVolume", "buyVolume"})))
-		sellRaw := math.Abs(toFloat(getField(p, []string{"SellVolume", "sellVolume"})))
-		bgColor := toFloat(getField(p, []string{"BackgroundColor", "backgroundColor", "Background Color"}))
+		buyRaw := math.Abs(SchemaFloat(p, sch, "BuyVolume", "buyVolume"))
+		sellRaw := math.Abs(SchemaFloat(p, sch, "SellVolume", "sellVolume"))
+		bgColor := SchemaFloat(p, sch, "BackgroundColor", "backgroundColor", "Background Color")
 		totalVol := buyRaw + sellRaw
 		dom := 0.0
 		if totalVol > 0 {
@@ -62,7 +68,7 @@ func parseBSV(periods []map[string]any, graphic map[string]map[string]any, tf st
 		// bar (previous in time). A "previous" background transition is
 		// current vs older.
 		if i+1 < len(hist) {
-			prevBg := toFloat(getField(hist[i+1], []string{"BackgroundColor", "backgroundColor"}))
+			prevBg := SchemaFloat(hist[i+1], sch, "BackgroundColor", "backgroundColor")
 			if bgColor == 4 && prevBg != 4 {
 				crossCount++
 			} else if bgColor == 5 && prevBg != 5 {
@@ -155,7 +161,7 @@ func parseBSV(periods []map[string]any, graphic map[string]map[string]any, tf st
 	// Last closed bar (periods[1]) is the most recent finalized bar. We do
 	// not read OHLC from periods[0] because BSV does not expose Close.
 	lastClosed := latestClosed(periods)
-	lastPrice := getField(lastClosed, []string{"Close", "close"})
+	lastPrice := SchemaField(lastClosed, sch, "Close", "close")
 
 	return skill.SkillResult{
 		Status: "ok", Workflow: "buying-selling-volume",

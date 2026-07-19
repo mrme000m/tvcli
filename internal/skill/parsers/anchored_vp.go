@@ -6,12 +6,17 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 var AnchoredVPSkill = &skill.Skill{
 	Name:     "anchored-vp",
 	Synopsis: "Anchored Volume Profile — k-means clusters and POC levels",
 	PineID:   "PUB;92974e0a3cfb481eaf058cdab9f925a3",
+	// Graphics-only: emits no period/plot data, so the parser reads the
+	// graphic layer; also errors on BTCUSD.
+	RequiresGraphic: true,
+	KnownBroken:    "Graphics-only; emits no period data and errors on BTCUSD.",
 	Inputs: []skill.InputDef{
 		{Name: "kInput", TVInputID: "in_3", Type: "int", Default: 5},
 		{Name: "iters", TVInputID: "in_4", Type: "int", Default: 50},
@@ -19,18 +24,23 @@ var AnchoredVPSkill = &skill.Skill{
 		{Name: "vpWidth", TVInputID: "in_6", Type: "int", Default: 40},
 		{Name: "showDots", TVInputID: "in_8", Type: "bool", Default: true},
 	},
-	ParseOutput: parseAnchoredVP,
-	FormatText:  formatAnchoredVP,
+	ParseOutput:     parseAnchoredVP,
+	ParseWithSchema: parseAnchoredVPSchema,
+	FormatText:      formatAnchoredVP,
 }
 
 func parseAnchoredVP(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
+	return parseAnchoredVPSchema(periods, graphic, nil, tf, symbol, args)
+}
+
+func parseAnchoredVPSchema(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
 		return skill.SkillResult{Status: "no_data", Workflow: "anchored-clusters-vp",
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close"}))
-	poc := toFloat(getField(last, []string{"POC", "poc", "PointOfControl"}))
+	price := SchemaFloat(last, sch, "Close", "close")
+	poc := SchemaFloat(last, sch, "POC", "poc", "PointOfControl")
 
 	bias := "neutral"
 	if price > 0 && poc > 0 {

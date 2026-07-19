@@ -12,6 +12,8 @@ var VGapsSkill = &skill.Skill{
 	Name:     "vgaps",
 	Synopsis: "Volume Gaps & Imbalances — zero-volume voids and order flow",
 	PineID:   "PUB;ff1a0136336340f38e908eeb12ea33aa",
+	Tier:        "plus",
+	KnownBroken: "Heavy indicator; requires a paid TradingView tier to return data.",
 	Inputs: []skill.InputDef{
 		{Name: "prd", TVInputID: "in_0", Type: "int", Default: 200},
 		{Name: "rows", TVInputID: "in_1", Type: "int", Default: 50},

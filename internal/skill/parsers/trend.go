@@ -12,6 +12,8 @@ var TrendSkill = &skill.Skill{
 	Name:     "trend",
 	Synopsis: "Self-Aware Trend System — adaptive SuperTrend with TQI",
 	PineID:   "PUB;0f80bcf05d544d4c98fde06faab1c976",
+	Tier:        "plus",
+	KnownBroken: "Heavy indicator; requires a paid TradingView tier to return data.",
 	Inputs: []skill.InputDef{
 		{Name: "presetInput", TVInputID: "in_0", Type: "string", Default: "Auto"},
 		{Name: "atrLenInput", TVInputID: "in_1", Type: "int", Default: 13},

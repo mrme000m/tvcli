@@ -12,6 +12,7 @@ var MTFSkill = &skill.Skill{
 	Name:     "mtf",
 	Synopsis: "XAUUSD Multi-Timeframe Trend Dashboard",
 	PineID:   "PUB;d1ad30c0261f49f297357f8aa2a7854a",
+	KnownBroken: "XAUUSD-specific dashboard; results are meaningless on other symbols.",
 	Inputs: []skill.InputDef{
 		{Name: "show_M15", TVInputID: "in_0", Type: "bool", Default: true},
 		{Name: "show_M30", TVInputID: "in_1", Type: "bool", Default: true},

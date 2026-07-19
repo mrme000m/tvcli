@@ -115,7 +115,11 @@ Each registered skill wraps a Pine Script indicator with typed inputs, presets, 
 | `--agent` | Agent-ready JSON envelope |
 | `--signals` | Use generic schema-guided extractor (bypasses custom parser) |
 | `--raw` / `--raw-out <file>` | Dump raw periods + graphic data |
-| `--schema` | Show Pine metaInfo schema without running |
+| `--schema` | Show Pine metaInfo schema without running (works for `run` and any skill command) |
+
+`tv skills --json` now reports each skill's `category`, `tier` (minimum
+TradingView plan), and `knownBroken` (e.g. wrong PineID, paid-tier only, or
+graphics-only) so agents can avoid or special-case fragile skills.
 
 ## Authentication
 

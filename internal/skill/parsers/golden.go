@@ -6,30 +6,38 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/schema"
 )
 
 var GoldenSkill = &skill.Skill{
 	Name:     "golden",
 	Synopsis: "Golden Rule Strategy — multi-TF weekly/daily/4H alignment",
 	PineID:   "PUB;6daafb2cabe6419d98ae25229d2327f8",
+	// Registered with SMC's PineID by mistake; always reports no_data.
+	KnownBroken: "Registered with SMC's PineID; always reports no_data. Fix the PineID.",
 	Inputs: []skill.InputDef{
 		{Name: "showStructureInput", TVInputID: "in_10", Type: "bool", Default: true},
 		{Name: "showFairValueGapsInput", TVInputID: "in_33", Type: "bool", Default: true},
 		{Name: "showInternalOrderBlocksInput", TVInputID: "in_19", Type: "bool", Default: true},
 		{Name: "swingsLengthInput", TVInputID: "in_17", Type: "int", Default: 50},
 	},
-	ParseOutput: parseGolden,
-	FormatText:  formatGolden,
+	ParseOutput:     parseGolden,
+	ParseWithSchema: parseGoldenSchema,
+	FormatText:      formatGolden,
 }
 
 func parseGolden(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
+	return parseGoldenSchema(periods, graphic, nil, tf, symbol, args)
+}
+
+func parseGoldenSchema(periods []map[string]any, graphic map[string]map[string]any, sch *schema.PineSchema, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
 		return skill.SkillResult{Status: "no_data", Workflow: "golden-rule-strategy",
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close", "plot_3"}))
-	verdict := getField(last, []string{"Verdict", "verdict"})
+	price := SchemaFloat(last, sch, "Close", "close", "plot_3")
+	verdict := SchemaField(last, sch, "Verdict", "verdict")
 	if verdict == nil {
 		return skill.SkillResult{Status: "no_data", Workflow: "golden-rule-strategy",
 			Narrative: skill.Narrative{MarketStructure: "No Verdict field; Pine script does not match Golden Rule expectation", Warnings: []string{"Verdict field missing — indicator is not the expected Golden Rule script"}}}
