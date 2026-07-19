@@ -62,7 +62,7 @@ func (cs *ChartSession) onData(packet map[string]any) {
 		if len(data) > 1 {
 			if dataMap, ok := data[1].(map[string]any); ok {
 				for key, val := range dataMap {
-					if key == "s1" {
+					if key == "s1" || key == "$prices" {
 						cs.parsePrices(val)
 					} else if listener, ok := cs.studyListeners[key]; ok {
 						listener(packet)

@@ -1322,28 +1322,31 @@ func cmdFetch(cfg *config.Config, flags flagSet) {
 	ch.OnError(func(err error) {
 		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
 	})
-	ch.SetMarket(symbol, map[string]any{
-		"timeframe": pinefacade.NormalizeTimeframe(tf),
-		"range":     bars,
-	})
 
-	// Wait for bars to arrive
-	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
-		fatal("Symbol load: %v", err)
-	}
-
-	// Wait for data to populate
+	// Wire OnUpdate BEFORE SetMarket so we catch the initial data batch
 	done := make(chan struct{})
 	once := sync.Once{}
 	ch.OnUpdate(func() {
 		once.Do(func() { close(done) })
 	})
+
+	ch.SetMarket(symbol, map[string]any{
+		"timeframe": pinefacade.NormalizeTimeframe(tf),
+		"range":     bars,
+	})
+
+	// Wait for symbol to resolve
+	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
+		fatal("Symbol load: %v", err)
+	}
+
+	// Wait for OHLCV data to arrive
 	select {
 	case <-done:
 	case <-time.After(30 * time.Second):
 		fatal("Timeout waiting for OHLCV data")
 	}
-	// Small settle to catch follow-up bars
+	// Settle to catch follow-up bars
 	time.Sleep(800 * time.Millisecond)
 
 	periods := ch.Periods()

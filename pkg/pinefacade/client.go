@@ -392,15 +392,22 @@ func NormalizeTimeframe(tf string) string {
 	if t == "" {
 		return "5"
 	}
+	// Already a bare number or single-letter D/W/M
 	if regexp.MustCompile(`^\d+$`).MatchString(t) || regexp.MustCompile(`(?i)^[DWM]$`).MatchString(t) {
-		return t
+		return strings.ToUpper(t)
 	}
+	// Nm → N (minutes)
 	if m := regexp.MustCompile(`(?i)^(\d+)m$`).FindStringSubmatch(t); len(m) > 1 {
 		return m[1]
 	}
+	// Nh → N*60 (minutes)
 	if h := regexp.MustCompile(`(?i)^(\d+)h$`).FindStringSubmatch(t); len(h) > 1 {
 		n, _ := strconv.Atoi(h[1])
 		return strconv.Itoa(n * 60)
+	}
+	// Nd → D, Nw → W, NM → M
+	if d := regexp.MustCompile(`(?i)^(\d+)[dwm]$`).FindStringSubmatch(t); len(d) > 1 {
+		return strings.ToUpper(d[len(d)-1])
 	}
 	return t
 }
