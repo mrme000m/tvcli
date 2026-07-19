@@ -251,8 +251,9 @@ func (c *WSClient) Close() {
 		}
 	}
 
-	// Allow delete messages to flush before closing socket
-	time.Sleep(50 * time.Millisecond)
+	// Allow delete messages to flush before closing socket. Increasing this
+	// makes the server-side study limit much less likely to leak between runs.
+	time.Sleep(300 * time.Millisecond)
 
 	c.sessions = make(map[string]*sessionEntry)
 

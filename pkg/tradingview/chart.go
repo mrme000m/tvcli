@@ -235,8 +235,15 @@ func (cs *ChartSession) RemoveAllStudies() {
 }
 
 func (cs *ChartSession) Delete() {
+	// Remove studies first so TradingView releases indicator slots before the
+	// chart session itself is deleted. The sleep gives the remove_study messages
+	// time to be flushed and processed by the server.
+	cs.RemoveAllStudies()
+	time.Sleep(200 * time.Millisecond)
+
 	cs.client.Send("chart_delete_session", []any{cs.sessionID})
 	cs.client.UnregisterSession(cs.sessionID)
+	time.Sleep(100 * time.Millisecond)
 }
 
 // GetSymbolInfo returns the resolved symbol info for this chart session.
