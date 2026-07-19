@@ -31,23 +31,69 @@ func NormalizeSearchResults(data any, limit int) []map[string]any {
 		if !ok {
 			continue
 		}
+
+		kind := ""
+		var stats map[string]any
+		if extra, ok := item["extra"].(map[string]any); ok {
+			if k, ok := extra["kind"].(string); ok {
+				kind = k
+			}
+			if s, ok := extra["stats"].(map[string]any); ok {
+				stats = s
+			}
+		}
+
+		// access: 1 = source visible, 2 = protected/closed source.
+		access := 0
+		if v, ok := item["access"].(float64); ok {
+			access = int(v)
+		}
+		source := ""
+		if s, ok := item["scriptSource"].(string); ok {
+			source = s
+		}
+
 		normalized := map[string]any{
 			"scriptIdPart": item["scriptIdPart"],
 			"title":        FirstNonEmptyStr(item, "title", "scriptName"),
 			"scriptName":   item["scriptName"],
+			"shortTitle":   item["shortTitle"],
+			"kind":         kind,
 			"type":         item["type"],
-			"access":       item["access"],
+			"access":       access,
+			"sourceVisible": access == 1 && source != "",
+			"agreeCount":   intOrZero(item["agreeCount"]),
+			"isRecommended": item["isRecommended"],
+			"weight":       intOrZero(item["weight"]),
+			"imageUrl":     item["imageUrl"],
 			"version":      item["version"],
+			"stats":        stats,
+		}
+		if source != "" {
+			normalized["scriptSource"] = source
 		}
 		if author, ok := item["author"].(map[string]any); ok {
 			normalized["author"] = map[string]any{
-				"id":       author["id"],
-				"username": author["username"],
+				"id":        author["id"],
+				"username":  author["username"],
+				"is_broker": author["is_broker"],
 			}
 		}
 		items = append(items, normalized)
 	}
 	return items
+}
+
+func intOrZero(v any) int {
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case int64:
+		return int(n)
+	}
+	return 0
 }
 
 // FirstNonEmptyStr returns the first non-empty string value for any of keys
@@ -78,11 +124,18 @@ func PrintSearchTable(w io.Writer, items []map[string]any) {
 		}
 		title, _ := it["title"].(string)
 		id, _ := it["scriptIdPart"].(string)
-		typ, _ := it["type"].(string)
-		access, _ := it["access"].(string)
+		kind, _ := it["kind"].(string)
+		access := "protected"
+		if a, ok := it["access"].(int); ok && a == 1 {
+			access = "public"
+		}
+		likes := 0
+		if n, ok := it["agreeCount"].(int); ok {
+			likes = n
+		}
 
 		fmt.Fprintf(w, "%3d. %s\n", i+1, title)
 		fmt.Fprintf(w, "     id: %s\n", id)
-		fmt.Fprintf(w, "     author: %s | type: %s | access: %s\n", author, typ, access)
+		fmt.Fprintf(w, "     author: %s | kind: %s | access: %s | likes: %d\n", author, kind, access, likes)
 	}
 }
