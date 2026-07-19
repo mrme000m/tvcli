@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -100,6 +101,8 @@ func main() {
 		cmdRun(cfg, flags)
 	case "fetch", "ohlcv":
 		cmdFetch(cfg, flags)
+	case "sync":
+		cmdSync(cfg, flags)
 	case "help", "--help", "-h":
 		printHelp()
 	default:
@@ -1426,6 +1429,393 @@ func cmdFetch(cfg *config.Config, flags flagSet) {
 	fmt.Printf("Fetched %d bars for %s @ %s\n", len(periods), symbol, tf)
 }
 
+// ohlcvBar is a single OHLCV bar for serialization.
+type ohlcvBar struct {
+	Time   float64 `json:"t"`
+	Open   float64 `json:"o"`
+	High   float64 `json:"h"`
+	Low    float64 `json:"l"`
+	Close  float64 `json:"c"`
+	Volume float64 `json:"v"`
+}
+
+// ohlcvFile is the on-disk compressed format.
+type ohlcvFile struct {
+	Symbol    string     `json:"symbol"`
+	Timeframe string     `json:"tf"`
+	Count     int        `json:"count"`
+	UpdatedAt string     `json:"updatedAt"`
+	Data      []ohlcvBar `json:"data"`
+}
+
+func loadOHLCV(path string) (*ohlcvFile, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+
+	var file ohlcvFile
+	if err := json.NewDecoder(gz).Decode(&file); err != nil {
+		return nil, err
+	}
+	return &file, nil
+}
+
+func saveOHLCV(path string, file *ohlcvFile) error {
+	os.MkdirAll(filepath.Dir(path), 0755)
+
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	gz := gzip.NewWriter(f)
+	defer gz.Close()
+
+	gz.Comment = "tvcli ohlcv"
+	enc := json.NewEncoder(gz)
+	enc.SetIndent("", "")
+	return enc.Encode(file)
+}
+
+func lastTimestamp(data []ohlcvBar) float64 {
+	if len(data) == 0 {
+		return 0
+	}
+	return data[len(data)-1].Time
+}
+
+// mergeOHLCV merges new bars into existing, deduplicating by timestamp.
+// Both slices must be sorted ascending by time. Returns merged sorted slice.
+func mergeOHLCV(existing, fresh []ohlcvBar) []ohlcvBar {
+	if len(existing) == 0 {
+		return fresh
+	}
+	if len(fresh) == 0 {
+		return existing
+	}
+
+	// Build index of existing timestamps
+	seen := make(map[float64]bool, len(existing))
+	for _, b := range existing {
+		seen[b.Time] = true
+	}
+
+	merged := make([]ohlcvBar, 0, len(existing)+len(fresh))
+	merged = append(merged, existing...)
+	for _, b := range fresh {
+		if !seen[b.Time] {
+			merged = append(merged, b)
+		}
+	}
+
+	sort.Slice(merged, func(i, j int) bool {
+		return merged[i].Time < merged[j].Time
+	})
+	return merged
+}
+
+// fetchOHLCVBars connects via WS, fetches raw OHLCV bars, and returns them sorted ascending.
+func fetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]ohlcvBar, error) {
+	client := tradingview.NewClient(
+		tradingview.WithToken(cfg.SessionID),
+		tradingview.WithSignature(cfg.Signature),
+		tradingview.WithDebug(cfg.Debug),
+	)
+	if err := client.Connect(); err != nil {
+		return nil, fmt.Errorf("ws connect: %w", err)
+	}
+	if !client.WaitForConnected(10 * time.Second) {
+		client.Close()
+		return nil, fmt.Errorf("ws timeout")
+	}
+	defer client.Close()
+
+	ch := tradingview.NewChartSession(client)
+	ch.OnError(func(err error) {
+		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
+	})
+
+	done := make(chan struct{})
+	once := sync.Once{}
+	ch.OnUpdate(func() {
+		once.Do(func() { close(done) })
+	})
+
+	ch.SetMarket(symbol, map[string]any{
+		"timeframe": pinefacade.NormalizeTimeframe(tf),
+		"range":     bars,
+	})
+
+	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
+		return nil, fmt.Errorf("symbol load: %w", err)
+	}
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		return nil, fmt.Errorf("timeout waiting for OHLCV data")
+	}
+	time.Sleep(800 * time.Millisecond)
+
+	periods := ch.Periods()
+	if len(periods) == 0 {
+		return nil, fmt.Errorf("no OHLCV data received")
+	}
+
+	// Convert to compact bar format
+	bars_out := make([]ohlcvBar, 0, len(periods))
+	for _, p := range periods {
+		bars_out = append(bars_out, ohlcvBar{
+			Time:   p["time"].(float64),
+			Open:   p["open"].(float64),
+			High:   p["high"].(float64),
+			Low:    p["low"].(float64),
+			Close:  p["close"].(float64),
+			Volume: p["volume"].(float64),
+		})
+	}
+
+	sort.Slice(bars_out, func(i, j int) bool {
+		return bars_out[i].Time < bars_out[j].Time
+	})
+
+	return bars_out, nil
+}
+
+func cmdSync(cfg *config.Config, flags flagSet) {
+	symbol := flags.get("symbol")
+	if symbol == "" {
+		symbol = "OANDA:XAUUSD"
+	}
+	normalizedSymbol, err := pinefacade.ValidateSymbol(symbol)
+	if err != nil {
+		fatal("Invalid symbol: %v\n\nUse --symbol EXCHANGE:SYMBOL (e.g. OANDA:XAUUSD, BINANCE:BTCUSDT)", err)
+	}
+	symbol = normalizedSymbol
+
+	tf := flags.get("tf")
+	if tf == "" {
+		tf = flags.get("timeframe")
+	}
+	if tf == "" {
+		tf = "5m"
+	}
+	bars := flags.getInt("bars", 5000)
+
+	limits := getTierLimits()
+	if limits.MaxBars > 0 && bars > limits.MaxBars {
+		fmt.Fprintf(os.Stderr, "Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
+		bars = limits.MaxBars
+	}
+
+	// Determine output path
+	symbolClean := strings.ReplaceAll(symbol, ":", "_")
+	baseName := fmt.Sprintf("%s_%s", symbolClean, tf)
+
+	outDir := flags.get("dir")
+	if outDir == "" {
+		outDir = "."
+	}
+	os.MkdirAll(outDir, 0755)
+
+	filePath := flags.get("out")
+	if filePath == "" {
+		filePath = filepath.Join(outDir, baseName+".json.gz")
+	}
+
+	// Load existing file for gap detection
+	var existing *ohlcvFile
+	force := flags.has("force")
+	if !force {
+		if f, err := loadOHLCV(filePath); err == nil {
+			existing = f
+			fmt.Fprintf(os.Stderr, "Loaded existing: %s (%d bars, updated %s)\n",
+				filePath, f.Count, f.UpdatedAt)
+		}
+	}
+
+	// Determine how many bars to fetch
+	fetchBars := bars
+	if existing != nil && len(existing.Data) > 0 {
+		// Gap-fill: we need enough bars to cover from last timestamp to now.
+		// TradingView returns the most N bars, so if the gap is small relative
+		// to the request, we'll get it. Request the full bar count to maximize coverage.
+		latest := lastTimestamp(existing.Data)
+		age := time.Now().Unix() - int64(latest)
+		// Estimate bars needed based on timeframe
+	 tfSecs := timeframeSeconds(tf)
+		if tfSecs > 0 {
+			gapBars := int(age/int64(tfSecs)) + 10 // +10 buffer
+			if gapBars < bars {
+				fetchBars = bars // request full amount to be safe
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Gap-fill: last bar at %s, fetching %d bars\n",
+			time.Unix(int64(latest), 0).UTC().Format("2006-01-02T15:04:05Z"), fetchBars)
+	}
+
+	// Fetch
+	fmt.Fprintf(os.Stderr, "Fetching OHLCV: %s @ %s, %d bars\n", symbol, tf, fetchBars)
+	start := time.Now()
+
+	fresh, err := fetchOHLCVBars(cfg, symbol, tf, fetchBars)
+	if err != nil {
+		fatal("Fetch: %v", err)
+	}
+
+	elapsed := time.Since(start)
+	fmt.Fprintf(os.Stderr, "Received %d bars in %s\n", len(fresh), elapsed.Round(time.Millisecond))
+
+	// Merge with existing
+	var merged []ohlcvBar
+	if existing != nil {
+		merged = mergeOHLCV(existing.Data, fresh)
+		added := len(merged) - len(existing.Data)
+		fmt.Fprintf(os.Stderr, "Merged: %d existing + %d new = %d total (+%d)\n",
+			len(existing.Data), len(fresh), len(merged), added)
+	} else {
+		merged = fresh
+	}
+
+	// Save compressed
+	file := &ohlcvFile{
+		Symbol:    symbol,
+		Timeframe: tf,
+		Count:     len(merged),
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339),
+		Data:      merged,
+	}
+
+	if err := saveOHLCV(filePath, file); err != nil {
+		fatal("Save: %v", err)
+	}
+
+	finfo, _ := os.Stat(filePath)
+	sizeKB := finfo.Size() / 1024
+
+	// Time span
+	span := ""
+	if len(merged) > 1 {
+		first := time.Unix(int64(merged[0].Time), 0).UTC()
+		last := time.Unix(int64(merged[len(merged)-1].Time), 0).UTC()
+		d := last.Sub(first)
+		span = fmt.Sprintf(", spans %s (%s to %s)", d.Round(time.Second), first.Format("2006-01-02"), last.Format("2006-01-02"))
+	}
+
+	fmt.Fprintf(os.Stderr, "\nSaved: %s (%dKB gzipped, %d bars%s)\n", filePath, sizeKB, len(merged), span)
+
+	// Loop mode
+	loopSecs := 0
+	if flags.has("loop") {
+		loopStr := flags.get("loop")
+		if loopStr == "" || loopStr == "true" {
+			loopSecs = 300
+		} else {
+			d, err := time.ParseDuration(loopStr)
+			if err != nil {
+				n := 0
+				fmt.Sscanf(loopStr, "%d", &n)
+				if n > 0 {
+					loopSecs = n
+				} else {
+					fatal("Invalid loop interval: %s", loopStr)
+				}
+			} else {
+				loopSecs = int(d.Seconds())
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Loop mode: syncing every %ds\n", loopSecs)
+	}
+
+	if loopSecs == 0 {
+		return
+	}
+
+	// Loop: re-fetch and merge periodically
+	for {
+		time.Sleep(time.Duration(loopSecs) * time.Second)
+
+		// Reload file in case it was edited externally
+		if f, err := loadOHLCV(filePath); err == nil {
+			existing = f
+		}
+
+		fresh, err := fetchOHLCVBars(cfg, symbol, tf, bars)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Loop fetch error: %v\n", err)
+			continue
+		}
+
+		if existing != nil {
+			merged = mergeOHLCV(existing.Data, fresh)
+		} else {
+			merged = fresh
+		}
+
+		file.Data = merged
+		file.Count = len(merged)
+		file.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+
+		if err := saveOHLCV(filePath, file); err != nil {
+			fmt.Fprintf(os.Stderr, "Loop save error: %v\n", err)
+			continue
+		}
+
+		finfo, _ := os.Stat(filePath)
+		fmt.Fprintf(os.Stderr, "[%s] Synced: %d bars, %dKB\n",
+			time.Now().Format("15:04:05"), len(merged), finfo.Size()/1024)
+	}
+}
+
+// timeframeSeconds returns the approximate seconds per bar for a timeframe string.
+func timeframeSeconds(tf string) int64 {
+	t := strings.ToUpper(tf)
+	switch t {
+	case "1":
+		return 60
+	case "3":
+		return 180
+	case "5":
+		return 300
+	case "15":
+		return 900
+	case "30":
+		return 1800
+	case "45":
+		return 2700
+	case "60", "1H":
+		return 3600
+	case "120", "2H":
+		return 7200
+	case "180", "3H":
+		return 10800
+	case "240", "4H":
+		return 14400
+	case "D", "1D":
+		return 86400
+	case "W", "1W":
+		return 604800
+	case "M", "1M":
+		return 2592000
+	}
+	// Try parsing as minutes
+	n := 0
+	fmt.Sscanf(tf, "%d", &n)
+	if n > 0 {
+		return int64(n) * 60
+	}
+	return 300 // default 5m
+}
+
 func printHelp() {
 	fmt.Print(`
 TradingView Pine Script Manager (Go)
@@ -1458,6 +1848,14 @@ Commands:
     --dir <dir>                 Output directory (default: .)
     --json-out <file>           Custom JSON output path
     --csv-out <file>            Custom CSV output path
+  sync                          Fetch + compress OHLCV to .json.gz (gap-fills existing)
+    --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
+    --tf 5m                     Timeframe (default: 5m)
+    --bars 5000                 Max bars to request
+    --dir <dir>                 Output directory (default: .)
+    --out <file>                Output file path (default: SYMBOL_tf.json.gz)
+    --force                     Ignore existing file, re-fetch everything
+    --loop <interval>           Keep syncing (e.g. 5m, 1h). Gap-fills each cycle.
   run <pineId>                  Run script with chart session
     --symbol EXCHANGE:SYMBOL     Market symbol (e.g., OANDA:XAUUSD, BINANCE:BTCUSDT)
     --tf 5m                     Timeframe
