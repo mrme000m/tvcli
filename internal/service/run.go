@@ -232,9 +232,19 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 
 		study := chart.Study(indicator)
 
-		done := make(chan struct{})
+		done := make(chan struct{}, 1)
 		var studyErr error
 		once := sync.Once{}
+
+		// Safe close: multiple goroutines (OnUpdate settle, OnReady, OnError)
+		// may signal done; use a buffered channel with non-blocking send to
+		// avoid double-close panics.
+		signalDone := func() {
+			select {
+			case done <- struct{}{}:
+			default:
+			}
+		}
 
 		study.OnUpdate(func() {
 			once.Do(func() {
@@ -251,7 +261,7 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 						select {
 						case <-done:
 						case <-timer.C:
-							close(done)
+							signalDone()
 						}
 					}()
 				}
@@ -260,8 +270,19 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		study.OnError(func(err error) {
 			once.Do(func() {
 				studyErr = err
-				close(done)
 			})
+			signalDone()
+		})
+		study.OnReady(func() {
+			// Graphics-only scripts (e.g. anchored-vp) may never emit period
+			// data, so the OnUpdate settle timer never starts. Signal done
+			// when the study finishes so the final snapshot is taken.
+			// Small delay lets any pending du/timescale_update messages arrive
+			// before the runner takes the final snapshot.
+			go func() {
+				time.Sleep(200 * time.Millisecond)
+				signalDone()
+			}()
 		})
 
 		select {

@@ -33,18 +33,47 @@ func parseSMC(periods []map[string]any, graphic map[string]map[string]any, tf st
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close"}))
-	bosCount := toFloat(getField(last, []string{"BOSCount", "bosCount"}))
-	chochCount := toFloat(getField(last, []string{"CHoCHCount", "chochCount"}))
-	fvgCount := toFloat(getField(last, []string{"FVGCount", "fvgCount"}))
-	obCount := toFloat(getField(last, []string{"OBCount", "obCount"}))
+	price := toFloat(getField(last, []string{"Close", "close", "plotcandle_0_ohlc_close", "plot_3"}))
+
+	// This Pine script emits 0/1 event flags per bar, not pre-aggregated counts.
+	// Count the bullish and bearish variants across closed bars.
+	bars := historicalBars(periods)
+	count := func(p map[string]any, names []string) float64 {
+		total := 0.0
+		for _, n := range names {
+			if toFloat(getField(p, []string{n})) > 0 {
+				total++
+			}
+		}
+		return total
+	}
+	bullishBOS, bearishBOS := 0.0, 0.0
+	bullishCHoCH, bearishCHoCH := 0.0, 0.0
+	bullishFVG, bearishFVG := 0.0, 0.0
+	bullishOB, bearishOB := 0.0, 0.0
+	for _, p := range bars {
+		bullishBOS += count(p, []string{"Bullish_BOS", "Internal_Bullish_BOS"})
+		bearishBOS += count(p, []string{"Bearish_BOS", "Internal_Bearish_BOS"})
+		bullishCHoCH += count(p, []string{"Bullish_CHoCH", "Internal_Bullish_CHoCH"})
+		bearishCHoCH += count(p, []string{"Bearish_CHoCH", "Internal_Bearish_CHoCH"})
+		bullishFVG += count(p, []string{"Bullish_FVG"})
+		bearishFVG += count(p, []string{"Bearish_FVG"})
+		bullishOB += count(p, []string{"Bullish_Internal_OB_Breakout", "Bullish_Swing_OB_Breakout", "Equal_Highs"})
+		bearishOB += count(p, []string{"Bearish_Internal_OB_Breakout", "Bearish_Swing_OB_Breakout", "Equal_Lows"})
+	}
+	bosCount := bullishBOS + bearishBOS
+	chochCount := bullishCHoCH + bearishCHoCH
+	fvgCount := bullishFVG + bearishFVG
+	obCount := bullishOB + bearishOB
 
 	bias := "neutral"
-	if bosCount > chochCount { bias = "bullish" }
-	if chochCount > bosCount { bias = "bearish" }
+	bullTotal := bullishBOS + bullishCHoCH + bullishFVG + bullishOB
+	bearTotal := bearishBOS + bearishCHoCH + bearishFVG + bearishOB
+	if bullTotal > bearTotal { bias = "bullish" }
+	if bearTotal > bullTotal { bias = "bearish" }
 
 	agenticScore := 0.2
-	if len(periods) > 0 { agenticScore += 0.2 }
+	if len(bars) > 0 { agenticScore += 0.2 }
 	if bosCount > 0 || chochCount > 0 { agenticScore += 0.15 }
 	if fvgCount > 0 { agenticScore += 0.1 }
 	if obCount > 0 { agenticScore += 0.1 }
@@ -53,10 +82,15 @@ func parseSMC(periods []map[string]any, graphic map[string]map[string]any, tf st
 	return skill.SkillResult{
 		Status: "ok", Workflow: "smart-money-concepts",
 		Market: skill.MarketData{LastPrice: price, Bias: bias},
-		Structure: map[string]any{"bosCount": bosCount, "chochCount": chochCount, "fvgCount": fvgCount, "obCount": obCount},
+		Structure: map[string]any{
+			"bosCount": bosCount, "bullishBOS": bullishBOS, "bearishBOS": bearishBOS,
+			"chochCount": chochCount, "bullishCHoCH": bullishCHoCH, "bearishCHoCH": bearishCHoCH,
+			"fvgCount": fvgCount, "bullishFVG": bullishFVG, "bearishFVG": bearishFVG,
+			"obCount": obCount, "bullishOB": bullishOB, "bearishOB": bearishOB,
+		},
 		Opportunities: []skill.Opportunity{},
-		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("BOS: %.0f | CHoCH: %.0f | FVG: %.0f | OB: %.0f", bosCount, chochCount, fvgCount, obCount)},
-		Validation: skill.Validation{Passed: true}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
+		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("BOS: %.0f | CHoCH: %.0f | FVG: %.0f | OB: %.0f | Bias: %s", bosCount, chochCount, fvgCount, obCount, bias)},
+		Validation:    skill.Validation{Passed: true}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
 	}
 }
 

@@ -41,26 +41,47 @@ func parseTrend(periods []map[string]any, graphic map[string]map[string]any, tf 
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close"}))
-	trendDir := toFloat(getField(last, []string{"TrendDirection", "trendDirection", "Trend"}))
-	tqi := toFloat(getField(last, []string{"TQI", "tqi", "QualityIndex"}))
-	regime := getField(last, []string{"Regime", "regime"})
+	price := toFloat(getField(last, []string{"Close", "close", "plotcandle_0_ohlc_close"}))
+	// The script emits the SuperTrend line as plot_0. The colorer/background
+	// carry the trend state, but we can infer bias directly from price vs the line.
+	superTrend := toFloat(getField(last, []string{"plot_0", "SuperTrend"}))
 
 	bias := "neutral"
-	if trendDir > 0 { bias = "bullish" } else if trendDir < 0 { bias = "bearish" }
+	if price > superTrend { bias = "bullish" }
+	if price < superTrend { bias = "bearish" }
+
+	bars := historicalBars(periods)
+	buyCount, sellCount := 0, 0
+	for _, p := range bars {
+		if toFloat(getField(p, []string{"Buy_Signal", "Validated_Long_Signal"})) > 0 {
+			buyCount++
+		}
+		if toFloat(getField(p, []string{"Sell_Signal", "Validated_Short_Signal"})) > 0 {
+			sellCount++
+		}
+	}
 
 	agenticScore := 0.2
-	if len(periods) > 0 { agenticScore += 0.2 }
-	if math.Abs(trendDir) > 0 { agenticScore += 0.2 }
-	if math.Abs(tqi) > 0.5 { agenticScore += 0.15 }
+	if len(bars) > 0 { agenticScore += 0.2 }
+	if superTrend > 0 { agenticScore += 0.2 }
+	if buyCount > 0 || sellCount > 0 { agenticScore += 0.15 }
 	agenticScore = math.Min(agenticScore, 0.99)
+
+	var opps []skill.Opportunity
+	latestBuy := toFloat(getField(last, []string{"Buy_Signal", "Validated_Long_Signal"})) > 0
+	latestSell := toFloat(getField(last, []string{"Sell_Signal", "Validated_Short_Signal"})) > 0
+	if latestBuy && bias == "bullish" {
+		opps = append(opps, skill.Opportunity{Rank: 1, Setup: "adaptive_supertrend", Direction: "long", Confidence: "HIGH", ConfluenceScore: 0.8, Rationale: fmt.Sprintf("Buy signal; price %.2f above SuperTrend %.2f", price, superTrend)})
+	} else if latestSell && bias == "bearish" {
+		opps = append(opps, skill.Opportunity{Rank: 1, Setup: "adaptive_supertrend", Direction: "short", Confidence: "HIGH", ConfluenceScore: 0.8, Rationale: fmt.Sprintf("Sell signal; price %.2f below SuperTrend %.2f", price, superTrend)})
+	}
 
 	return skill.SkillResult{
 		Status: "ok", Workflow: "adaptive-supertrend-quality",
 		Market: skill.MarketData{LastPrice: price, Bias: bias},
-		Structure: map[string]any{"trendDirection": trendDir, "tqi": tqi, "regime": regime},
-		Opportunities: []skill.Opportunity{},
-		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("Trend: %s | TQI: %.2f | Regime: %v", bias, tqi, regime)},
+		Structure: map[string]any{"superTrend": superTrend, "buySignals": buyCount, "sellSignals": sellCount},
+		Opportunities: opps,
+		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("SuperTrend: %.2f | Price: %.2f | Bias: %s | Buy/Sell: %d/%d", superTrend, price, bias, buyCount, sellCount)},
 		Validation: skill.Validation{Passed: true}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
 	}
 }

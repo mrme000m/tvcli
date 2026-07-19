@@ -31,9 +31,11 @@ func parseUST(periods []map[string]any, graphic map[string]map[string]any, tf st
 			Narrative: skill.Narrative{MarketStructure: "No data", Warnings: []string{"No period data"}}}
 	}
 	last := latestClosed(periods)
-	st1 := toFloat(getField(last, []string{"ST1", "plot_0"}))
-	st2 := toFloat(getField(last, []string{"ST2", "plot_2"}))
-	st2Color := toFloat(getField(last, []string{"ST2_colorer", "plot_3"}))
+	// The script exposes line plots as plot_0/plot_2 and colorers as plot_1/plot_3.
+	// Read the line plots directly; the "ST1"/"ST2" style keys map to the colorers.
+	st1 := toFloat(getField(last, []string{"plot_0"}))
+	st2 := toFloat(getField(last, []string{"plot_2"}))
+	st2Color := toFloat(getField(last, []string{"plot_3", "ST2_colorer"}))
 	bgColor := toFloat(getField(last, []string{"Background_Color", "plot_4"}))
 
 	// ST2_colorer: 2 = bearish (price below ST), 4 = bullish (price above ST)

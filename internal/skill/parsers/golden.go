@@ -28,8 +28,12 @@ func parseGolden(periods []map[string]any, graphic map[string]map[string]any, tf
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	price := toFloat(getField(last, []string{"Close", "close"}))
+	price := toFloat(getField(last, []string{"Close", "close", "plot_3"}))
 	verdict := getField(last, []string{"Verdict", "verdict"})
+	if verdict == nil {
+		return skill.SkillResult{Status: "no_data", Workflow: "golden-rule-strategy",
+			Narrative: skill.Narrative{MarketStructure: "No Verdict field; Pine script does not match Golden Rule expectation", Warnings: []string{"Verdict field missing — indicator is not the expected Golden Rule script"}}}
+	}
 
 	bias := "neutral"
 	if verdict == "PASS" || verdict == "BULLISH" { bias = "bullish" }

@@ -91,15 +91,15 @@ Each registered skill wraps a Pine Script indicator with typed inputs, presets, 
 | `ema-atr` | EMA + ATR Pro Engine | `PUB;7d5f8755ab67400899ef73a9898471e4` |
 | `sr-breaks` | Support/Resistance Breaks | `PUB;NXS6SoOdr880Hrvh9vA36UcAjC14bOkc` |
 | `shemar` | SHEMAR HMA ST + SMC Confidence | `PUB;70f6e4e05f9c439c9d1f8fe26019357e` |
-| `quantum` | Quantum Ribbon Lite | `PUB;91e003af510345f299e5846773538206` |
-| `vgaps` | Volume Gaps & Imbalances | `PUB;ff1a0136336340f38e908eeb12ea33aa` |
-| `anchored-vp` | Anchored Volume Profile | `PUB;92974e0a3cfb481eaf058cdab9f925a3` |
-| `mtf` | XAUUSD MTF Trend Dashboard | `PUB;d1ad30c0261f49f297357f8aa2a7854a` |
-| `sniper` | Precision Sniper | `PUB;1fc29950178c42a1a88f52a18161dd53` |
+| `quantum` | EMA Ribbon [Krypt] | `PUB;GOYNhZP4X9VEbYA54MRIYU5FPvyr5IJB` |
+| `vgaps` | Volume Gaps & Imbalances | `PUB;ff1a0136336340f38e908eeb12ea33aa` | heavy; needs paid tier |
+| `anchored-vp` | Anchored Volume Profile (graphics-only) | `PUB;92974e0a3cfb481eaf058cdab9f925a3` | no period data; errors on BTCUSD |
+| `mtf` | XAUUSD MTF Trend Dashboard | `PUB;d1ad30c0261f49f297357f8aa2a7854a` | XAUUSD-specific |
+| `sniper` | BS Buy & Sell Signals with EMA | `PUB;0287a71c10904118b75d4360a32c0579` |
 | `smc` | Smart Money Concepts | `PUB;6daafb2cabe6419d98ae25229d2327f8` |
-| `golden` | Golden Rule Strategy | `PUB;6daafb2cabe6419d98ae25229d2327f8` |
-| `trend` | Self-Aware Trend System | `PUB;0f80bcf05d544d4c98fde06faab1c976` |
-| `ict` | ICT Auto-Validated SMC | `PUB;789a5c79bfe9443585da09e85ece73de` |
+| `golden` | Golden Rule Strategy | `PUB;6daafb2cabe6419d98ae25229d2327f8` | wrong PineID; reports no_data |
+| `trend` | Self-Aware Trend System | `PUB;0f80bcf05d544d4c98fde06faab1c976` | heavy; needs paid tier |
+| `ict` | ICT Auto-Validated SMC | `PUB;789a5c79bfe9443585da09e85ece73de` | heavy; needs paid tier |
 | `liq-sweep` | Institutional Liquidity Sweep | `PUB;b9372355c2e6483f952ca49a21d2ebbb` |
 
 ### Common CLI Flags

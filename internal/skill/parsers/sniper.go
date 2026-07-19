@@ -10,32 +10,19 @@ import (
 
 var SniperSkill = &skill.Skill{
 	Name:     "sniper",
-	Synopsis: "Precision Sniper — EMA confluence with grade signals",
-	PineID:   "PUB;1fc29950178c42a1a88f52a18161dd53",
+	Synopsis: "BS Buy & Sell Signals with EMA — multi-EMA confluence with buy/sell signals",
+	PineID:   "PUB;0287a71c10904118b75d4360a32c0579",
 	Inputs: []skill.InputDef{
-		{Name: "sourceInput", TVInputID: "in_0", Type: "source", Default: "close"},
-		{Name: "htfInput", TVInputID: "in_1", Type: "timeframe", Default: ""},
-		{Name: "presetInput", TVInputID: "in_2", Type: "string", Default: "Auto"},
-		{Name: "emaFastLenInput", TVInputID: "in_3", Type: "int", Default: 9},
-		{Name: "emaSlowLenInput", TVInputID: "in_4", Type: "int", Default: 21},
-		{Name: "emaTrendLenInput", TVInputID: "in_5", Type: "int", Default: 55},
-		{Name: "minScoreInput", TVInputID: "in_6", Type: "int", Default: 5},
-		{Name: "rsiLenInput", TVInputID: "in_7", Type: "int", Default: 13},
-		{Name: "gradeFilterInput", TVInputID: "in_8", Type: "string", Default: "All"},
-		{Name: "atrLenInput", TVInputID: "in_10", Type: "int", Default: 14},
-		{Name: "slMultInput", TVInputID: "in_11", Type: "float", Default: 1.5},
-		{Name: "tp1MultInput", TVInputID: "in_12", Type: "float", Default: 1},
-		{Name: "tp2MultInput", TVInputID: "in_13", Type: "float", Default: 2},
-		{Name: "tp3MultInput", TVInputID: "in_14", Type: "float", Default: 3},
+		{Name: "ema1Len", TVInputID: "in_0", Type: "int", Default: 2},
+		{Name: "ema2Len", TVInputID: "in_1", Type: "int", Default: 4},
+		{Name: "ema3Len", TVInputID: "in_2", Type: "int", Default: 6},
+		{Name: "ema4Len", TVInputID: "in_3", Type: "int", Default: 8},
+		{Name: "ema5Len", TVInputID: "in_4", Type: "int", Default: 10},
 	},
 	Presets: map[string]map[string]any{
-		"auto":        {"presetInput": "Auto"},
-		"conservative": {"presetInput": "Conservative"},
-		"default":     {"presetInput": "Default"},
-		"aggressive":  {"presetInput": "Aggressive"},
-		"scalping":    {"presetInput": "Scalping"},
-		"swing":       {"presetInput": "Swing"},
-		"crypto":      {"presetInput": "Crypto"},
+		"default":  {},
+		"scalping": {"ema1Len": 2, "ema2Len": 4, "ema3Len": 6, "ema4Len": 8, "ema5Len": 10},
+		"swing":    {"ema1Len": 10, "ema2Len": 20, "ema3Len": 50, "ema4Len": 100, "ema5Len": 200},
 	},
 	ParseOutput: parseSniper,
 	FormatText:  formatSniper,
@@ -43,68 +30,99 @@ var SniperSkill = &skill.Skill{
 
 func parseSniper(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) skill.SkillResult {
 	if len(periods) == 0 {
-		return skill.SkillResult{Status: "no_data", Workflow: "ema-confluence-sniper",
+		return skill.SkillResult{Status: "no_data", Workflow: "bs-buy-sell-ema",
 			Narrative: skill.Narrative{MarketStructure: "No data"}}
 	}
 	last := latestClosed(periods)
-	emaFast := toFloat(getField(last, []string{"EMA_Fast", "plot_0"}))
-	emaSlow := toFloat(getField(last, []string{"EMA_Slow", "plot_2"}))
-	emaTrend := toFloat(getField(last, []string{"EMA_Trend", "plot_5"}))
-	buySignal := toFloat(getField(last, []string{"Buy_Signal", "plot_8"})) == 1
-	sellSignal := toFloat(getField(last, []string{"Sell_Signal", "plot_9"})) == 1
+	ema1 := toFloat(getField(last, []string{"EMA_1", "plot_0"}))
+	ema2 := toFloat(getField(last, []string{"EMA_2", "plot_2"}))
+	ema3 := toFloat(getField(last, []string{"EMA_3", "plot_4"}))
+	ema4 := toFloat(getField(last, []string{"EMA_4", "plot_6"}))
+	ema5 := toFloat(getField(last, []string{"EMA_5", "plot_8"}))
+	buySignal := toFloat(getField(last, []string{"Buy_Signal", "plot_10"})) == 1
+	sellSignal := toFloat(getField(last, []string{"Sell_Signal", "plot_11"})) == 1
+	resistance := toFloat(getField(last, []string{"Resistance", "plot_20"}))
+	support := toFloat(getField(last, []string{"Support", "plot_21"}))
+	price := toFloat(getField(last, []string{"Close", "close"}))
+	if price == 0 {
+		price = ema1
+	}
 
-	// Compute bias from EMA alignment
+	// Bias from EMA alignment (shortest > longest = bullish)
 	bias := "neutral"
-	if emaFast > emaSlow && emaSlow > emaTrend { bias = "bullish" }
-	if emaFast < emaSlow && emaSlow < emaTrend { bias = "bearish" }
+	if ema1 > ema5 && ema5 > 0 {
+		bias = "bullish"
+	} else if ema1 < ema5 && ema5 > 0 {
+		bias = "bearish"
+	}
 
-	// Compute score from EMA separation
+	// Score from EMA separation
 	score := 0.0
-	if emaFast > 0 && emaSlow > 0 && emaTrend > 0 {
-		diff1 := math.Abs(emaFast-emaSlow) / emaSlow * 100
-		diff2 := math.Abs(emaSlow-emaTrend) / emaTrend * 100
-		score = (diff1 + diff2) * 10
-		if score > 5 { score = 5 }
+	if ema1 > 0 && ema5 > 0 {
+		diff := math.Abs(ema1-ema5) / ema5 * 100
+		score = math.Min(diff, 5.0)
 	}
 
 	agenticScore := 0.2
-	if len(periods) > 0 { agenticScore += 0.2 }
-	if score > 3 { agenticScore += 0.2 }
-	if bias != "neutral" { agenticScore += 0.15 }
-	if buySignal || sellSignal { agenticScore += 0.15 }
+	if len(periods) > 0 {
+		agenticScore += 0.2
+	}
+	if score > 3 {
+		agenticScore += 0.2
+	}
+	if bias != "neutral" {
+		agenticScore += 0.15
+	}
+	if buySignal || sellSignal {
+		agenticScore += 0.15
+	}
 	agenticScore = math.Min(agenticScore, 0.99)
 
 	var opps []skill.Opportunity
-	if (score >= 3 || buySignal || sellSignal) && bias != "neutral" {
+	if (buySignal || sellSignal || score >= 3) && bias != "neutral" {
 		dir := "long"
-		if bias == "bearish" || sellSignal { dir = "short" }
+		if bias == "bearish" || sellSignal {
+			dir = "short"
+		}
 		scoreNorm := score / 5.0
-		if scoreNorm > 1 { scoreNorm = 1 }
+		if scoreNorm > 1 {
+			scoreNorm = 1
+		}
 		opps = append(opps, skill.Opportunity{
 			Rank: 1, Setup: "ema_confluence", Direction: dir,
 			Confidence: confidenceLabel(scoreNorm), ConfluenceScore: round2(scoreNorm),
-			Rationale: fmt.Sprintf("Score=%.1f EMA=%s Fast=%.0f Slow=%.0f Trend=%.0f", score, bias, emaFast, emaSlow, emaTrend),
+			Rationale: fmt.Sprintf("Score=%.1f EMA=%s Fast=%.0f Slow=%.0f", score, bias, ema1, ema5),
 		})
 	}
 
 	return skill.SkillResult{
-		Status: "ok", Workflow: "ema-confluence-sniper",
-		Market: skill.MarketData{LastPrice: emaFast, Bias: bias},
-		Structure: map[string]any{"score": round2(score), "emaFast": round2(emaFast), "emaSlow": round2(emaSlow), "emaTrend": round2(emaTrend), "buySignal": buySignal, "sellSignal": sellSignal},
+		Status: "ok", Workflow: "bs-buy-sell-ema",
+		Market: skill.MarketData{LastPrice: price, Bias: bias},
+		Structure: map[string]any{
+			"score": round2(score), "ema1": round2(ema1), "ema2": round2(ema2),
+			"ema3": round2(ema3), "ema4": round2(ema4), "ema5": round2(ema5),
+			"buySignal": buySignal, "sellSignal": sellSignal,
+			"resistance": resistance, "support": support,
+		},
 		Opportunities: opps,
-		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("Score: %.1f | EMA: %s | Fast: %.0f Slow: %.0f Trend: %.0f", score, bias, emaFast, emaSlow, emaTrend), PrimaryOpp: primaryOppFromOpps(opps)},
-		Validation: skill.Validation{Passed: true}, Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
+		Narrative: skill.Narrative{
+			MarketStructure: fmt.Sprintf("Score: %.1f | EMA: %s | Fast: %.0f Slow: %.0f", score, bias, ema1, ema5),
+			PrimaryOpp:      primaryOppFromOpps(opps),
+		},
+		Validation:  skill.Validation{Passed: true},
+		Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(agenticScore)},
 	}
 }
 
 func formatSniper(result skill.SkillResult) string {
 	var sb strings.Builder
 	sb.WriteString("\n======================================================================\n")
-	sb.WriteString("  PRECISION SNIPER\n")
+	sb.WriteString("  BS BUY & SELL SIGNALS WITH EMA\n")
 	sb.WriteString("======================================================================\n\n")
 	sb.WriteString(fmt.Sprintf("  Score: %v | Bias: %s\n", result.Structure["score"], result.Market.Bias))
-	sb.WriteString(fmt.Sprintf("  EMA Fast: %v | Slow: %v | Trend: %v\n", result.Structure["emaFast"], result.Structure["emaSlow"], result.Structure["emaTrend"]))
+	sb.WriteString(fmt.Sprintf("  EMA 1: %v | EMA 5: %v\n", result.Structure["ema1"], result.Structure["ema5"]))
 	sb.WriteString(fmt.Sprintf("  Buy: %v | Sell: %v\n", result.Structure["buySignal"], result.Structure["sellSignal"]))
+	sb.WriteString(fmt.Sprintf("  Support: %v | Resistance: %v\n", result.Structure["support"], result.Structure["resistance"]))
 	for _, o := range result.Opportunities {
 		sb.WriteString(fmt.Sprintf("\n  -> %s %s [%s] %.2f: %s\n", o.Direction, o.Setup, o.Confidence, o.ConfluenceScore, o.Rationale))
 	}

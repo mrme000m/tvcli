@@ -140,14 +140,18 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	}
 
 	result := c.skill.ParseOutput(res.Periods, res.Graphic, tf, symbol, flags.All())
-	result.Status = "ok"
+	if result.Status == "" {
+		result.Status = "ok"
+	}
 	if result.Workflow == "" {
 		result.Workflow = c.skill.Name
 	}
 
 	// Some Pine scripts do not emit a Close plot, so the parser cannot report
-	// a price. Fetch the latest underlying close and back-fill it when missing.
-	if lastPriceMissing(result.Market.LastPrice) {
+	// a price. Fetch the latest underlying close and back-fill it when missing,
+	// but only when the parser actually produced data so we don't mask a no_data
+	// result with a fake price.
+	if result.Status == "ok" && lastPriceMissing(result.Market.LastPrice) {
 		if bars, err := service.FetchOHLCVBars(cfg, symbol, tf, 2); err == nil && len(bars) > 0 {
 			result.Market.LastPrice = roundPrice(bars[len(bars)-1].Close)
 		}
