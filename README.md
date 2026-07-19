@@ -1,167 +1,129 @@
 # tvcli — TradingView Pine Script CLI (Go)
 
-A Go implementation of the TradingView Pine Script CLI. It manages, compiles, and runs Pine Scripts via TradingView's HTTP and WebSocket APIs.
+A Go CLI tool that manages, compiles, and runs TradingView Pine Scripts via TradingView's HTTP and WebSocket APIs. Includes a skill framework for wrapping indicators as typed, agent-ready commands.
 
-This Go codebase is the authoritative implementation. The JavaScript files in `/Volumes/ExMac/code/tradingview/` are historical reference material only; they are no longer the source of truth for behavior or output.
-
-## Source Files
-
-The implementation is organized into a few focused Go packages:
-
-| Go Package | Responsibility |
-|-----------|----------------|
-| `cmd/tvcli/` + `pkg/pinefacade/` | CLI entry point; Pine Facade HTTP client for script CRUD, search, and compile. |
-| `pkg/tradingview/` | WebSocket client, protocol framing (`~m~<len>~m~<json>`), chart/study lifecycle, indicator types. |
-| `pkg/runner/` | Generic indicator runner and persistent/multi-run orchestration. |
-| `internal/skill/` + `internal/skill/parsers/` | Declarative skill registry and per-Pine-Script output parsers. |
-
-Historical JS reference files (no longer canonical):
-
-- `/Volumes/ExMac/code/tradingview/tv-cli.js`
-- `/Volumes/ExMac/code/tradingview/tv.js`
-- `/Volumes/ExMac/code/tradingview/js-experiment06/generic-indicator.cjs`
-
-## Project Index
-
-For historical context on earlier JS-based TVCLI projects in `/Volumes/ExMac/code/tradingview/`, see `/Volumes/ExMac/code/tradingview/Index.md`.
-
-## Structure
+## Architecture
 
 ```
 go/
-├── cmd/tvcli/main.go             — CLI entry point, all commands
-├── internal/config/config.go     — Env/`.env` config, cookie auth
+├── cmd/tvcli/
+│   └── main.go                  CLI entry point
+├── internal/
+│   ├── cli/                     Generic CLI framework (root, routing)
+│   ├── cmd/                     Command implementations (run, list, pull, skills, ...)
+│   ├── config/                  Env/`.env` config, cookie auth
+│   ├── metadb/                  Local metadata database
+│   ├── service/                 Script execution service (run, fetch)
+│   └── skill/
+│       ├── skill.go             Skill, InputDef, SkillResult, AgentResult types
+│       ├── registry.go          Global Register/Get/All skill registry
+│       └── parsers/             One file per skill (ParseOutput + FormatText)
 ├── pkg/
-│   ├── pinefacade/
-│   │   ├── client.go             — HTTP client (CRUD, search, compile)
-│   │   ├── parser.go             — PineScript input extraction
-│   │   └── types.go              — Response types
-│   ├── tradingview/
-│   │   ├── client.go             — WebSocket client, auth token fetch, IsConnected()
-│   │   ├── chart.go              — Chart session, symbol loading
-│   │   ├── study.go              — Study/indicator execution
-│   │   ├── indicator.go          — PineIndicator + BuiltinIndicator
-│   │   └── protocol.go           — ~m~ framing protocol
-│   └── runner/
-│       ├── runner.go             — Generic indicator output parser
-│       ├── persistent.go         — Persistent WS connection runner
-│       └── multirun.go           — Input sweep / multi-run analysis
-├── .env                          — Session cookies (not committed)
+│   ├── pinefacade/              HTTP client for Pine Facade (script CRUD, search, compile)
+│   ├── pipeline/                Generic schema-guided signal extractor (--signals)
+│   ├── runner/                  Persistent/multi-run WS orchestration
+│   ├── schema/                  PineScript metaInfo schema parsing
+│   └── tradingview/             WebSocket client, protocol framing, chart/study lifecycle
+├── .env                         Session cookies (not committed)
 ├── go.mod
 └── go.sum
 ```
 
-## Use as a Library
+## Key Packages
 
-Import the packages directly in your Go project:
+| Package | Import Path | Purpose |
+|---------|-------------|---------|
+| `tradingview` | `github.com/ch99q/tvcli/pkg/tradingview` | WS client, protocol framing (`~m~<len>~m~<json>`), chart/study lifecycle |
+| `pinefacade` | `github.com/ch99q/tvcli/pkg/pinefacade` | HTTP client for script CRUD, search, compile |
+| `runner` | `github.com/ch99q/tvcli/pkg/runner` | Persistent WS runner, input sweep / multi-run analysis |
+| `pipeline` | `github.com/ch99q/tvcli/pkg/pipeline` | Generic schema-guided signal extractor (`--signals`) |
+| `schema` | `github.com/ch99q/tvcli/pkg/schema` | PineScript `metaInfo` schema parsing (plots, inputs, styles) |
+| `skill` | `github.com/ch99q/tvcli/internal/skill` | Skill framework: `Skill`, `InputDef`, `SkillResult`, registry |
+| `parsers` | `github.com/ch99q/tvcli/internal/skill/parsers` | Per-skill output parsers (one `.go` file each) |
+| `cmd` | `github.com/ch99q/tvcli/internal/cmd` | CLI command implementations |
+| `service` | `github.com/ch99q/tvcli/internal/service` | Script execution service |
 
-```go
-import (
-    "github.com/ch99q/tvcli/pkg/tradingview"
-    "github.com/ch99q/tvcli/pkg/runner"
-    "github.com/ch99q/tvcli/pkg/pinefacade"
-)
+## Quick Start
+
+```bash
+# Build
+go build -o tvcli ./cmd/tvcli
+
+# Run any public Pine script
+./tvcli run "PUB;ff1a0136336340f38e908eeb12ea33aa" --symbol BTCUSDT --tf 1h --bars 50 --json
+
+# Run with generic signal extraction
+./tvcli run "PUB;ff1a0136336340f38e908eeb12ea33aa" --symbol BTCUSDT --tf 1h --bars 50 --signals --agent --json
+
+# Run a registered skill command
+./tvcli vgaps --symbol BTCUSDT --tf 1h --bars 50 --json
 ```
 
-### Quick Example — Run an Indicator
+## Skill Commands
 
-```go
-package main
+Each registered skill wraps a Pine Script indicator with typed inputs, presets, and structured output parsing.
 
-import (
-    "fmt"
-    "log"
-    "time"
+```bash
+# List all available skills
+./tvcli skills --json
 
-    "github.com/ch99q/tvcli/pkg/tradingview"
-    "github.com/ch99q/tvcli/pkg/runner"
-)
+# Run a skill with agent-ready output
+./tvcli smc --symbol BTCUSDT --tf 1h --bars 500 --agent --json
 
-func main() {
-    // 1. Create WS client
-    client := tradingview.NewClient(
-        tradingview.WithToken("your-session-cookie"),
-        tradingview.WithSignature("your-signature-cookie"),
-    )
-    if err := client.Connect(); err != nil {
-        log.Fatal(err)
-    }
-    defer client.Close()
+# Use a preset
+./tvcli sniper --symbol BTCUSDT --tf 5m --preset scalping --agent --json
 
-    // 2. Load indicator metadata (via Pine Facade HTTP API)
-    // indResult, _ := pineClient.Get(pineID, "last", cookieHeader)
+# Override individual inputs
+./tvcli dvi --symbol BTCUSDT --tf 1h --input length_volatility=20 --agent --json
 
-    // 3. Create chart + study
-    ch := tradingview.NewChartSession(client)
-    ch.SetMarket("OANDA:XAUUSD", map[string]any{"timeframe": "5m", "range": 500})
-    ch.WaitForSymbol(15 * time.Second)
-
-    indicator := tradingview.NewPineIndicator(map[string]any{
-        "pineId":  pineID,
-        "script":  sourceCode,
-        "metaInfo": metaInfo,
-    })
-    study := ch.Study(indicator)
-
-    // 4. Wait for data
-    // ... (use study.OnUpdate / study.OnError callbacks)
-
-    // 5. Parse results
-    result := runner.ParseOutput(study.Periods(), study.Graphic(), study.StrategyReport(), "5m", pineID, indicator.Schema)
-    fmt.Println(runner.FormatResults(result, false))
-}
+# Bypass custom parser, use generic extractor
+./tvcli dvi --symbol BTCUSDT --tf 1h --bars 50 --signals --agent --json
 ```
 
-### Quick Example — Persistent Connection (Loop)
+### Available Skills
 
-```go
-pr := runner.NewPersistentRunner(
-    []tradingview.ClientOption{
-        tradingview.WithToken(session),
-        tradingview.WithSignature(sig),
-    },
-    false, // debug
-)
-defer pr.Close()
+| Command | Skill | Pine ID |
+|---------|-------|---------|
+| `bsv` | Buy/Sell Volume | `PUB;28a4da159ce246dab2cb6524c25f950f` |
+| `dvi` | Delta Volume Intensity | `PUB;bdd3bc54cf9f4dc6b42e6b2879b4eed2` |
+| `ust` | Ultra Sensitive SuperTrend | `PUB;fc33f2d98699414a8585923116dbd959` |
+| `swingarm` | SwingArm ATR Trend | `PUB;GdkmXaTINI8knwuCrctQD1pB5dFaRnyr` |
+| `ema-atr` | EMA + ATR Pro Engine | `PUB;7d5f8755ab67400899ef73a9898471e4` |
+| `sr-breaks` | Support/Resistance Breaks | `PUB;NXS6SoOdr880Hrvh9vA36UcAjC14bOkc` |
+| `shemar` | SHEMAR HMA ST + SMC Confidence | `PUB;70f6e4e05f9c439c9d1f8fe26019357e` |
+| `quantum` | Quantum Ribbon Lite | `PUB;91e003af510345f299e5846773538206` |
+| `vgaps` | Volume Gaps & Imbalances | `PUB;ff1a0136336340f38e908eeb12ea33aa` |
+| `anchored-vp` | Anchored Volume Profile | `PUB;92974e0a3cfb481eaf058cdab9f925a3` |
+| `mtf` | XAUUSD MTF Trend Dashboard | `PUB;d1ad30c0261f49f297357f8aa2a7854a` |
+| `sniper` | Precision Sniper | `PUB;1fc29950178c42a1a88f52a18161dd53` |
+| `smc` | Smart Money Concepts | `PUB;6daafb2cabe6419d98ae25229d2327f8` |
+| `golden` | Golden Rule Strategy | `PUB;6daafb2cabe6419d98ae25229d2327f8` |
+| `trend` | Self-Aware Trend System | `PUB;0f80bcf05d544d4c98fde06faab1c976` |
+| `ict` | ICT Auto-Validated SMC | `PUB;789a5c79bfe9443585da09e85ece73de` |
+| `liq-sweep` | Institutional Liquidity Sweep | `PUB;b9372355c2e6483f952ca49a21d2ebbb` |
 
-// Run repeatedly — WS stays open, only chart sessions cycle
-for i := 0; i < 10; i++ {
-    result, err := pr.Run(runner.RunOnceOptions{
-        PineID:     pineID,
-        Symbol:     "OANDA:XAUUSD",
-        Timeframe:  "5m",
-        Bars:       500,
-        Indicator:  indicator,
-        CalcTimeout: 60 * time.Second,
-    })
-    if err != nil {
-        log.Printf("run %d error: %v", i, err)
-        continue
-    }
-    fmt.Printf("Run %d: %d periods\n", i, len(result.NumericalData.Fields))
-    time.Sleep(30 * time.Second)
-}
-```
+### Common CLI Flags
 
-### Available Packages
-
-| Package | Import Path | Key Types |
-|---------|-------------|-----------|
-| `tradingview` | `github.com/ch99q/tvcli/pkg/tradingview` | `Client`, `ChartSession`, `ChartStudy`, `PineIndicator` |
-| `runner` | `github.com/ch99q/tvcli/pkg/runner` | `PersistentRunner`, `RunResult`, `ParseOutput()` |
-| `pinefacade` | `github.com/ch99q/tvcli/pkg/pinefacade` | `Client`, `Compile()`, `Get()`, `SearchPublicScripts()` |
-| `extract` | `github.com/ch99q/tvcli/pkg/extract` | `Extract()`, `Signals` |
-| `schema` | `github.com/ch99q/tvcli/pkg/schema` | `PineSchema`, `ScriptSchema` |
+| Flag | Meaning |
+|------|---------|
+| `--symbol <SYM>` | Trading symbol (default: `OANDA:XAUUSD`) |
+| `--tf <timeframe>` | `1m`, `5m`, `15m`, `1h`, `4h`, `1D` |
+| `--bars <n>` | Number of historical bars |
+| `--input key=value` | Override a Pine input (repeatable) |
+| `--preset <name>` | Use a bundled preset (`scalping`, `default`, `swing`, etc.) |
+| `--json` | JSON output |
+| `--agent` | Agent-ready JSON envelope |
+| `--signals` | Use generic schema-guided extractor (bypasses custom parser) |
+| `--raw` / `--raw-out <file>` | Dump raw periods + graphic data |
+| `--schema` | Show Pine metaInfo schema without running |
 
 ## Authentication
 
-Pine Script CRUD operations require browser session cookies from TradingView.
-
-### Setup
+Pine Script operations require browser session cookies from TradingView.
 
 1. Log in to [tradingview.com](https://www.tradingview.com)
 2. Open DevTools → Application → Cookies
-3. Copy the `sessionid` and `sessionid_sign` cookie values
+3. Copy `sessionid` and `sessionid_sign` cookie values
 4. Create/update `.env` in this directory:
 
 ```
@@ -170,51 +132,29 @@ SIGNATURE=<sessionid_sign cookie value>
 TV_USER=<your TradingView username>
 ```
 
-### Auth requirements by command
-
 | Command | Auth Required |
 |---------|--------------|
-| `list` (local) | None |
-| `list --remote` | SESSION + SIGNATURE |
-| `pull` | SESSION + SIGNATURE |
-| `search` | SESSION + SIGNATURE |
-| `compile` | SESSION + SIGNATURE + TV_USER |
-| `create` | SESSION + SIGNATURE + TV_USER |
-| `push` | SESSION + SIGNATURE + TV_USER |
-| `delete` | SESSION + SIGNATURE + TV_USER |
 | `run` | SESSION + SIGNATURE (anonymous fallback) |
+| `list` (local) | None |
+| `list --remote`, `pull`, `search` | SESSION + SIGNATURE |
+| `create`, `push`, `delete` | SESSION + SIGNATURE + TV_USER |
 
-## Build & Run
+## Subscription Tiers
 
-```bash
-cd /Volumes/ExMac/code/tradingview/go
+| Tier | Charts | Indicators | Connections | Bars | Calc Timeout |
+|------|--------|------------|-------------|------|--------------|
+| `free` | 1 | 2 | 2 | 180d | 20s |
+| `essential` | 2 | 5 | 10 | 365d | 40s |
+| `plus` | 4 | 10 | 20 | unlimited | 40s |
+| `premium` | 8 | 25 | 50 | unlimited | 40s |
+| `ultimate` | 16 | 50 | 200 | unlimited | 100s |
 
-# Build
-go build -o tvcli ./cmd/tvcli
-
-# Run
-./tvcli list --remote
-./tvcli pull PUB;ff1a0136336340f38e908eeb12ea33aa
-./tvcli run PUB;ff1a0136336340f38e908eeb12ea33aa --symbol BTCUSDT --tf 15m --json
-```
-
-## Dependencies
-
-| Package | Purpose |
-|---------|---------|
-| `github.com/gorilla/websocket` | WebSocket client for TradingView protocol |
-| `github.com/joho/godotenv` | Auto-load `.env` files |
-| `gopkg.in/yaml.v3` | YAML input file generation |
+Set `TV_TIER=free` (default) in `.env` to match your plan.
 
 ## Cross-Compile
 
 ```bash
-# Linux amd64 (VPS)
 GOOS=linux GOARCH=amd64 go build -o tvcli-linux ./cmd/tvcli
-
-# Linux arm64 (Raspberry Pi)
 GOOS=linux GOARCH=arm64 go build -o tvcli-arm64 ./cmd/tvcli
-
-# Windows
 GOOS=windows GOARCH=amd64 go build -o tvcli.exe ./cmd/tvcli
 ```

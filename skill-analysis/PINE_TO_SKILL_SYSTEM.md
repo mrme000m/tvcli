@@ -455,6 +455,139 @@ Only strategy scripts (`isStrategy: true`) produce strategy reports. Check:
 
 ---
 
+## When to write a custom parser (and how)
+
+The generic `--signals` extractor is the right default, but some scripts need a custom parser:
+
+- The script only emits **graphic primitives** (boxes, labels, polylines) and returns **zero periods**.
+- The signal you care about is embedded in **graphics labels** rather than numeric plots.
+- You want **typed presets** (`scalping` / `swing`) and CLI-friendly inputs.
+- You need a **stable `workflow` name** and a custom `Structure` shape for downstream agents.
+
+### Step-by-step custom parser workflow
+
+1. **Find the public Pine ID**
+   ```bash
+   ./tvcli search "institutional liquidity sweep XAUUSD" --limit 5 --json
+   ```
+
+2. **Inspect the schema**
+   ```bash
+   ./tvcli run PUB;b9372355c2e6483f952ca49a21d2ebbb --schema --json
+   ```
+   Check whether plots are numeric, shape-only, or missing entirely.
+
+3. **Capture a raw response fixture**
+   ```bash
+   ./tvcli run PUB;b9372355c2e6483f952ca49a21d2ebbb \
+     --symbol BINANCE:BTCUSDT --tf 1h --bars 50 \
+     --raw-out internal/skill/parsers/testdata/my_skill_fixture.json
+   ```
+   Use BTC/USDT (or any 24/7 market) on weekends when XAUUSD is thin/closed.
+
+4. **Check for a `Close` / price field**
+   - If `periods[0]` has `Close`/`close`, read it directly.
+   - If the script is overlay and lacks a price plot, derive the price from the most recent `dwglabels` entry (`y` field is price when `yl == "pr"`).
+
+5. **Create the skill file**
+   - Path: `internal/skill/parsers/<name>.go`
+   - Declare `var XxxSkill = &skill.Skill{...}`
+   - Provide `Inputs`, `Presets`, `ParseOutput`, `FormatText`
+   - Call `skill.Register` in `init()`
+   - `internal/cmd/shared.go` already blank-imports `internal/skill/parsers`, so no extra wiring is needed.
+
+6. **Register skill metadata in `internal/cmd/help.go`**
+   Add the skill name under **Indicator Skills** in the static help text.
+
+7. **Add tests**
+   - Path: `internal/skill/parsers/<name>_test.go`
+   - Load the captured fixture and assert on `Status`, `Market.Bias`, `Structure` keys, and `Conformance.AgenticScore`.
+
+8. **Build and verify**
+   ```bash
+   go build -o tvcli ./cmd/tvcli
+   go test ./internal/skill/parsers -v
+   ./tvcli <skill> --symbol BINANCE:BTCUSDT --tf 5m --preset scalping --agent --json
+   ```
+
+### Common pitfalls discovered in practice
+
+| Pitfall | Symptom | Fix |
+|---|---|---|
+| Graphics-only script | `periodCount: 0`, all data in `dwgboxes`/`dwglabels` | Either use the generic `--signals` path (events from labels) or pick an alternative script with numeric plots. |
+| Missing `Close` field | `market.lastPrice: 0` | Read the latest label price from `graphic["dwglabels"]` as a fallback. |
+| Heavy dashboard script | Timeout even with `TV_TIER=ultimate` | Drop the script; use a simpler alternative already in the registry (`smc`, `ict`, `vp`, `vgaps`). |
+| Preset keys must match JS variable names | Preset values are silently ignored | Use the `Name` field of `InputDef`, not the `TVInputID`. |
+| Unnamed `in_N` inputs | `--help` shows blank or cryptic flags | Only expose the few tunable inputs that matter; rely on defaults for the rest. |
+
+### Minimal custom parser template
+
+```go
+package parsers
+
+import (
+    "fmt"
+    "math"
+    "strings"
+
+    "github.com/ch99q/tvcli/internal/skill"
+)
+
+var MySkill = &skill.Skill{
+    Name:     "my-skill",
+    Synopsis: "Describe what it does",
+    PineID:   "PUB;...",
+    Inputs: []skill.InputDef{
+        {Name: "length", TVInputID: "in_0", Type: "int", Default: 20},
+    },
+    Presets: map[string]map[string]any{
+        "default":  {"length": 20},
+        "scalping": {"length": 10},
+        "swing":    {"length": 50},
+    },
+    ParseOutput: parseMySkill,
+    FormatText:  formatMySkill,
+}
+
+func parseMySkill(periods []map[string]any, graphic map[string]map[string]any, tf, symbol string, args map[string]string) skill.SkillResult {
+    if len(periods) == 0 {
+        return skill.SkillResult{Status: "no_data", Workflow: "my-skill",
+            Narrative: skill.Narrative{MarketStructure: "No data"}}
+    }
+    last := latestClosed(periods)
+    price := toFloat(getField(last, []string{"Close", "close"}))
+    if price == 0 {
+        price = latestGraphicPrice(graphic)
+    }
+    // ... your event/metric parsing ...
+    return skill.SkillResult{
+        Status: "ok", Workflow: "my-skill",
+        Market: skill.MarketData{LastPrice: price, Bias: bias},
+        Structure: map[string]any{...},
+        Opportunities: opps,
+        Narrative: skill.Narrative{...},
+        Validation: skill.Validation{Passed: true},
+        Conformance: skill.Conformance{HasValidData: true, AgenticScore: round2(score)},
+    }
+}
+
+func init() { skill.Register(MySkill) }
+```
+
+### Example: `liq-sweep` findings
+
+Implemented in `internal/skill/parsers/liq_sweep.go` for:
+
+```text
+PUB;b9372355c2e6483f952ca49a21d2ebbb
+Institutional Liquidity Sweep & Volume Breakout [SMC]
+```
+
+- Schema exposes only `Bullish_Sweep_Shape`/`Bearish_Sweep_Shape` event flags.
+- The script has no price plot, so price is read from the latest `dwglabels` price.
+- Counting recent sweep events gives a directional bias and a high-confidence opportunity when the latest closed bar fires a sweep.
+- Presets tune swing lookback and volume multiplier for scalping vs swing styles.
+
 ## Conclusion
 
 The system you want **already exists**. Use:

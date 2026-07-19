@@ -1,6 +1,0 @@
-
-Ultra Sensitive SuperTrend — Standalone Runner
-Usage: node ultra-sensitive-supertrend.cjs <SYMBOL> [options]
-Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help
-Inputs: atrPeriod1, multiplier1, atrPeriod2, multiplier2, useHeikenAshi, showLabels, showBG
-

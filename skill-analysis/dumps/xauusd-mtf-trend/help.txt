@@ -1,9 +1,0 @@
-◇ injected env (13) from .env // tip: ⌘ override existing { override: true }
-
-XAUUSD MTF Trend Dashboard — Standalone Runner
-Usage: node xauusd-mtf-trend.cjs <SYMBOL> [options]
-Options: --tf, --bars, --input key=value, --json, --agent, --out, --verbose, --dry-run, --help
-Inputs: show_M15, show_M30, show_H1, show_H4, show_D1, fastLength, slowLength, rsiLength, rsiOverbought, rsiOversold, macdFastLength, macdSlowLength, macdSignalLength, bbLength, bbMultiplier, dmiLength, dmiSmoothing, sarStartValue, sarIncrement, sarMaxValue
-        macdFastLength, macdSlowLength, macdSignalLength, bbLength, bbMultiplier, dmiLength, dmiSmoothing,
-        sarStartValue, sarIncrement, sarMaxValue
-
