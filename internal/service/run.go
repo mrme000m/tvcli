@@ -228,11 +228,13 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 
 		study.OnUpdate(func() {
 			once.Do(func() {
-				p := study.Periods()
-				if len(p) > 0 {
-					periods = p
-					graphicData = study.Graphic()
-					stratReport = study.StrategyReport()
+				periods = study.Periods()
+				graphicData = study.Graphic()
+				stratReport = study.StrategyReport()
+				// Some scripts (e.g. volume profile, boxes, tables) produce no
+				// numeric periods but still emit graphic/strategy data. Treat any
+				// non-empty payload as a sign the study is alive.
+				if len(periods) > 0 || len(graphicData) > 0 || len(stratReport) > 0 {
 					go func() {
 						timer := time.NewTimer(time.Duration(settleMs) * time.Millisecond)
 						defer timer.Stop()
@@ -263,7 +265,7 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		graphicData = study.Graphic()
 		stratReport = study.StrategyReport()
 
-		if studyErr == nil && len(periods) > 0 {
+		if studyErr == nil && (len(periods) > 0 || len(graphicData) > 0 || len(stratReport) > 0) {
 			study.Remove()
 			fmt.Fprintf(os.Stderr, "✓ Study data received (%d periods, %d graphic types)\n", len(periods), len(graphicData))
 			break
@@ -290,10 +292,6 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 			return nil, fmt.Errorf("study error: %w", studyErr)
 		}
 		break
-	}
-
-	if len(periods) == 0 {
-		return nil, fmt.Errorf("no data received from study")
 	}
 
 	return &RunResult{
