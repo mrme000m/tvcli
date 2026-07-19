@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,6 +22,28 @@ import (
 // TradingView subscription, so concurrent runs would hit the study limit.
 var runMu sync.Mutex
 
+// resolvePineID validates the positional argument and optionally maps a
+// metadb alias to a real Pine ID. It catches the common zsh/bash mistake of
+// typing PUB;<uuid> without quotes, where the shell splits on the semicolon.
+func resolvePineID(pineID string, cfg *config.Config) (string, error) {
+	if !strings.Contains(pineID, ";") {
+		// Unquoted PUB;xxx becomes just "PUB" in the shell.
+		if strings.EqualFold(pineID, "PUB") || strings.EqualFold(pineID, "USER") ||
+			strings.EqualFold(pineID, "STD") || strings.EqualFold(pineID, "INDIC") {
+			return "", fmt.Errorf(`Pine ID %q looks incomplete; the semicolon must be quoted in your shell
+
+Example: ./tvcli run "PUB;your-script-id"`, pineID)
+		}
+	}
+	if !pinefacade.LooksLikePineID(pineID) {
+		store, _ := metadb.Load(cfg)
+		if entry := store.Get(pineID); entry != nil {
+			return entry.PineID, nil
+		}
+	}
+	return pineID, nil
+}
+
 type runCmd struct{ app *App }
 
 func (c *runCmd) Name() string      { return "run" }
@@ -32,7 +55,7 @@ func (c *runCmd) Run(env *cli.Env) error {
 	flags := env.Flags
 
 	if len(flags.Positional) == 0 {
-		return fmt.Errorf("usage: run <pineId> [--symbol X] [--tf 5m] [--bars 500] ...")
+		return fmt.Errorf(`usage: run "<pineId>" [--symbol X] [--tf 5m] [--bars 500] ...`)
 	}
 
 	if flags.Has("persistent") || flags.Has("loop") {
@@ -51,13 +74,9 @@ func (c *runCmd) Run(env *cli.Env) error {
 		fmt.Fprintln(env.Stderr, "⚠ Force cleanup mode: will aggressively try to free studies")
 	}
 
-	pineID := flags.Positional[0]
-	if !pinefacade.LooksLikePineID(pineID) {
-		store, _ := metadb.Load(cfg)
-		entry := store.Get(pineID)
-		if entry != nil {
-			pineID = entry.PineID
-		}
+	pineID, err := resolvePineID(flags.Positional[0], cfg)
+	if err != nil {
+		return err
 	}
 
 	symbol := flags.Get("symbol")
@@ -228,16 +247,12 @@ func (c *runCmd) runPersistent(env *cli.Env) error {
 	flags := env.Flags
 
 	if len(flags.Positional) == 0 {
-		return fmt.Errorf("persistent run requires a pineId")
+		return fmt.Errorf(`persistent run requires a pineId (remember to quote it, e.g. "PUB;...")`)
 	}
 
-	pineID := flags.Positional[0]
-	if !pinefacade.LooksLikePineID(pineID) {
-		store, _ := metadb.Load(cfg)
-		entry := store.Get(pineID)
-		if entry != nil {
-			pineID = entry.PineID
-		}
+	pineID, err := resolvePineID(flags.Positional[0], cfg)
+	if err != nil {
+		return err
 	}
 
 	symbol := flags.Get("symbol")
