@@ -39,7 +39,7 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 	}
 
 	// Build field stats from typed bars
-	fields := parsed.FieldNames
+	fields := uniqueStrings(parsed.FieldNames)
 	fieldStats := calcStatsFromTyped(parsed.Bars, fields)
 
 	// Classify using schema ground-truth first, then fall back to stats.
@@ -72,6 +72,10 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 			s.Last[f] = v
 		}
 	}
+
+	// Build a cleaned recent series (chronological, capped to keep payloads reasonable).
+	const maxSeriesBars = 50
+	s.Series = buildTypedSeries(parsed.Bars, fields, s.Classifications, maxSeriesBars)
 
 	// Detect events from signal plots
 	s.Events = detectEventsFromTyped(parsed.Bars, fields, s.Classifications)
@@ -315,4 +319,47 @@ func extractLevelsFromTyped(bars []TypedBar, fields []string, classes map[string
 		}
 	}
 	return levels
+}
+
+// uniqueStrings returns the first occurrence of each string, preserving order.
+func uniqueStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, s := range in {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
+}
+
+// buildTypedSeries turns the parsed bars into a chronological series of maps,
+// keeping only non-noise fields. The result is oldest-first so consumers can
+// read left-to-right.
+func buildTypedSeries(bars []TypedBar, fields []string, classes map[string]PlotClass, maxBars int) []map[string]any {
+	n := len(bars)
+	if n == 0 {
+		return nil
+	}
+	start := 0
+	if n > maxBars {
+		start = n - maxBars
+	}
+	series := make([]map[string]any, 0, n-start)
+	for i := n - 1; i >= start; i-- {
+		bar := bars[i]
+		m := map[string]any{"time": bar.Time}
+		for _, f := range fields {
+			if classes[f] == ClassNoise {
+				continue
+			}
+			if v, ok := findValue(bar, f); ok {
+				m[f] = v
+			}
+		}
+		series = append(series, m)
+	}
+	return series
 }

@@ -111,6 +111,7 @@ func (c *runCmd) Run(env *cli.Env) error {
 	}
 
 	calcTimeout := time.Duration(limits.CalcTimeoutSecs) * time.Second
+	start := time.Now()
 	res, err := service.RunScript(context.Background(), cfg, service.RunRequest{
 		PineID:       pineID,
 		Symbol:       symbol,
@@ -162,16 +163,26 @@ func (c *runCmd) Run(env *cli.Env) error {
 		}
 	}
 
+	durationMs := time.Since(start).Milliseconds()
+
 	if flags.Has("signals") {
 		signals := runner.ExtractSignals(periods, graphicData, stratReport, tf, pineID, symbol, indicator.Schema)
-		if flags.Has("json") {
-			b, _ := json.MarshalIndent(signals, "", "  ")
+		var output any = signals
+		if flags.Has("agent") {
+			workflow := pineID
+			if indicator.Schema != nil && indicator.Schema.Name != "" {
+				workflow = indicator.Schema.Name
+			}
+			output = signalsToAgent(signals, workflow, symbol, tf, durationMs)
+		}
+		if flags.Has("json") || flags.Has("agent") {
+			b, _ := json.MarshalIndent(output, "", "  ")
 			fmt.Fprintln(env.Stdout, string(b))
 		} else {
 			fmt.Fprintln(env.Stdout, signals.Compact())
 		}
 		if outFile := flags.Get("out"); outFile != "" {
-			b, _ := json.MarshalIndent(signals, "", "  ")
+			b, _ := json.MarshalIndent(output, "", "  ")
 			os.WriteFile(outFile, b, 0644)
 			fmt.Fprintf(env.Stdout, "✓ Saved: %s\n", outFile)
 		}

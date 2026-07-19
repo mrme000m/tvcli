@@ -121,9 +121,9 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 		}
 	}
 
-	// Default output is decision-snapshot only. The full cleaned series is left
-	// unpopulated to keep payloads small; consumers can rebuild it from the
-	// classifications if they need bar-by-bar data.
+	// Build a cleaned recent series (chronological, capped to keep payloads reasonable).
+	const maxSeriesBars = 50
+	s.Series = buildRawSeries(periods, fields, s.Classifications, maxSeriesBars)
 
 	// Last useful snapshot.
 	last := periods[0]
@@ -837,4 +837,34 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// buildRawSeries turns raw periods into a chronological series of maps,
+// keeping only non-noise fields. The result is oldest-first so consumers can
+// read left-to-right.
+func buildRawSeries(periods []map[string]any, fields []string, classes map[string]PlotClass, maxBars int) []map[string]any {
+	n := len(periods)
+	if n == 0 {
+		return nil
+	}
+	start := 0
+	if n > maxBars {
+		start = n - maxBars
+	}
+	series := make([]map[string]any, 0, n-start)
+	for i := n - 1; i >= start; i-- {
+		p := periods[i]
+		m := map[string]any{}
+		if t, ok := toFloat(p["$time"]); ok {
+			m["time"] = t
+		}
+		for _, f := range fields {
+			if classes[f] == ClassNoise {
+				continue
+			}
+			m[f] = cleanFloat(p[f])
+		}
+		series = append(series, m)
+	}
+	return series
 }

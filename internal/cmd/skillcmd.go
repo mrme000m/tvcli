@@ -12,6 +12,7 @@ import (
 	"github.com/ch99q/tvcli/internal/config"
 	"github.com/ch99q/tvcli/internal/service"
 	"github.com/ch99q/tvcli/pkg/pinefacade"
+	"github.com/ch99q/tvcli/pkg/runner"
 	"github.com/ch99q/tvcli/internal/skill"
 )
 
@@ -105,6 +106,36 @@ func (c *skillCmd) Run(env *cli.Env) error {
 			fmt.Fprintln(env.Stdout, string(rawJSON))
 			return nil
 		}
+	}
+
+	// --signals: bypass the per-skill parser and use the generic schema-guided
+	// signal extractor. This is the script-agnostic path: it works for any
+	// Pine script where metaInfo is available, including the broken field-name
+	// parsers whose hand-coded aliases no longer match the actual TV output.
+	if flags.Has("signals") {
+		signals := runner.ExtractSignals(res.Periods, res.Graphic, res.StrategyReport, tf, c.skill.PineID, symbol, res.Indicator.Schema)
+		var output any = signals
+		if flags.Has("agent") {
+			output = signalsToAgent(signals, c.skill.Name, symbol, tf, duration.Milliseconds())
+		}
+		if flags.Has("json") || flags.Has("agent") {
+			b, _ := json.MarshalIndent(output, "", "  ")
+			if outFile := flags.Get("out"); outFile != "" {
+				os.WriteFile(outFile, b, 0644)
+				fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
+			} else {
+				fmt.Fprintln(env.Stdout, string(b))
+			}
+		} else {
+			text := signals.Compact()
+			if outFile := flags.Get("out"); outFile != "" {
+				os.WriteFile(outFile, []byte(text), 0644)
+				fmt.Fprintf(env.Stderr, "Saved: %s\n", outFile)
+			} else {
+				fmt.Fprintln(env.Stdout, text)
+			}
+		}
+		return nil
 	}
 
 	result := c.skill.ParseOutput(res.Periods, res.Graphic, tf, symbol, flags.All())
@@ -241,6 +272,7 @@ func (c *skillCmd) printHelp(env *cli.Env) {
 	fmt.Fprintln(w, "  --bars 500                   Number of bars")
 	fmt.Fprintln(w, "  --json                       JSON output")
 	fmt.Fprintln(w, "  --agent                      Agent-ready JSON (implies --json)")
+	fmt.Fprintln(w, "  --signals                    Use generic schema-guided signal extractor")
 	fmt.Fprintln(w, "  --raw                        Dump raw periods + graphic (skip parsing)")
 	fmt.Fprintln(w, "  --raw-out FILE               Write raw dump to file (implies --raw)")
 	fmt.Fprintln(w, "  --preset NAME                Load preset")
