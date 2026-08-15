@@ -90,7 +90,21 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 
 	if len(periods) == 0 {
 		s.Warnings = append(s.Warnings, "no periods received")
-		s.Bias = "neutral"
+		// Still try to extract signals from graphic data (labels, boxes, lines, tables)
+		gfxEvents, gfxLevels, gfxCounts := extractGraphicSignals(graphic, s.Classifications)
+		s.Events = append(s.Events, gfxEvents...)
+		s.Levels = append(s.Levels, gfxLevels...)
+		for k, v := range gfxCounts {
+			s.GraphicCounts[k] = v
+		}
+
+		// Enhance graphics-only output: classify graphic fields and extract last values.
+		classifyGraphicsOnly(s.Classifications, graphic)
+		extractLastFromGraphics(s.Last, graphic)
+
+		if len(s.Events) == 0 && len(s.Levels) == 0 {
+			s.Warnings = append(s.Warnings, "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy")
+		}
 		return s
 	}
 
@@ -517,7 +531,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 			if len(events) < 20 {
 				events = append(events, Event{
 					Time:  int64(x),
-					Field: "dwglabels",
+					Field: "label_" + text,
 					Kind:  kind,
 					Value: y,
 				})
@@ -540,7 +554,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 		}
 	}
 
-	// --- Labels (standard TradingView label graphics) ---
+	// --- Other draw types ---
 	for drawType, items := range graphic {
 		if drawType == "dwglabels" {
 			continue // already handled above
@@ -581,32 +595,23 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				if len(events) < 20 {
 					events = append(events, Event{
 						Time:  int64(x),
-						Field: "label",
+						Field: "label_" + text,
 						Kind:  kind,
 						Value: y,
 					})
 				}
 			}
 
-		case "line":
+		case "dwglines":
 			counts["line"] += len(items)
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
 					continue
 				}
-				// Lines have coords: [{x, y}, {x, y}] — extract price levels
-				coords, ok := m["coords"].([]any)
-				if !ok || len(coords) < 2 {
-					continue
-				}
-				p1, ok1 := coords[0].(map[string]any)
-				p2, ok2 := coords[1].(map[string]any)
-				if !ok1 || !ok2 {
-					continue
-				}
-				y1, y1Ok := toFloat(p1["y"])
-				y2, y2Ok := toFloat(p2["y"])
+				// dwglines: {x1, y1, x2, y2, w, st, ...}
+				y1, y1Ok := toFloat(m["y1"])
+				y2, y2Ok := toFloat(m["y2"])
 				if !y1Ok || !y2Ok {
 					continue
 				}
@@ -617,7 +622,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 					slope := math.Abs(y2-y1) / math.Max(math.Abs(y1), 1)
 					if slope < 0.001 { // nearly flat
 						levels = append(levels, Level{
-							Field: "graphic_line",
+							Field: "dwglines",
 							Kind:  "band",
 							Value: avgPrice,
 						})
@@ -625,24 +630,16 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				}
 			}
 
-		case "box":
+		case "dwgboxes":
 			counts["box"] += len(items)
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
 					continue
 				}
-				coords, ok := m["coords"].([]any)
-				if !ok || len(coords) < 2 {
-					continue
-				}
-				p1, ok1 := coords[0].(map[string]any)
-				p2, ok2 := coords[1].(map[string]any)
-				if !ok1 || !ok2 {
-					continue
-				}
-				y1, y1Ok := toFloat(p1["y"])
-				y2, y2Ok := toFloat(p2["y"])
+				// dwgboxes: {x1, y1, x2, y2, t, ...}
+				y1, y1Ok := toFloat(m["y1"])
+				y2, y2Ok := toFloat(m["y2"])
 				if !y1Ok || !y2Ok {
 					continue
 				}
@@ -651,12 +648,12 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 					high := math.Max(y1, y2)
 					low := math.Min(y1, y2)
 					levels = append(levels, Level{
-						Field: "graphic_box_top",
+						Field: "dwgboxes_top",
 						Kind:  "resistance",
 						Value: high,
 					})
 					levels = append(levels, Level{
-						Field: "graphic_box_bottom",
+						Field: "dwgboxes_bottom",
 						Kind:  "support",
 						Value: low,
 					})
@@ -666,30 +663,278 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 		case "fill":
 			counts["fill"] += len(items)
 
-		case "table":
-			counts["table"] += len(items)
+		case "table", "dwgtablecells":
+			counts[drawType] += len(items)
 			// Tables often contain dashboard values — extract text fields
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
 					continue
 				}
-				// Table cells may have text with formatted values
-				if text, ok := m["text"].(string); ok && text != "" {
-					// Try to parse numeric values from table text
-					if val, err := parseFormattedNumber(text); err == nil {
-						events = append(events, Event{
-							Field: "table_" + strings.ReplaceAll(text, " ", "_"),
-							Kind:  "state",
-							Value: val,
-						})
+				text, _ := m["t"].(string)
+				if text == "" {
+					text, _ = m["text"].(string)
+				}
+				if text == "" {
+					continue
+				}
+				if val, err := parseFormattedNumber(text); err == nil {
+					events = append(events, Event{
+						Field: "table_" + strings.ReplaceAll(text, " ", "_"),
+						Kind:  "state",
+						Value: val,
+					})
+				}
+			}
+
+		default:
+			// Skip dwgtables / dwgtablecells — handled by ReconstructTables
+			if drawType == "dwgtables" || drawType == "dwgtablecells" {
+				continue
+			}
+			counts[drawType] += len(items)
+		}
+	}
+
+	return events, dedupeLevels(levels), counts
+}
+
+// dedupeLevels collapses levels that describe the same price zone.
+// A box's top/bottom is often emitted again as a dwglines band at the same
+// price, so without this the level list carries doubled noise. Keeps the most
+// specific kind: resistance/support over band. Tolerance: 0.05% of price.
+func dedupeLevels(levels []Level) []Level {
+	out := make([]Level, 0, len(levels))
+	for _, lv := range levels {
+		found := false
+		for i := range out {
+			if out[i].Kind == lv.Kind {
+				continue
+			}
+			// same price zone and close price
+			if math.Abs(out[i].Value-lv.Value)/math.Max(math.Abs(lv.Value), 1) < 0.0001 {
+				// prefer resistance/support over band
+				if lv.Kind == "resistance" || lv.Kind == "support" {
+					if out[i].Kind == "band" {
+						out[i] = lv
+					}
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			out = append(out, lv)
+		}
+	}
+	return out
+}
+
+
+
+// classifyGraphicsOnly attempts to classify graphic fields based on their values.
+// Since there are no periods, we use heuristic rules on the graphic data values
+// to assign semantic categories (price, signal, style, metric, snapshot).
+func classifyGraphicsOnly(classifications map[string]PlotClass, graphic map[string]map[string]any) {
+	if graphic == nil {
+		return
+	}
+
+	// Collect all numeric values from graphic items to analyze patterns
+	var allVals []float64
+
+	extractFloatsFromCell := func(cell any) {
+		m, ok := cell.(map[string]any)
+		if !ok {
+			return
+		}
+		for _, v := range m {
+			if f, ok := v.(float64); ok {
+				allVals = append(allVals, f)
+			}
+		}
+	}
+
+	// dwgtablecells: structure is map[cellID]cellData
+	if cells, ok := graphic["dwgtablecells"]; ok {
+		for _, cellV := range cells {
+			extractFloatsFromCell(cellV)
+		}
+	}
+
+	// dwglabels: structure is map[labelID]labelData
+	if labels, ok := graphic["dwglabels"]; ok {
+		for _, labelV := range labels {
+			extractFloatsFromCell(labelV)
+			if m, ok := labelV.(map[string]any); ok {
+				if t, ok := m["t"].(string); ok {
+					upper := strings.ToUpper(t)
+					// Label-based classification
+					if strings.Contains(upper, "BUY") || strings.Contains(upper, "SELL") ||
+						strings.Contains(upper, "LONG") || strings.Contains(upper, "SHORT") {
+						if _, exists := classifications["label"]; !exists {
+							classifications["label"] = ClassSignal
+						}
+					}
+					if strings.Contains(upper, "SUPPORT") || strings.Contains(upper, "RESISTANCE") ||
+						strings.Contains(upper, "POC") || strings.Contains(upper, "LEVEL") {
+						if _, exists := classifications["label"]; !exists {
+							classifications["label"] = ClassPrice
+						}
 					}
 				}
 			}
 		}
 	}
 
-	return events, levels, counts
+	// Other draw types: dwglines, dwgboxes, fill, tables
+	for drawType, items := range graphic {
+		if drawType == "dwglabels" || drawType == "dwgtables" || drawType == "dwgtablecells" {
+			continue
+		}
+		for _, cellV := range items {
+			extractFloatsFromCell(cellV)
+		}
+	}
+
+	// Classify based on value patterns
+	if len(allVals) > 0 {
+		sum := 0.0
+		minVal, maxVal := allVals[0], allVals[0]
+		intCount := 0
+		for _, v := range allVals {
+			sum += v
+			if v == math.Round(v) && math.Abs(v) < 1e6 {
+				intCount++
+			}
+			if v < minVal {
+				minVal = v
+			}
+			if v > maxVal {
+				maxVal = v
+			}
+		}
+		mean := sum / float64(len(allVals))
+		rng := maxVal - minVal
+		stddev := 0.0
+		if rng > 0 {
+			for _, v := range allVals {
+				stddev += (v - mean) * (v - mean)
+			}
+			stddev = math.Sqrt(stddev / float64(len(allVals)))
+		}
+		nonZero := 0
+		for _, v := range allVals {
+			if v != 0 {
+				nonZero++
+			}
+		}
+		_ = nonZero
+		nonZeroDensity := float64(nonZero) / float64(len(allVals))
+		integerRatio := float64(intCount) / float64(len(allVals))
+
+		// Heuristic classifications
+		// 1. Values in plausible price range (100-10000) with low variance → price level
+		if mean > 100 && mean < 10000 && rng < mean*0.3 && stddev/mean < 0.2 {
+			for f := range classifications {
+				if classifications[f] == ClassMetric {
+					classifications[f] = ClassPrice
+				}
+			}
+		}
+
+		// 2. Very large values (>1e6) → likely ARGB color constants → style
+		if mean > 1e6 {
+			for f := range classifications {
+				if classifications[f] == ClassMetric {
+					classifications[f] = ClassStyle
+				}
+			}
+		}
+
+		// 3. Single unique value → snapshot
+		uniqueVals := map[float64]struct{}{}
+		for _, v := range allVals {
+			uniqueVals[round6(v)] = struct{}{}
+		}
+		if len(uniqueVals) == 1 {
+			for f := range classifications {
+				if classifications[f] == ClassMetric {
+					classifications[f] = ClassSnapshot
+				}
+			}
+		}
+		_ = nonZeroDensity
+		_ = integerRatio
+	}
+}
+
+// extractLastFromGraphics extracts a "last" snapshot from graphic data.
+// Since there are no periods, we derive the last values from the most recent
+// graphic items (e.g., the last dwgtablecell, the last dwglabel, etc.).
+func extractLastFromGraphics(last map[string]any, graphic map[string]map[string]any) {
+	if graphic == nil {
+		return
+	}
+
+	// dwgtablecells: last cell values
+	if cells, ok := graphic["dwgtablecells"]; ok {
+		lastKey := ""
+		var lastTS float64
+		for k := range cells {
+			if k > lastKey {
+				lastKey = k
+			}
+		}
+		_ = lastTS
+		if cellV, ok := cells[lastKey].(map[string]any); ok {
+			for key, val := range cellV {
+				if key == "t" || key == "text" {
+					if s, ok := val.(string); ok && s != "" {
+						last["table_"+strings.ReplaceAll(s, " ", "_")] = s
+					}
+				} else if v, ok := toFloat(val); ok {
+					last[key] = v
+				}
+			}
+		}
+	}
+
+	// dwglabels: last label price + text
+	if labels, ok := graphic["dwglabels"]; ok {
+		lastKey := ""
+		for k := range labels {
+			if k > lastKey {
+				lastKey = k
+			}
+		}
+		if labelV, ok := labels[lastKey].(map[string]any); ok {
+			if v, ok := toFloat(labelV["y"]); ok {
+				last["last_label_price"] = v
+			}
+			if text, ok := labelV["t"].(string); ok && text != "" {
+				last["last_label_text"] = text
+			}
+		}
+	}
+
+	// dwgboxes: last box high/low
+	if boxes, ok := graphic["dwgboxes"]; ok {
+		lastKey := ""
+		for k := range boxes {
+			if k > lastKey {
+				lastKey = k
+			}
+		}
+		if boxV, ok := boxes[lastKey].(map[string]any); ok {
+			y1, y1Ok := toFloat(boxV["y1"])
+			y2, y2Ok := toFloat(boxV["y2"])
+			if y1Ok && y2Ok {
+				last["last_box_high"] = math.Max(y1, y2)
+				last["last_box_low"] = math.Min(y1, y2)
+			}
+		}
+	}
 }
 
 // parseFormattedNumber attempts to extract a numeric value from formatted text

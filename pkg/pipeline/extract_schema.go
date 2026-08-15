@@ -34,7 +34,21 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 
 	if len(parsed.Bars) == 0 {
 		s.Warnings = append(s.Warnings, "no bars to extract")
-		s.Bias = "neutral"
+		// Still try to extract signals from graphic data (labels, boxes, lines, tables)
+		gfxEvents, gfxLevels, gfxCounts := extractGraphicSignals(graphic, s.Classifications)
+		s.Events = append(s.Events, gfxEvents...)
+		s.Levels = append(s.Levels, gfxLevels...)
+		for k, v := range gfxCounts {
+			s.GraphicCounts[k] = v
+		}
+
+		// Enhance graphics-only output: classify graphic fields and extract last values.
+		classifyGraphicsOnly(s.Classifications, graphic)
+		extractLastFromGraphics(s.Last, graphic)
+
+		if len(s.Events) == 0 && len(s.Levels) == 0 {
+			s.Warnings = append(s.Warnings, "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy")
+		}
 		return s
 	}
 
