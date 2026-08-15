@@ -1,0 +1,55 @@
+//@version=5
+indicator("Liquidity Map", overlay=true)
+
+lookback = input.int(50, "Lookback Bars")
+swingLen = input.int(5, "Swing Length")
+
+// === Swing Highs/Lows ===
+ph = ta.pivothigh(high, swingLen, swingLen)
+pl = ta.pivotlow(low, swingLen, swingLen)
+
+var float lastPH = na
+var float lastPL = na
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+// === Session Highs/Lows ===
+dayHigh = ta.highest(high, 24)
+dayLow = ta.lowest(low, 24)
+
+// === VWAP ===
+vwapVal = ta.vwap(hlc3)
+
+// === EMA as dynamic S/R ===
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+// === Volume POC (simplified — find highest volume bar) ===
+highestVol = ta.highest(volume, lookback)
+// POC = close of the bar with highest volume in lookback
+pocLevel = ta.valuewhen(volume == highestVol, close, 0)
+
+// === ATR stops ===
+atrVal = ta.atr(14)
+stopLong = close - atrVal * 1.5
+stopShort = close + atrVal * 1.5
+
+// === Sweep detection ===
+sweepHigh = high >= dayHigh[1] and close < dayHigh[1] ? 1 : 0
+sweepLow = low <= dayLow[1] and close > dayLow[1] ? 1 : 0
+
+// === Plot key levels ===
+plot(vwapVal, "VWAP", color=color.fuchsia, linewidth=2)
+plot(ema50, "EMA50", color=color.blue)
+plot(ema200, "EMA200", color=color.orange)
+plot(dayHigh, "DayHigh", color=color.new(color.red, 30))
+plot(dayLow, "DayLow", color=color.new(color.green, 30))
+plot(pocLevel, "POC", color=color.new(color.purple, 20), linewidth=2)
+plot(lastPH, "Resistance_Swing", color=color.new(color.red, 20))
+plot(lastPL, "Support_Swing", color=color.new(color.green, 20))
+plot(stopLong, "StopLong", color=color.new(color.green, 50))
+plot(stopShort, "StopShort", color=color.new(color.red, 50))
+plot(sweepHigh * 100, "SweepHigh", color=color.new(color.red, 0))
+plot(sweepLow * 100, "SweepLow", color=color.new(color.green, 0))

@@ -1,0 +1,85 @@
+//@version=5
+indicator("Composite Market Bias", overlay=false)
+
+// === INPUTS ===
+rsiLen = input.int(14, "RSI Length")
+fastEma = input.int(9, "Fast EMA")
+slowEma = input.int(21, "Slow EMA")
+signalEma = input.int(9, "MACD Signal")
+bbLen = input.int(20, "Bollinger Length")
+bbMult = input.float(2.0, "Bollinger StdDev")
+atrLen = input.int(14, "ATR Length")
+
+// === RSI ===
+rsi = ta.rsi(close, rsiLen)
+
+// === EMA Trend ===
+emaFast = ta.ema(close, fastEma)
+emaSlow = ta.ema(close, slowEma)
+emaTrend = emaFast > emaSlow ? 1 : emaFast < emaSlow ? -1 : 0
+
+// === MACD ===
+[macdLine, signalLine, histLine] = ta.macd(close, fastEma, slowEma, signalEma)
+macdBull = histLine > 0 ? 1 : 0
+macdBear = histLine < 0 ? 1 : 0
+
+// === Bollinger Bands ===
+[middleBB, upperBB, lowerBB] = ta.bb(close, bbLen, bbMult)
+bbPos = (close - lowerBB) / (upperBB - lowerBB) * 100
+bbPos := na(bbPos) ? 50 : bbPos
+
+// === ATR / Volatility ===
+atrVal = ta.atr(atrLen)
+atrPct = atrVal / close * 100
+
+// === Volume Momentum ===
+volMa = ta.sma(volume, 20)
+volRatio = volume / volMa
+
+// === Composite Score (-100 to +100) ===
+bullPoints = 0
+bullPoints += rsi > 50 ? 20 : 0
+bullPoints += rsi > 70 ? 10 : 0
+bullPoints += emaTrend == 1 ? 25 : 0
+bullPoints += macdBull == 1 ? 20 : 0
+bullPoints += bbPos > 50 ? 15 : 0
+bullPoints += close > ta.ema(close, 50) ? 10 : 0
+
+bearPoints = 0
+bearPoints += rsi < 50 ? 20 : 0
+bearPoints += rsi < 30 ? 10 : 0
+bearPoints += emaTrend == -1 ? 25 : 0
+bearPoints += macdBear == 1 ? 20 : 0
+bearPoints += bbPos < 50 ? 15 : 0
+bearPoints += close < ta.ema(close, 50) ? 10 : 0
+
+biasScore = bullPoints - bearPoints
+
+// === Regime Detection ===
+isTrending = atrPct > 0.5 ? 1 : 0
+isHighVol = volRatio > 1.5 ? 1 : 0
+
+// === Key Levels ===
+pivotHigh = ta.pivothigh(high, 5, 5)
+pivotLow = ta.pivotlow(low, 5, 5)
+resistance = ta.valuewhen(not na(pivotHigh), pivotHigh, 0)
+support = ta.valuewhen(not na(pivotLow), pivotLow, 0)
+
+// === VWAP ===
+vwapVal = ta.vwap(hlc3)
+
+// === Outputs ===
+plot(biasScore, "BiasScore", color=color.new(color.blue, 0))
+plot(rsi, "RSI", color=color.new(color.purple, 0))
+plot(emaTrend * 100, "EMATrend", color=color.new(color.green, 0))
+plot(macdBull * 100 - macdBear * 100, "MACD", color=color.new(color.orange, 0))
+plot(bbPos, "BBPosition", color=color.new(color.teal, 0))
+plot(atrPct * 100, "ATRPercent", color=color.new(color.red, 0))
+plot(volRatio * 100, "VolRatio", color=color.new(color.gray, 0))
+plot(bullPoints, "BullPoints", color=color.new(color.green, 50))
+plot(bearPoints, "BearPoints", color=color.new(color.red, 50))
+plot(isTrending * 100, "IsTrending", color=color.new(color.blue, 50))
+plot(isHighVol * 100, "IsHighVol", color=color.new(color.orange, 50))
+plot(vwapVal, "VWAP", color=color.new(color.fuchsia, 0))
+plot(resistance, "Resistance", color=color.new(color.red, 0))
+plot(support, "Support", color=color.new(color.green, 0))

@@ -1,0 +1,63 @@
+//@version=5
+indicator("Key Level Confluence", overlay=true)
+
+// === Pivot-based S/R ===
+leftBars = input.int(10, "Pivot Lookback Left")
+rightBars = input.int(10, "Pivot Lookback Right")
+
+ph = ta.pivothigh(high, leftBars, rightBars)
+pl = ta.pivotlow(low, leftBars, rightBars)
+
+var float lastPH = na
+var float lastPL = na
+if not na(ph)
+    lastPH := ph
+if not na(pl)
+    lastPL := pl
+
+// === Volume Profile (simplified) ===
+// Find the price level with most volume in last N bars
+lookback = input.int(50, "VP Lookback")
+highestVolPrice = close
+maxVol = 0.0
+for i = 0 to lookback - 1
+    if volume[i] > maxVol
+        maxVol := volume[i]
+        highestVolPrice := close[i]
+pocLevel = highestVolPrice
+
+// === Anchored VWAP ===
+vwapVal = ta.vwap(hlc3)
+
+// === EMA as dynamic S/R ===
+ema50 = ta.ema(close, 50)
+ema200 = ta.ema(close, 200)
+
+// === Bollinger as volatility bands ===
+[bbMid, bbUpper, bbLower] = ta.bb(close, 20, 2.0)
+
+// === ATR-based stop levels ===
+atrVal = ta.atr(14)
+atrStopLong = close - atrVal * 1.5
+atrStopShort = close + atrVal * 1.5
+
+// === Confluence scoring ===
+// How many methods agree on a level?
+resistance1 = lastPH
+resistance2 = bbUpper
+resistance3 = ema200 > close ? ema200 : na
+support1 = lastPL
+support2 = bbLower
+support3 = ema200 < close ? ema200 : na
+
+// Plot levels
+plot(vwapVal, "VWAP", color=color.fuchsia, linewidth=2)
+plot(ema50, "EMA50", color=color.blue)
+plot(ema200, "EMA200", color=color.orange)
+plot(bbUpper, "BB_Upper", color=color.new(color.red, 50))
+plot(bbLower, "BB_Lower", color=color.new(color.green, 50))
+plot(atrStopLong, "ATR_Stop_Long", color=color.new(color.green, 30))
+plot(atrStopShort, "ATR_Stop_Short", color=color.new(color.red, 30))
+plot(pocLevel, "POC", color=color.new(color.purple, 30), linewidth=2)
+plot(resistance1, "Resistance_Pivot", color=color.new(color.red, 20))
+plot(support1, "Support_Pivot", color=color.new(color.green, 20))

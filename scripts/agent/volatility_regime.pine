@@ -1,0 +1,49 @@
+//@version=5
+indicator("Volatility Regime Detector", overlay=false)
+
+// === ATR ===
+atrLen = input.int(14, "ATR Length")
+atrVal = ta.atr(atrLen)
+atrPct = atrVal / close * 100
+atrMa = ta.sma(atrPct, 50)
+
+// === Bollinger Band Width ===
+bbLen = input.int(20, "BB Length")
+[bbMid, bbUpper, bbLower] = ta.bb(close, bbLen, 2.0)
+bbWidth = (bbUpper - bbLower) / bbMid * 100
+bbWidthMa = ta.sma(bbWidth, 50)
+bbSqueeze = bbWidth < bbWidthMa * 0.7 ? 1 : 0
+bbExpansion = bbWidth > bbWidthMa * 1.3 ? 1 : 0
+
+// === Trend via EMA alignment ===
+ema10 = ta.ema(close, 10)
+ema20 = ta.ema(close, 20)
+ema50 = ta.ema(close, 50)
+bullAlign = ema10 > ema20 and ema20 > ema50 ? 1 : 0
+bearAlign = ema10 < ema20 and ema20 < ema50 ? 1 : 0
+
+// === Regime ===
+isTrending = bullAlign or bearAlign ? 1 : 0
+isChoppy = bbSqueeze and not isTrending ? 1 : 0
+regime = isTrending ? (bullAlign ? 2 : 3) : (isChoppy ? 0 : 1)
+
+// === Risk: ATR-based stop ===
+stopLong = close - atrVal * 1.5
+stopShort = close + atrVal * 1.5
+riskReward = atrVal * 3 / atrVal * 1
+
+// === Choppiness via EMA slope ===
+emaSlope = (ema20 - ema20[5]) / ema20[5] * 100
+
+plot(atrPct, "ATR_Pct", color=color.red)
+plot(atrMa, "ATR_MA", color=color.new(color.red, 50))
+plot(bbWidth, "BB_Width", color=color.orange)
+plot(bbWidthMa, "BB_Width_MA", color=color.new(color.orange, 50))
+plot(regime, "Regime", color=color.purple, linewidth=2)
+plot(bullAlign, "BullAlign", color=color.new(color.green, 0))
+plot(bearAlign, "BearAlign", color=color.new(color.red, 0))
+plot(bbSqueeze, "Squeeze", color=color.new(color.fuchsia, 0))
+plot(bbExpansion, "Expansion", color=color.new(color.yellow, 0))
+plot(emaSlope, "EMA_Slope", color=color.teal)
+plot(stopLong, "Stop_Long", color=color.new(color.green, 30))
+plot(stopShort, "Stop_Short", color=color.new(color.red, 30))

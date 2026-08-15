@@ -1,0 +1,57 @@
+//@version=5
+indicator("Order Flow Delta", overlay=false)
+
+// === Inputs ===
+lookback = input.int(20, "Delta Lookback")
+threshold = input.float(1.5, "Imbalance Threshold")
+
+// === Delta Calculation ===
+// Buying pressure = close - low (bulls pushed up from low)
+// Selling pressure = high - close (bears pushed down from high)
+buyPressure = close - low
+sellPressure = high - close
+totalPressure = buyPressure + sellPressure
+buyPct = totalPressure > 0 ? buyPressure / totalPressure * 100 : 50
+sellPct = 100 - buyPct
+
+// === Volume-weighted delta ===
+delta = (buyPct - sellPct) * volume / 100
+deltaMa = ta.sma(delta, lookback)
+
+// === Cumulative Delta ===
+cumDelta = ta.cum(delta)
+
+// === Imbalance Detection ===
+volMa = ta.sma(volume, lookback)
+isBullImbalance = buyPct > 70 and volume > volMa * threshold ? 1 : 0
+isBearImbalance = sellPct > 70 and volume > volMa * threshold ? 1 : 0
+
+// === Volume Climax ===
+isVolClimax = volume > volMa * 2 ? 1 : 0
+isBullClimax = isVolClimax and close > open ? 1 : 0
+isBearClimax = isVolClimax and close < open ? 1 : 0
+
+// === Delta Divergence ===
+priceUp = close > close[1]
+deltaDown = delta < delta[1]
+bullDiv = priceUp and deltaDown ? 1 : 0
+priceDown = close < close[1]
+deltaUp = delta > delta[1]
+bearDiv = priceDown and deltaUp ? 1 : 0
+
+// === Churn (no direction) ===
+isChurn = volume > volMa * 1.5 and math.abs(close - open) < ta.atr(14) * 0.1 ? 1 : 0
+
+// === Plot ===
+plot(delta, "Delta", color=color.blue)
+plot(deltaMa, "DeltaMA", color=color.orange)
+plot(cumDelta, "CumDelta", color=color.purple)
+plot(buyPct, "BuyPct", color=color.green)
+plot(sellPct, "SellPct", color=color.red)
+plot(isBullImbalance * 100, "BullImbalance", color=color.new(color.green, 0))
+plot(isBearImbalance * 100, "BearImbalance", color=color.new(color.red, 0))
+plot(isBullClimax * 100, "BullClimax", color=color.new(color.lime, 0))
+plot(isBearClimax * 100, "BearClimax", color=color.new(color.maroon, 0))
+plot(bullDiv * 100, "BullDivergence", color=color.new(color.teal, 0))
+plot(bearDiv * 100, "BearDivergence", color=color.new(color.maroon, 0))
+plot(isChurn * 100, "Churn", color=color.new(color.gray, 0))
