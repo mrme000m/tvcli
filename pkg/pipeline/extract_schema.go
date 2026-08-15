@@ -108,7 +108,7 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 
 	// Cap
 	s.Events = capEvents(s.Events, 30)
-	s.Levels = capLevels(s.Levels, 10)
+	s.Levels = capLevels(s.Levels, 50)
 
 	// Bias
 	s.Bias, s.Confidence = computeBias(s.Last, s.Events, s.Classifications)

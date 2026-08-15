@@ -164,7 +164,7 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 
 	// Keep payloads small: newest events, largest absolute levels.
 	s.Events = capEvents(s.Events, 30)
-	s.Levels = capLevels(s.Levels, 10)
+	s.Levels = capLevels(s.Levels, 50)
 
 	// Aggregate directional bias.
 	s.Bias, s.Confidence = computeBias(s.Last, s.Events, s.Classifications)
@@ -635,7 +635,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
-					continue
+									continue
 				}
 				// dwgboxes: {x1, y1, x2, y2, t, ...}
 				y1, y1Ok := toFloat(m["y1"])
@@ -966,11 +966,29 @@ func capEvents(events []Event, max int) []Event {
 }
 
 func capLevels(levels []Level, max int) []Level {
-	sort.Slice(levels, func(i, j int) bool { return math.Abs(levels[i].Value) > math.Abs(levels[j].Value) })
+	// Sort by kind priority (resistance/support > band > other), then by absolute value.
+	sort.Slice(levels, func(i, j int) bool {
+		ki, kj := kindPriority(levels[i].Kind), kindPriority(levels[j].Kind)
+		if ki != kj {
+			return ki < kj // lower = higher priority
+		}
+		return math.Abs(levels[i].Value) > math.Abs(levels[j].Value)
+	})
 	if len(levels) > max {
 		return levels[:max]
 	}
 	return levels
+}
+
+func kindPriority(kind string) int {
+	switch kind {
+	case "resistance", "support":
+		return 0
+	case "band":
+		return 1
+	default:
+		return 2
+	}
 }
 
 func extractReport(report map[string]any) *StrategySummary {
