@@ -104,6 +104,9 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 
 		if len(s.Events) == 0 && len(s.Levels) == 0 {
 			s.Warnings = append(s.Warnings, "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy")
+		} else {
+			// Graphics-only scripts with extracted levels/events have moderate confidence.
+			s.Confidence = 0.5
 		}
 		return s
 	}

@@ -42,6 +42,9 @@ func RegisterAll(root *cli.Root, app *App) {
 	root.Add(&fetchCmd{app: app})
 	root.Add(&syncCmd{app: app})
 	root.Add(&inputsCmd{app: app})
+	root.Add(&evalCmd{app: app})
+	root.Add(&cleanCmd{app: app})
+	root.Add(&serveCmd{app: app})
 	RegisterSkills(root, app)
 }
 
@@ -88,7 +91,7 @@ func signalsToAgent(signals *pipeline.Signals, workflow, symbol, tf string, dura
 			Warnings: signals.Warnings,
 		},
 		Conformance: skill.Conformance{
-			HasValidData: signals.Meta.PeriodCount > 0,
+			HasValidData: signals.Meta.PeriodCount > 0 || len(signals.Levels) > 0 || len(signals.Events) > 0 || len(signals.GraphicCounts) > 0,
 			AgenticScore: signals.Confidence,
 		},
 	}
