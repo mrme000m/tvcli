@@ -5,7 +5,7 @@ authenticated_cookies.json
 .tv-meta.json
 .tv-scripts/
 
-# Compiled binaries (root-level only)
+# Compiled binaries
 /tv
 /tvcli
 
@@ -13,6 +13,38 @@ authenticated_cookies.json
 .DS_Store
 
 # Tool caches
-.mimocode/
 __pycache__/
 *.pyc
+.mimocode/
+.crush/
+
+# Editor / agent tool integration (not part of the Go project)
+.agents/
+.claude/
+.codex/
+.opencode/
+.openknowledge/
+.pi/
+opencode.json
+
+# Open Knowledge scaffold (auto-generated, not part of Go project)
+Wiki/
+
+# Temp data output (fetch, runs, analysis)
+rawdumps/
+skill-runs/
+skill-analysis/
+.tv-src/
+top_scripts.json
+
+# NotebookLM extracts
+notebooklm_*.json
+
+# One-off scripts & session artifacts
+run_all_skills.sh
+pi-session-*.html
+CONSOLIDATED_SCALP_SCRIPT.md
+
+# Fetch output files (CSV/JSON at root)
+*.csv
+BINANCE_*.json

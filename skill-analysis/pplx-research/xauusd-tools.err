@@ -1,3 +1,0 @@
-usage: pplx [-h] [--version]
-            {search,follow-up,models,threads,spaces,assets,sources,tasks,finance,billing,discover,profile,rate-limits,notifications,ai-profile,status,credits,settings,memories,computer-tasks,workflows,refresh-cookies,validate} ...
-pplx: error: unrecognized arguments: --json
