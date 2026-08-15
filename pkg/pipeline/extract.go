@@ -51,9 +51,10 @@ type Meta struct {
 type Event struct {
 	Time  int64   `json:"time"`
 	Field string  `json:"field"`
-	Kind  string  `json:"kind"`  // "buy", "sell", "alert", "state"
+	Kind  string  `json:"kind"`  // "buy", "sell", "alert", "state", "text"
 	Value float64 `json:"value"`
 	Prev  float64 `json:"prev,omitempty"`
+	Text  string  `json:"text,omitempty"`
 }
 
 type Level struct {
@@ -668,25 +669,48 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 
 		case "table", "dwgtablecells":
 			counts[drawType] += len(items)
-			// Tables often contain dashboard values — extract text fields
-			for _, item := range items {
-				m, _ := item.(map[string]any)
-				if m == nil {
-					continue
-				}
-				text, _ := m["t"].(string)
-				if text == "" {
-					text, _ = m["text"].(string)
-				}
-				if text == "" {
-					continue
-				}
-				if val, err := parseFormattedNumber(text); err == nil {
-					events = append(events, Event{
-						Field: "table_" + strings.ReplaceAll(text, " ", "_"),
-						Kind:  "state",
-						Value: val,
-					})
+			// Reconstruct tables into structured grids and extract labeled values.
+			grids := ReconstructTables(map[string]map[string]any{drawType: items})
+			if len(grids) == 0 {
+				// Fallback: try full graphic for ReconstructTables (needs dwgtables too).
+				grids = ReconstructTables(graphic)
+			}
+			for _, grid := range grids {
+				for r := 0; r < grid.Rows; r++ {
+					if r >= len(grid.Cells) {
+						continue
+					}
+					row := grid.Cells[r]
+					// 2-column tables: label → value pairs
+					if len(row) >= 2 {
+						label := strings.TrimSpace(row[0])
+						valText := strings.TrimSpace(row[1])
+						if label == "" || valText == "" {
+							continue
+						}
+						// Skip NaN/na values
+						upper := strings.ToUpper(valText)
+						if upper == "NAN" || upper == "NA" || upper == "NULL" {
+							continue
+						}
+						if val, err := parseFormattedNumber(valText); err == nil {
+							fieldName := "table_" + strings.ReplaceAll(label, " ", "_")
+							events = append(events, Event{
+								Field: fieldName,
+								Kind:  "state",
+								Value: val,
+							})
+						} else {
+							// Non-numeric value — store as text state
+							fieldName := "table_" + strings.ReplaceAll(label, " ", "_")
+							events = append(events, Event{
+								Field: fieldName,
+								Kind:  "text",
+								Value: 0,
+								Text:  valText,
+							})
+						}
+					}
 				}
 			}
 
@@ -880,25 +904,35 @@ func extractLastFromGraphics(last map[string]any, graphic map[string]map[string]
 		return
 	}
 
-	// dwgtablecells: last cell values
-	if cells, ok := graphic["dwgtablecells"]; ok {
-		lastKey := ""
-		var lastTS float64
-		for k := range cells {
-			if k > lastKey {
-				lastKey = k
-			}
-		}
-		_ = lastTS
-		if cellV, ok := cells[lastKey].(map[string]any); ok {
-			for key, val := range cellV {
-				if key == "t" || key == "text" {
-					if s, ok := val.(string); ok && s != "" {
-						last["table_"+strings.ReplaceAll(s, " ", "_")] = s
-					}
-				} else if v, ok := toFloat(val); ok {
-					last[key] = v
+	// dwgtablecells: reconstruct tables and store structured data
+	if _, ok := graphic["dwgtablecells"]; ok {
+		grids := ReconstructTables(graphic)
+		for _, grid := range grids {
+			tableData := make(map[string]any)
+			for r := 0; r < grid.Rows; r++ {
+				if r >= len(grid.Cells) {
+					continue
 				}
+				row := grid.Cells[r]
+				if len(row) >= 2 {
+					label := strings.TrimSpace(row[0])
+					valText := strings.TrimSpace(row[1])
+					if label == "" || valText == "" {
+						continue
+					}
+					upper := strings.ToUpper(valText)
+					if upper == "NAN" || upper == "NA" || upper == "NULL" {
+						continue
+					}
+					if val, err := parseFormattedNumber(valText); err == nil {
+						tableData[label] = val
+					} else {
+						tableData[label] = valText
+					}
+				}
+			}
+			if len(tableData) > 0 {
+				last["table_"+grid.ID] = tableData
 			}
 		}
 	}
