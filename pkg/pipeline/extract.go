@@ -714,6 +714,92 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				}
 			}
 
+		case "hhists":
+			// Horizontal histograms (volume profile): {priceLow, priceHigh, firstBarTime, lastBarTime, rate[]}
+			counts["hhist"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				priceLow, loOk := toFloat(m["priceLow"])
+				priceHigh, hiOk := toFloat(m["priceHigh"])
+				if !loOk || !hiOk {
+					continue
+				}
+				if priceHigh > 2000 || priceLow > 2000 {
+					levels = append(levels, Level{
+						Field: "hhists_high",
+						Kind:  "resistance",
+						Value: priceHigh,
+					})
+					levels = append(levels, Level{
+						Field: "hhists_low",
+						Kind:  "support",
+						Value: priceLow,
+					})
+					// Store the histogram rate array in Last for context.
+					if rates, ok := m["rate"].([]any); ok && len(rates) > 0 {
+						// Store as text event for agent visibility.
+						if len(events) < 20 {
+							events = append(events, Event{
+								Field: "hhists_profile",
+								Kind:  "state",
+								Value: priceHigh,
+								Text:  fmt.Sprintf("%.2f-%.2f (%d bins)", priceLow, priceHigh, len(rates)),
+							})
+						}
+					}
+				}
+			}
+
+		case "horizlines":
+			// Horizontal lines: {level, startIndex, endIndex, extendRight, extendLeft}
+			counts["horizline"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				level, ok := toFloat(m["level"])
+				if !ok {
+					continue
+				}
+				if level > 2000 {
+					levels = append(levels, Level{
+						Field: "horizlines",
+						Kind:  "resistance",
+						Value: level,
+					})
+				}
+			}
+
+		case "polygons":
+			// Polygons: {points: [{index, level}, ...]}
+			counts["polygon"] += len(items)
+			for _, item := range items {
+				m, _ := item.(map[string]any)
+				if m == nil {
+					continue
+				}
+				if points, ok := m["points"].([]any); ok {
+					for _, pt := range points {
+						ptMap, _ := pt.(map[string]any)
+						if ptMap == nil {
+							continue
+						}
+						level, ok := toFloat(ptMap["level"])
+						if ok && level > 2000 {
+							levels = append(levels, Level{
+								Field: "polygon_point",
+								Kind:  "band",
+								Value: level,
+							})
+						}
+					}
+				}
+			}
+
 		default:
 			// Skip dwgtables / dwgtablecells — handled by ReconstructTables
 			if drawType == "dwgtables" || drawType == "dwgtablecells" {
