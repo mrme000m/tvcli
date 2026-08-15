@@ -151,7 +151,10 @@ DEVICE_T=<device_t cookie value>
 | `premium` | 8 | 25 | 50 | unlimited | 40s |
 | `ultimate` | 16 | 50 | 200 | unlimited | 100s |
 
-Set `TV_TIER=free` (default) in `.env` to match your plan. The CLI auto-caps bars and cleans up study slots for free accounts.
+Set `TV_TIER=free` (default) in `.env` to match your plan. The CLI auto-caps bars
+and cleans up study slots for free accounts. See **[docs/TIER_LIMITS.md](docs/TIER_LIMITS.md)**
+for the full, current subscription feature/price matrix (scraped from
+`tradingview.com/pricing`) and how each plan gates Pine-script capabilities.
 
 ## HTTP Server
 

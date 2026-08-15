@@ -382,7 +382,7 @@ See `docs/skills/` for per-skill documentation.
 | `SIGNATURE` | Yes | TradingView `sessionid_sign` cookie |
 | `TV_USER` | For writes | TradingView username |
 | `DEVICE_T` | Yes (for studies) | TradingView `device_t` cookie |
-| `TV_TIER` | No (default `free`) | Subscription tier |
+| `TV_TIER` | No (default `free`) | Subscription tier (see [docs/TIER_LIMITS.md](TIER_LIMITS.md)) |
 | `TW_DEBUG` | No | Set to `1` for debug logging |
 
 ---
