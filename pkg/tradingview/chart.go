@@ -227,10 +227,18 @@ func (cs *ChartSession) RemoveStudy(studyID string) {
 }
 
 // RemoveAllStudies removes all studies from the chart.
+//
+// Study removals are spaced ~100ms apart so the TradingView server reliably
+// releases each indicator slot before the next removal and before the chart
+// session is deleted. This mirrors the proven pattern in reference clients
+// (e.g. tradingview-mcp's removeAllStudies uses a 100ms sleep per study) and
+// avoids free-tier "maximum number of studies" errors from studies being
+// dropped all-at-once.
 func (cs *ChartSession) RemoveAllStudies() {
 	for id := range cs.studyListeners {
 		cs.Send("remove_study", []any{cs.sessionID, id})
 		delete(cs.studyListeners, id)
+		time.Sleep(100 * time.Millisecond)
 	}
 }
 
@@ -239,7 +247,9 @@ func (cs *ChartSession) Delete() {
 	// chart session itself is deleted. The sleep gives the remove_study messages
 	// time to be flushed and processed by the server.
 	cs.RemoveAllStudies()
-	time.Sleep(200 * time.Millisecond)
+	// Allow the per-study remove messages (100ms apart) plus a flush buffer to
+	// be drained before deleting the session, matching reference clients.
+	time.Sleep(300 * time.Millisecond)
 
 	cs.client.Send("chart_delete_session", []any{cs.sessionID})
 	cs.client.UnregisterSession(cs.sessionID)
