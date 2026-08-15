@@ -22,7 +22,7 @@ lint: vet
 skills:
 	go run ./cmd/tvcli skills
 
-# List the 21 registered indicator skills as JSON (includes tier / category /
+# List the 22 registered indicator skills as JSON (includes tier / category /
 # knownBroken metadata added by the skill-command improvements).
 skills-json:
 	go run ./cmd/tvcli skills --json

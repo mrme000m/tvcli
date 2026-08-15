@@ -2,7 +2,9 @@
 
 Each file documents one registered `tvcli <skill>` command: its Pine Script, input variables, presets, and which inputs matter most when switching markets.
 
-## Active Skills (14)
+## Active Skills (15)
+
+> Plus `cust` (ScalpQuant v2, private), `vp`, `ust`, `xau-trend` — see individual docs below.
 
 | Skill | Category | Key Inputs to Vary |
 |-------|----------|-------------------|

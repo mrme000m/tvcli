@@ -343,7 +343,7 @@ tvcli serve [--addr :8765]
 
 ---
 
-## Skill Commands (21 indicators)
+## Skill Commands (22 indicators)
 
 Each skill is a shortcut for `run` with a pre-configured Pine ID and custom output parser.
 
@@ -368,7 +368,7 @@ tvcli <skill-name> [options]
 | `--force-cleanup` | Aggressively retry on study limit |
 
 **Available skills:**
-`bsv`, `dvi`, `vgaps`, `anchored-vp`, `vp`, `order-flow`, `smc`, `ict`, `liq-sweep`, `sr-breaks`, `sniper`, `swingarm`, `ema-atr`, `quantum`, `ust`, `trend`, `golden`, `shemar`, `mtf`, `gold-divergence`, `xau-trend`
+`cust`, `bsv`, `dvi`, `vgaps`, `anchored-vp`, `vp`, `order-flow`, `smc`, `ict`, `liq-sweep`, `sr-breaks`, `sniper`, `swingarm`, `ema-atr`, `quantum`, `ust`, `trend`, `golden`, `shemar`, `mtf`, `gold-divergence`, `xau-trend`
 
 See `docs/skills/` for per-skill documentation.
 

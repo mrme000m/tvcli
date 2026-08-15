@@ -25,7 +25,7 @@ EOF
 # 5. Run a pre-published script by Pine ID
 ./tvcli run "PUB;6daafb2cabe6419d98ae25229d2327f8" --signals --agent --json --symbol BTCUSDT --tf 1H
 
-# 6. Run a built-in skill (21 indicators pre-configured)
+# 6. Run a built-in skill (22 indicators pre-configured)
 ./tvcli smc --symbol BTCUSDT --tf 1H --agent --json
 
 # 7. Search TradingView's public script library
@@ -50,7 +50,7 @@ tvcli/
 │   └── skill/
 │       ├── skill.go    Skill, InputDef, AgentResult types
 │       ├── registry.go Global skill registry
-│       └── parsers/    Per-skill output parsers (21 indicators)
+│       └── parsers/    Per-skill output parsers (22 indicators)
 ├── pkg/
 │   ├── pinefacade/     HTTP client: Pine Facade (CRUD, search, compile)
 │   ├── pipeline/       Signal extractor (periods → events/levels/report)
@@ -88,10 +88,11 @@ tvcli/
 | `clean` | Clean chart sessions to free indicator slots | SESSION+SIGNATURE |
 | `serve` | Start HTTP server for AI agent integration | SESSION+SIGNATURE |
 
-## Built-in Skills (21 Indicators)
+## Built-in Skills (22 Indicators)
 
 | Command | Skill | Category |
 |---------|-------|----------|
+| `cust` | ScalpQuant v2 (private) | Scalping |
 | `bsv` | Buy/Sell Volume | Volume |
 | `dvi` | Delta Volume Intensity | Volume |
 | `vgaps` | Volume Gaps & Imbalances | Volume |
