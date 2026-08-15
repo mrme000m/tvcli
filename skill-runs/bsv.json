@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "workflow": "buying-selling-volume",
+  "market": {
+    "lastPrice": 4017.32,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bgConsensus": "neutral",
+    "buyDominant": 12,
+    "dominanceRatio": 0.25,
+    "neutral": 1,
+    "recentCrosses": 0,
+    "sellDominant": 7,
+    "totalBars": 399
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Buy:12 Sell:7 Neutral:1 Dom:0.25 BG:neutral",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": []
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.55
+  }
+}

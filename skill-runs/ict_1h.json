@@ -1,0 +1,16 @@
+{
+  "meta": {
+    "pineId": "PUB;789a5c79bfe9443585da09e85ece73de",
+    "symbol": "OANDA:XAUUSD",
+    "timeframe": "1h",
+    "periodCount": 0,
+    "timestamp": 0
+  },
+  "classifications": {},
+  "last": {},
+  "bias": "neutral",
+  "confidence": 0,
+  "warnings": [
+    "no bars to extract"
+  ]
+}

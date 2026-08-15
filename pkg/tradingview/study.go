@@ -178,6 +178,17 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 				if data, ok := inlineParsed["data"].(map[string]any); ok {
 					cs.mergeStrategyReport(data["report"])
 				}
+				// dataCompressed at the top level of the parsed `d` JSON (strategy reports).
+				if dataComp, ok := inlineParsed["dataCompressed"].(string); ok && dataComp != "" {
+					if decomp, err := parseCompressed(dataComp); err == nil {
+						cs.mergeStrategyReport(decomp["report"])
+						if graphicsCmds, ok := decomp["graphicsCmds"].(map[string]any); ok {
+							cs.processGraphics(graphicsCmds)
+						}
+					} else if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
+						log.Printf("[DEBUG] inline dataCompressed parse error: %v", err)
+					}
+				}
 			}
 		}
 

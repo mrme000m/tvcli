@@ -1,0 +1,4 @@
+Indicator loaded: 19 inputs defined
+🧹 Pre-cleanup: fresh session...
+📊 Session has no existing studies
+Error: vgaps: study error: timeout after 20s waiting for study data

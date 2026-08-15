@@ -72,15 +72,7 @@ func signalsToAgent(signals *pipeline.Signals, workflow, symbol, tf string, dura
 			LastPrice: pickLastPrice(signals),
 			Bias:      signals.Bias,
 		},
-		Structure: map[string]any{
-			"classifications": signals.Classifications,
-			"last":            signals.Last,
-			"series":          signals.Series,
-			"levels":          nonNilLevels(signals.Levels),
-			"events":          nonNilEvents(signals.Events),
-			"graphicCounts":   signals.GraphicCounts,
-			"meta":            signals.Meta,
-		},
+		Structure: buildStructure(signals),
 		Opportunities: nonNilOpps(opportunitiesFromSignals(signals)),
 		Narrative: skill.Narrative{
 			MarketStructure: fmt.Sprintf("%s | confidence=%.2f | fields=%d", signals.Bias, signals.Confidence, len(signals.Classifications)),
@@ -124,6 +116,24 @@ func nonNilOpps(opps []skill.Opportunity) []skill.Opportunity {
 		return []skill.Opportunity{}
 	}
 	return opps
+}
+
+// buildStructure creates the Structure map for the agent-ready envelope,
+// including strategy report data when available.
+func buildStructure(signals *pipeline.Signals) map[string]any {
+	structure := map[string]any{
+		"classifications": signals.Classifications,
+		"last":            signals.Last,
+		"series":          signals.Series,
+		"levels":          nonNilLevels(signals.Levels),
+		"events":          nonNilEvents(signals.Events),
+		"graphicCounts":   signals.GraphicCounts,
+		"meta":            signals.Meta,
+	}
+	if signals.Report != nil {
+		structure["strategy"] = signals.Report
+	}
+	return structure
 }
 
 // nonNilEvents ensures JSON emits [] instead of null for an empty slice.

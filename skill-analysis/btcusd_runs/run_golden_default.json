@@ -1,0 +1,30 @@
+{
+  "status": "no_data",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T08:09:46Z",
+  "execution": {
+    "durationMs": 7095,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "golden-rule-strategy",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {},
+  "structure": null,
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "No Verdict field; Pine script does not match Golden Rule expectation",
+    "primaryOpportunity": "",
+    "warnings": [
+      "Verdict field missing — indicator is not the expected Golden Rule script"
+    ]
+  },
+  "conformance": {
+    "hasValidData": false,
+    "agenticScore": 0
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

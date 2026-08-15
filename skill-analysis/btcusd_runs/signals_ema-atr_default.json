@@ -1,0 +1,790 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:51:00Z",
+  "execution": {
+    "durationMs": 7069,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "ema-atr",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "bias": "long"
+  },
+  "structure": {
+    "classifications": {
+      "BUY_All": "metric",
+      "BUY_Re_entry": "noise",
+      "BUY_Signal": "metric",
+      "Plot": "price",
+      "SELL_All": "metric",
+      "SELL_Re_entry": "noise",
+      "SELL_Signal": "metric"
+    },
+    "events": [
+      {
+        "time": 498,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 62539.71
+      },
+      {
+        "time": 495,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 63649.5
+      },
+      {
+        "time": 462,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 61852
+      },
+      {
+        "time": 458,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 60758
+      },
+      {
+        "time": 457,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 63436
+      },
+      {
+        "time": 448,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 76132
+      },
+      {
+        "time": 399,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 74653.12
+      },
+      {
+        "time": 378,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 66502.79
+      },
+      {
+        "time": 356,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 72517.06
+      },
+      {
+        "time": 313,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 90360
+      },
+      {
+        "time": 310,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 89437.25
+      },
+      {
+        "time": 293,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 93782.6
+      },
+      {
+        "time": 256,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 85499.99
+      },
+      {
+        "time": 238,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 95936
+      },
+      {
+        "time": 213,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 114942.64
+      },
+      {
+        "time": 197,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 112085.68
+      },
+      {
+        "time": 178,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 109314.98
+      },
+      {
+        "time": 110,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 115038.06
+      },
+      {
+        "time": 8,
+        "field": "dwglabels",
+        "kind": "buy",
+        "value": 102722
+      },
+      {
+        "time": 7,
+        "field": "dwglabels",
+        "kind": "sell",
+        "value": 104628
+      }
+    ],
+    "graphicCounts": {
+      "buy": 252,
+      "sell": 251
+    },
+    "last": {
+      "BUY_All": 0,
+      "BUY_Signal": 0,
+      "Plot": null,
+      "SELL_All": 0,
+      "SELL_Signal": 0
+    },
+    "levels": [
+      {
+        "field": "Plot",
+        "kind": "support",
+        "value": 62324.07550669712
+      }
+    ],
+    "meta": {
+      "pineId": "PUB;7d5f8755ab67400899ef73a9898471e4",
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "1h",
+      "periodCount": 250,
+      "timestamp": 0
+    },
+    "series": [
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62324.07550669712,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783548000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62324.07550669712,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783551600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62324.07550669712,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783555200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62324.07550669712,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783558800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62317.5563211724,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783562400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62317.5563211724,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783566000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62317.5563211724,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783569600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62317.5563211724,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783573200
+      },
+      {
+        "BUY_All": 1,
+        "BUY_Signal": 1,
+        "Plot": 62393.66397657667,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783576800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62415.56340849429,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783580400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62415.56340849429,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783584000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62439.07287154682,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783587600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62439.07287154682,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783591200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62439.07287154682,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783594800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62439.07287154682,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783598400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62445.782256361796,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783602000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62445.782256361796,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783605600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62445.782256361796,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783609200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62445.782256361796,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783612800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62527.77025499579,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783616400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62607.87021856782,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783620000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62672.79275877241,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783623600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62789.56150751921,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783627200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62789.56150751921,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783630800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62789.56150751921,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783634400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62789.56150751921,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783638000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 62789.56150751921,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783641600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63159.12324034447,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783645200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63384.15020600954,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783648800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63406.46874800818,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783652400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63520.55206972129,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783656000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63612.80463118968,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783659600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63612.80463118968,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783663200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63612.80463118968,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783666800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63759.45177940808,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783670400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63892.438096635495,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783674000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63941.452939973286,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783677600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783681200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783684800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783688400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783692000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783695600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783699200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783702800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783706400
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783710000
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783713600
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783717200
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783720800
+      },
+      {
+        "BUY_All": 0,
+        "BUY_Signal": 0,
+        "Plot": 63997.81994854853,
+        "SELL_All": 0,
+        "SELL_Signal": 0,
+        "time": 1783724400
+      }
+    ]
+  },
+  "opportunities": [
+    {
+      "rank": 1,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 62539.71"
+    },
+    {
+      "rank": 2,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 63649.50"
+    },
+    {
+      "rank": 3,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 61852.00"
+    },
+    {
+      "rank": 4,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 60758.00"
+    },
+    {
+      "rank": 5,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 63436.00"
+    },
+    {
+      "rank": 6,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 76132.00"
+    },
+    {
+      "rank": 7,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 74653.12"
+    },
+    {
+      "rank": 8,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 66502.79"
+    },
+    {
+      "rank": 9,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 72517.06"
+    },
+    {
+      "rank": 10,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 90360.00"
+    },
+    {
+      "rank": 11,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 89437.25"
+    },
+    {
+      "rank": 12,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 93782.60"
+    },
+    {
+      "rank": 13,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 85499.99"
+    },
+    {
+      "rank": 14,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 95936.00"
+    },
+    {
+      "rank": 15,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 114942.64"
+    },
+    {
+      "rank": 16,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 112085.68"
+    },
+    {
+      "rank": 17,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 109314.98"
+    },
+    {
+      "rank": 18,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 115038.06"
+    },
+    {
+      "rank": 19,
+      "setup": "dwglabels",
+      "direction": "long",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "buy event at 102722.00"
+    },
+    {
+      "rank": 20,
+      "setup": "dwglabels",
+      "direction": "short",
+      "confidence": "MED",
+      "confluenceScore": 0.6,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "sell event at 104628.00"
+    }
+  ],
+  "narrative": {
+    "marketStructure": "long | confidence=0.60 | fields=7",
+    "primaryOpportunity": "",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.6
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

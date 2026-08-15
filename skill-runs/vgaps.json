@@ -1,0 +1,20 @@
+{
+  "status": "no_data",
+  "workflow": "trend-following-gap-rejection",
+  "market": {},
+  "structure": null,
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "No data",
+    "primaryOpportunity": "",
+    "warnings": null
+  },
+  "validation": {
+    "passed": false,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": false,
+    "agenticScore": 0
+  }
+}

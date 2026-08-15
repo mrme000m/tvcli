@@ -1,0 +1,46 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:52:30Z",
+  "execution": {
+    "durationMs": 25441,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "ict",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "bias": "neutral"
+  },
+  "structure": {
+    "classifications": {},
+    "events": [],
+    "graphicCounts": {},
+    "last": {},
+    "levels": [],
+    "meta": {
+      "pineId": "PUB;789a5c79bfe9443585da09e85ece73de",
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "1h",
+      "periodCount": 0,
+      "timestamp": 0
+    },
+    "series": null
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "neutral | confidence=0.00 | fields=0",
+    "primaryOpportunity": "",
+    "warnings": [
+      "no bars to extract"
+    ]
+  },
+  "conformance": {
+    "hasValidData": false,
+    "agenticScore": 0
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

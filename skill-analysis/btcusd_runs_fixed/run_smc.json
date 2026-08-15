@@ -1,0 +1,44 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T08:09:39Z",
+  "execution": {
+    "durationMs": 7442,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "smart-money-concepts",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64711.05,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bearishBOS": 3,
+    "bearishCHoCH": 2,
+    "bearishFVG": 5,
+    "bearishOB": 6,
+    "bosCount": 9,
+    "bullishBOS": 6,
+    "bullishCHoCH": 3,
+    "bullishFVG": 10,
+    "bullishOB": 6,
+    "chochCount": 5,
+    "fvgCount": 15,
+    "obCount": 12
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "BOS: 9 | CHoCH: 5 | FVG: 15 | OB: 12 | Bias: bullish",
+    "primaryOpportunity": "",
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.75
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

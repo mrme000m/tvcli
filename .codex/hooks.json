@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "command": "openknowledge insights observe --runtime codex",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

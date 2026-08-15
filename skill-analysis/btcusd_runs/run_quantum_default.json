@@ -1,0 +1,50 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:53:29Z",
+  "execution": {
+    "durationMs": 8695,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "quantum-ribbon",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64328.74745380882,
+    "bias": "neutral"
+  },
+  "structure": {
+    "bias": "neutral",
+    "buySignal": false,
+    "price": 64328.74745380882,
+    "ribbon": {
+      "Plot": 64328.74745380882,
+      "Plot_10": 64334.65588278201,
+      "Plot_2": 64390.85889518642,
+      "Plot_3": 64292.60797575501,
+      "Plot_4": 64288.07435500271,
+      "Plot_5": 64259.634203147565,
+      "Plot_6": 64554.1617232121,
+      "Plot_7": 64467.52699330834,
+      "Plot_8": 64456.634453076615,
+      "Plot_9": 64382.84438778669
+    },
+    "sellSignal": false,
+    "stopHit": false,
+    "targetHit": false
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Price: 64328.75 | Bias: neutral | Ribbon lines: 10",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.7
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

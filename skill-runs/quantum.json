@@ -1,0 +1,46 @@
+{
+  "status": "ok",
+  "workflow": "quantum-ribbon",
+  "market": {
+    "lastPrice": 4014.3976018970898,
+    "bias": "bullish"
+  },
+  "structure": {
+    "alignment": 8,
+    "ma1": 4014.4,
+    "ma2": 4013.05,
+    "ma3": 4012.34,
+    "ma4": 4011.93,
+    "ma5": 4011.68,
+    "ma6": 4011.48,
+    "ma7": 4011.28,
+    "ma8": 4011.04,
+    "score": 0.08,
+    "spread": 0.08
+  },
+  "opportunities": [
+    {
+      "rank": 1,
+      "setup": "ribbon_alignment",
+      "direction": "long",
+      "confidence": "LOW",
+      "confluenceScore": 0.02,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "Alignment=8 Spread=0.1% bullish"
+    }
+  ],
+  "narrative": {
+    "marketStructure": "Alignment: 8/8 | Spread: 0.1% | Bias: bullish",
+    "primaryOpportunity": "Alignment=8 Spread=0.1% bullish",
+    "warnings": null
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.75
+  }
+}

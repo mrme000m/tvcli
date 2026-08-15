@@ -38,6 +38,7 @@ type WSClient struct {
 	server         string
 	token          string
 	signature      string
+	deviceToken    string
 	location       string
 	loggedIn       bool
 	connected      bool
@@ -53,7 +54,7 @@ type WSClient struct {
 func NewClient(opts ...ClientOption) Client {
 	c := &WSClient{
 		server:   "data",
-		location: "https://www.tradingview.com/",
+		location: "https://www.tradingview.com/chart/",
 		sessions: make(map[string]*sessionEntry),
 	}
 	for _, o := range opts {
@@ -67,6 +68,7 @@ type ClientOption func(*WSClient)
 func WithServer(s string) ClientOption    { return func(c *WSClient) { c.server = s } }
 func WithToken(t string) ClientOption     { return func(c *WSClient) { c.token = t } }
 func WithSignature(s string) ClientOption { return func(c *WSClient) { c.signature = s } }
+func WithDeviceToken(d string) ClientOption { return func(c *WSClient) { c.deviceToken = d } }
 func WithLocation(l string) ClientOption  { return func(c *WSClient) { c.location = l } }
 func WithDebug(d bool) ClientOption       { return func(c *WSClient) { c.debug = d } }
 
@@ -93,7 +95,8 @@ func (c *WSClient) Connect() error {
 	uri := fmt.Sprintf("wss://%s.tradingview.com/socket.io/websocket?from=chart&type=chart", c.server)
 
 	headers := http.Header{}
-	headers.Set("Origin", c.location)
+	// Origin must be the base TradingView URL, not the chart page.
+	headers.Set("Origin", "https://www.tradingview.com/")
 	headers.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
 	headers.Set("Accept-Encoding", "gzip, deflate, br")
 	headers.Set("Accept-Language", "en,en-US;q=0.9")
@@ -101,7 +104,7 @@ func (c *WSClient) Connect() error {
 	headers.Set("Pragma", "no-cache")
 
 	if c.token != "" {
-		cookie := auth.GenCookies(c.token, c.signature)
+		cookie := auth.GenCookies(c.token, c.signature, c.deviceToken)
 		if cookie != "" {
 			headers.Set("Cookie", cookie)
 		}
@@ -123,7 +126,7 @@ func (c *WSClient) Connect() error {
 	// Fetch auth token from TradingView page when cookies are present
 	authToken := "unauthorized_user_token"
 	if c.token != "" {
-		if token, err := auth.FetchToken(c.token, c.signature, c.location); err == nil && token != "" {
+		if token, err := auth.FetchToken(c.token, c.signature, c.location, c.deviceToken); err == nil && token != "" {
 			authToken = token
 			if c.debug {
 				log.Printf("[DEBUG] fetched auth_token: %s...", token[:min(20, len(token))])

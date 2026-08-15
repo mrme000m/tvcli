@@ -1,0 +1,39 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:55:10Z",
+  "execution": {
+    "durationMs": 6809,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "swingarm-atr-trend",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 63776.03848139876,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bias": "bullish",
+    "extremum": 64967.25,
+    "fib1": 64231.08,
+    "fib2": 64030.96,
+    "fib3": 63911.84,
+    "signal": 0,
+    "trailingStop": 63776.04
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Stop: 63776 | Extremum: 64967 | Bias: bullish",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.65
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

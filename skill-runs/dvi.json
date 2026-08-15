@@ -1,0 +1,32 @@
+{
+  "status": "ok",
+  "workflow": "trend-following-sr-break",
+  "market": {
+    "lastPrice": 4017.32,
+    "bias": "neutral"
+  },
+  "structure": {
+    "momentum": 0,
+    "resistance": 4202.705,
+    "sideways": 386,
+    "support": 4021.815,
+    "trend": 0,
+    "trendDown": 13,
+    "trendUp": 0,
+    "volatility": 30.06504675908961
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Trend: neutral | Vol: 30.07 | Mom: 0.00 | S/R: 4021.82 / 4202.70",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": []
+  },
+  "validation": {
+    "passed": true,
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.5
+  }
+}

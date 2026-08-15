@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "workflow": "swingarm-atr-trend",
+  "market": {
+    "lastPrice": 3999.270368115989,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bias": "bullish",
+    "extremum": 4023.84,
+    "fib1": 4008.65,
+    "fib2": 4004.53,
+    "fib3": 4002.07,
+    "signal": 0,
+    "trailingStop": 3999.27
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Stop: 3999 | Extremum: 4024 | Bias: bullish",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": []
+  },
+  "validation": {
+    "passed": true,
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.65
+  }
+}

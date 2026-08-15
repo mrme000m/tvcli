@@ -1,0 +1,131 @@
+{
+  "Volume Profile": {
+    "title": "I Built a New Kind Of Volume Profile - It Won An Award (Free Tool)",
+    "url": "https://www.youtube.com/watch?v=NKf_6vVmvCI",
+    "key_concepts": [
+      "Auction Market Theory",
+      "Point of Control (POC)",
+      "Value Area",
+      "Volume Delta",
+      "Session-based analysis"
+    ],
+    "indicator_or_strategy": "10X bull verse bear VP intraday session [1]",
+    "signal_generation": "Identifies fair value agreements through increasing POCs across sessions; Volume Delta tracks net limit order fills at specific tick levels [2], [3]",
+    "confidence_or_scoring": "Award-winning (EP sign) status; uses session overlaps to find higher volume/volatility for clearer expansions [4], [1]",
+    "best_timeframe": "5-minute (demonstrated on Bitcoin) [5]",
+    "setup_steps": [
+      "Search '10X' in TradingView indicators [1]",
+      "Configure up to 10 market sessions (e.g., NY, London, Tokyo) [6], [5]",
+      "Enable 'Volume Delta' and 'Naked POC/Value Area' for untested levels [7], [3]"
+    ]
+  },
+  "Liquidity": {
+    "title": "ITC Liquidity Sweep Indicator Explained | Smart Money Liquidity Sweeps with TradingView Pine Script",
+    "url": "https://www.youtube.com/watch?v=qFb7uEF_NX4",
+    "key_concepts": [
+      "Liquidity Zones",
+      "Stop Loss Hunting",
+      "Swing High/Low",
+      "ICT Concepts"
+    ],
+    "indicator_or_strategy": "ITC Liquidity Sweep Indicator [8]",
+    "signal_generation": "Generates labels when price 'sweeps' (touches and reverses) a liquidity zone defined by previous swing points [8], [9]",
+    "confidence_or_scoring": "Zones are invalidated and removed once price breaks through the level [10], [9]",
+    "best_timeframe": "not explicitly covered",
+    "setup_steps": [
+      "Set Swing Length (e.g., 20 candles) to define pivots [11]",
+      "Define 'Max Active Levels' to filter recent vs. old swinger levels [11], [12]",
+      "Set alerts for 'Bullish/Bearish Sweep' or 'Inside Zone' conditions [13]"
+    ]
+  },
+  "Market Structure": {
+    "title": "📈 Smart Money Market Structure Tool | BoS + CHoCH in TradingView",
+    "url": "https://www.youtube.com/watch?v=NH4fzhUoENc",
+    "key_concepts": [
+      "Break of Structure (BoS)",
+      "Change of Character (CHoCH)",
+      "Higher High/Higher Low mapping",
+      "Market Indecision"
+    ],
+    "indicator_or_strategy": "Market Structure Break of Structure and Change of Structure [14]",
+    "signal_generation": "Automatically marks structural points (HH, HL, LH, LL) and labels BoS/CHoCH when price breaks these levels [15], [14]",
+    "confidence_or_scoring": "Identifies market indecision when HH/LL patterns are mixed (e.g., Doji behavior) [16]",
+    "best_timeframe": "5-minute (demonstrated on Nifty) [14]",
+    "setup_steps": [
+      "Apply the script from personal or community indicator search [14]",
+      "Use markings to determine if the trend is currently bullish or bearish [15]",
+      "Refer to BoS/CHoCH labels for entry/exit bias [14]"
+    ]
+  },
+  "Order Flow": {
+    "title": "The Top Ten Most Accurate Buy-Sell Indicators on TradingView",
+    "url": "https://www.youtube.com/watch?v=DJ97c8VkZaY",
+    "key_concepts": [
+      "Mean Deviation",
+      "Volatility Waves",
+      "Z-Score Divergence",
+      "Smart Money Logic"
+    ],
+    "indicator_or_strategy": "Pine Trades Market Beacon (and 9 others) [17], [18]",
+    "signal_generation": "Uses price action methodologies and smart money logic to generate green 'long' and red 'short' labels [18]",
+    "confidence_or_scoring": "Higher quality signals prioritized by using signal cooldowns and ADX trend filters [19], [20]",
+    "best_timeframe": "15-minute (tested on GBP/JPY) [21]",
+    "setup_steps": [
+      "Enable 'Market Beacon' and disable redundant labels for a clean version [18]",
+      "Adjust signal modes (e.g., 'Combined Signal' for mean deviation) to remove weak signals [22]",
+      "Add 'Mean Reversion Bands' for visual context on overstretched conditions [17]"
+    ]
+  },
+  "Volatility/Trend": {
+    "title": "Pine Script Tutorial | Developing Real Trading Strategies On TradingView",
+    "url": "https://www.youtube.com/watch?v=8YaGDki1_KI",
+    "key_concepts": [
+      "Series Data",
+      "Moving Average Crossovers",
+      "Average True Range (ATR)",
+      "Trend Following vs. Mean Reversion"
+    ],
+    "indicator_or_strategy": "Custom EMA/SMA Crossover Strategy [23], [24]",
+    "signal_generation": "Long entries triggered when fast EMA crosses above slow EMA/SMA; exits based on ATR-linked stop losses or price crossing back below the 200-period MA [23], [25], [26]",
+    "confidence_or_scoring": "Backtested against 'Buy and Hold' returns; Sharpe ratio analysis for risk-adjusted performance [27], [28]",
+    "best_timeframe": "1-hour (demonstrated on Bitcoin) [29]",
+    "setup_steps": [
+      "Open Pine Editor and define variables for fast/slow moving averages [29], [30]",
+      "Apply 'overlay=true' to see signals directly on price bars [29]",
+      "Script entries and exits using 'strategy.entry' and 'strategy.close' functions [23], [27]"
+    ]
+  },
+  "Price Action": {
+    "title": "Insane 1-Min Scalping Indicator! 📈 #DayTrading #Scalping #TradingStrategy",
+    "url": "https://www.youtube.com/watch?v=_-kuNOfDEhU",
+    "key_concepts": [
+      "RSI Divergence",
+      "Regular vs. Hidden Divergence",
+      "Convergence",
+      "Scalping"
+    ],
+    "indicator_or_strategy": "RSI Divergence indicator [31]",
+    "signal_generation": "Detects regular bullish/bearish and hidden bullish/bearish divergences on the RSI oscillator to signal reversals or continuations [31]",
+    "confidence_or_scoring": "Claimed 'very high' win rate for high-frequency scalp targets (e.g., 1000-2000 tick targets) [31]",
+    "best_timeframe": "1-minute (Gold scalping) [31]",
+    "setup_steps": [
+      "Add RSI Divergence script to the chart [31]",
+      "Uncheck unnecessary background lines for visibility [31]",
+      "Set take-profit parameters (e.g., 1000 to 2000) [31]"
+    ]
+  },
+  "Sentiment/Gap": {
+    "title": "VIP Algos: How the VIP Algorithm That’s Changing the Market Works?",
+    "url": "https://www.youtube.com/watch?v=SvBwspGtO8A",
+    "key_concepts": [
+      "not explicitly covered"
+    ],
+    "indicator_or_strategy": "VIP Algos [32]",
+    "signal_generation": "not explicitly covered",
+    "confidence_or_scoring": "not explicitly covered",
+    "best_timeframe": "not explicitly covered",
+    "setup_steps": [
+      "not explicitly covered"
+    ]
+  }
+}

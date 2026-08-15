@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:54:57Z",
+  "execution": {
+    "durationMs": 6132,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "support-resistance-breaks",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 63462.774999999994,
+    "bias": "bearish"
+  },
+  "structure": {
+    "bias": "bearish",
+    "breakBarsAgo": 111,
+    "lastBreak": "bearish",
+    "price": 63462.774999999994,
+    "resistance": 64387.99,
+    "support": 62537.56
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Support: 62537.56 | Resistance: 64387.99 | Last break: bearish (111 bars ago)",
+    "primaryOpportunity": "",
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.8
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

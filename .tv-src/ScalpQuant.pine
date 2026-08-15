@@ -1,0 +1,340 @@
+//@version=5
+// ScalpQuant — consolidated quantitative scalping indicator.
+// Exposes ONLY named numeric plot series (no tables, boxes, lines, labels or
+// drawings) so the TradingView facade returns them as parseable `periods`.
+// Every metric below is a number; if a source script was purely graphic
+// (SMC drawings, VP cluster boxes) it was dropped or reduced to a numeric state.
+indicator("ScalpQuant", overlay=true, max_bars_back=1000)
+
+// ─────────────────────────────────────────────────────────────────────────
+// INPUTS
+// ─────────────────────────────────────────────────────────────────────────
+// Bias engine (MTF)
+fastLength      = input.int(10, "Fast MA Len", minval=1, group="Bias")
+slowLength      = input.int(20, "Slow MA Len", minval=1, group="Bias")
+rsiLength       = input.int(14, "RSI Len", minval=1, group="Bias")
+macdFastLength  = input.int(12, "MACD Fast", minval=1, group="Bias")
+macdSlowLength  = input.int(26, "MACD Slow", minval=1, group="Bias")
+macdSignalLength= input.int(9,  "MACD Signal", minval=1, group="Bias")
+bbLength        = input.int(20, "BB Len", minval=1, group="Bias")
+bbMultiplier    = input.float(2.0, "BB Mult", minval=0.1, group="Bias")
+dmiLength       = input.int(14, "DMI Len", minval=1, group="Bias")
+dmiSmoothing    = input.int(14, "DMI Smooth", minval=1, group="Bias")
+sarStartValue   = input.float(0.02, "SAR Start", minval=0.01, step=0.01, group="Bias")
+sarIncrement    = input.float(0.02, "SAR Inc", minval=0.01, step=0.01, group="Bias")
+sarMaxValue     = input.float(0.2, "SAR Max", minval=0.1, step=0.1, group="Bias")
+
+// Trend / stop
+ema2Len   = input.int(20, "EMA1 Len", minval=1, group="Trend")
+ema3Len   = input.int(50, "EMA2 Len", minval=1, group="Trend")
+atrLen    = input.int(7,  "ATR Len", minval=1, group="Trend")
+atrMult   = input.float(1.4, "ATR Mult", minval=0.1, step=0.1, group="Trend")
+atrP1     = input.int(10, "ST1 ATR", minval=1, group="Trend")
+mult1     = input.float(1.0, "ST1 Mult", minval=0.1, step=0.1, group="Trend")
+atrP2     = input.int(5,  "ST2 ATR", minval=1, group="Trend")
+mult2     = input.float(0.5, "ST2 Mult", minval=0.1, step=0.1, group="Trend")
+swATRLen    = input.int(28, "Swing ATR Len", minval=1, group="Trend")
+swATRFactor = input.float(5.0, "Swing ATR Factor", minval=0.5, step=0.1, group="Trend")
+
+// EMA ribbon / sniper
+emaFastLen = input.int(14,  "EMA Fast", minval=1, group="EMA")
+emaSlowLen = input.int(21,  "EMA Slow", minval=1, group="EMA")
+ema200Len  = input.int(200, "EMA 200", minval=1, group="EMA")
+tp1Pct = input.float(1.1, "TP1 %", minval=0.1)
+tp2Pct = input.float(3.3, "TP2 %", minval=0.1)
+tp3Pct = input.float(5.5, "TP3 %", minval=0.1)
+
+// Volume
+volMaLen  = input.int(10, "Buy/Sell Vol MA", minval=1, group="Volume")
+vpLookback= input.int(200, "VP Lookback", minval=20, maxval=500, group="Volume")
+vpBins    = input.int(50,  "VP Bins", minval=10, maxval=200, group="Volume")
+volMaLenOF= input.int(20, "VolSpike MA", minval=1, group="Volume")
+volMultOF = input.float(3.0, "VolSpike Mult", minval=1.0, step=0.1, group="Volume")
+coinMaLen = input.int(5,  "VolSpike Coin MA", minval=1, group="Volume")
+
+// Levels
+leftB  = input.int(15, "S/R Left", minval=1, group="Levels")
+rightB = input.int(15, "S/R Right", minval=1, group="Levels")
+
+// Oscillator / quality
+hmaLength      = input.int(50, "HMA Len", minval=1, group="Quality")
+stAtr          = input.int(10, "Conf ST ATR", minval=1, group="Quality")
+stFactor       = input.float(3.0, "Conf ST Mult", minval=0.1, step=0.1, group="Quality")
+kernelPeriod   = input.int(30, "Conf Kernel", minval=1, group="Quality")
+dviVolLen      = input.int(14, "DVI Vol Len", minval=1, group="Quality")
+dviMomLen      = input.int(14, "DVI Mom Len", minval=1, group="Quality")
+erLen          = input.int(20, "TQI ER Len", minval=5, group="Quality")
+
+// Liquidity
+sweepLookback = input.int(20, "Sweep Lookback", minval=5, group="Liquidity")
+sweepMult     = input.float(1.5, "Sweep Vol Mult", minval=1.0, step=0.1, group="Liquidity")
+
+// ─────────────────────────────────────────────────────────────────────────
+// 1) BIAS ENGINE (mtf) — 6-vote trend score per timeframe
+// ─────────────────────────────────────────────────────────────────────────
+getTrend() =>
+    fastMA = ta.sma(close, fastLength)
+    slowMA = ta.sma(close, slowLength)
+    maUp = fastMA > slowMA
+    rsiUp = ta.rsi(close, rsiLength) > 50
+    [macdLine, signalLine, _] = ta.macd(close, macdFastLength, macdSlowLength, macdSignalLength)
+    macdUp = macdLine > signalLine
+    [mid, _, _] = ta.bb(close, bbLength, bbMultiplier)
+    bbUp = close > mid
+    [diP, diM, _] = ta.dmi(dmiLength, dmiSmoothing)
+    dmiUp = diP > diM
+    psarUp = close > ta.sar(sarStartValue, sarIncrement, sarMaxValue)
+    strength = (maUp ? 1 : -1) + (rsiUp ? 1 : -1) + (macdUp ? 1 : -1) + (bbUp ? 1 : -1) + (dmiUp ? 1 : -1) + (psarUp ? 1 : -1)
+    bias = strength >= 2 ? 1 : strength <= -2 ? -1 : 0
+    [bias, strength]
+
+[bM15, sM15] = request.security(syminfo.tickerid, "15", getTrend(), lookahead=barmerge.lookahead_off)
+[bM30, sM30] = request.security(syminfo.tickerid, "30", getTrend(), lookahead=barmerge.lookahead_off)
+[bH1,  sH1 ] = request.security(syminfo.tickerid, "60", getTrend(), lookahead=barmerge.lookahead_off)
+[bH4,  sH4 ] = request.security(syminfo.tickerid, "240", getTrend(), lookahead=barmerge.lookahead_off)
+[bD1,  sD1 ] = request.security(syminfo.tickerid, "D", getTrend(), lookahead=barmerge.lookahead_off)
+
+biasWeighted = (bM15 * 0.5 + bM30 * 1.0 + bH1 * 1.5 + bH4 * 2.0 + bD1 * 3.0) / 8.0
+biasStrength = sM15 + sM30 + sH1 + sH4 + sD1
+
+plot(bM15, "biasM15", display=display.none)
+plot(bM30, "biasM30", display=display.none)
+plot(bH1,  "biasH1",  display=display.none)
+plot(bH4,  "biasH4",  display=display.none)
+plot(bD1,  "biasD1",  display=display.none)
+plot(biasStrength, "biasStrength", display=display.none)
+plot(biasWeighted, "biasWeighted", display=display.none)
+plot(close, "price", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 2) TREND / STOP (ema-atr, ust, swingarm)
+// ─────────────────────────────────────────────────────────────────────────
+atr = ta.atr(atrLen)
+ema2 = ta.ema(close, ema2Len)
+ema3 = ta.ema(close, ema3Len)
+longStop = close - atr * atrMult
+shortStop = close + atr * atrMult
+var float trail = na
+var bool trendUp = true
+if na(trail)
+    trail := close
+if close > trail
+    trendUp := true
+    trail := math.max(trail, longStop)
+else
+    trendUp := false
+    trail := math.min(trail, shortStop)
+emaTrend = (trendUp and close > ema2 and close > ema3) ? 1 : (not trendUp and close < ema2 and close < ema3) ? -1 : 0
+
+[supertrend1, dir1] = ta.supertrend(mult1, atrP1)
+[supertrend2, dir2] = ta.supertrend(mult2, atrP2)
+stTrend = dir1 == -1 ? 1 : -1
+
+swLoss = swATRFactor * ta.atr(swATRLen)
+var float swUp = na
+var float swDn = na
+var int swTrend = 1
+var float swEx = na
+swUp := na(swUp[1]) ? close - swLoss : (close[1] > swUp[1] ? math.max(close - swLoss, swUp[1]) : close - swLoss)
+swDn := na(swDn[1]) ? close + swLoss : (close[1] < swDn[1] ? math.min(close + swLoss, swDn[1]) : close + swLoss)
+swTrend := close > swDn[1] ? 1 : close < swUp[1] ? -1 : nz(swTrend[1], 1)
+swTrail = swTrend == 1 ? swUp : swDn
+swEx := swTrend == 1 ? math.max(nz(swEx[1], high), high) : math.min(nz(swEx[1], low), low)
+fib1 = swEx + (swTrail - swEx) * 0.618
+fib2 = swEx + (swTrail - swEx) * 0.786
+fib3 = swEx + (swTrail - swEx) * 0.886
+
+plot(emaTrend, "emaTrend", display=display.none)
+plot(longStop, "atrStopLong")
+plot(shortStop, "atrStopShort")
+plot(trail, "emaATRTrail")
+plot(stTrend, "stTrend", display=display.none)
+plot(supertrend1, "st1")
+plot(supertrend2, "st2")
+plot(swTrail, "swingTrail")
+plot(fib1, "fib1", display=display.none)
+plot(fib2, "fib2", display=display.none)
+plot(fib3, "fib3", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 3) EMA RIBBON / SNIPER
+// ─────────────────────────────────────────────────────────────────────────
+emaFast = ta.ema(close, emaFastLen)
+emaSlow = ta.ema(close, emaSlowLen)
+ema200v = ta.ema(close, ema200Len)
+crossUp = ta.crossover(emaFast, emaSlow)
+crossDn = ta.crossunder(emaFast, emaSlow)
+emaTrendCross = crossUp ? 1 : crossDn ? -1 : 0
+tp1 = close * (1 + tp1Pct / 100)
+tp2 = close * (1 + tp2Pct / 100)
+tp3 = close * (1 + tp3Pct / 100)
+
+plot(emaFast, "emaFast")
+plot(emaSlow, "emaSlow")
+plot(ema200v, "ema200")
+plot(emaTrendCross, "emaTrendCross", display=display.none)
+plot(tp1, "tp1", display=display.none)
+plot(tp2, "tp2", display=display.none)
+plot(tp3, "tp3", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 4) VOLUME (bsv, vp, order-flow)
+// ─────────────────────────────────────────────────────────────────────────
+bv = high == low ? 0.0 : volume * (close - low) / (high - low)
+sv = high == low ? 0.0 : volume * (high - close) / (high - low)
+maBuy = ta.sma(bv, volMaLen)
+maSell = ta.sma(sv, volMaLen)
+
+var float[] vc = array.new_float()
+var float[] vv = array.new_float()
+array.push(vc, close)
+array.push(vv, volume)
+if array.size(vc) > vpLookback
+    array.shift(vc)
+    array.shift(vv)
+var float poc = na
+var float vah = na
+var float val = na
+if array.size(vc) >= vpLookback
+    pmin = array.min(vc)
+    pmax = array.max(vc)
+    binW = pmax > pmin ? (pmax - pmin) / vpBins : syminfo.mintick
+    binVol = array.new_float(vpBins, 0.0)
+    binCtr = array.new_float(vpBins, 0.0)
+    for i = 0 to vpBins - 1
+        binCtr.set(i, pmin + (i + 0.5) * binW)
+    for i = 0 to array.size(vc) - 1
+        p = array.get(vc, i)
+        v = array.get(vv, i)
+        idx = math.min(vpBins - 1, math.max(0, int((p - pmin) / binW)))
+        binVol.set(idx, binVol.get(idx) + v)
+    maxV = array.max(binVol)
+    poc := binCtr.get(binVol.indexof(maxV))
+    total = 0.0
+    for i = 0 to vpBins - 1
+        total += binVol.get(i)
+    cum = 0.0
+    val := na
+    vah := na
+    for i = 0 to vpBins - 1
+        cum += binVol.get(i)
+        if cum >= total * 0.15 and na(val)
+            val := binCtr.get(i)
+        if cum >= total * 0.85 and na(vah)
+            vah := binCtr.get(i)
+
+volMAOF = ta.sma(volume, volMaLenOF)
+coinLine = ta.sma(close, coinMaLen)
+volSpike = volume > volMAOF * volMultOF ? (close < coinLine ? -1 : 1) : 0
+
+plot(bv, "buyVol", display=display.none)
+plot(sv, "sellVol", display=display.none)
+plot(maBuy, "maBuy", display=display.none)
+plot(maSell, "maSell", display=display.none)
+plot(poc, "poc")
+plot(vah, "vah", display=display.none)
+plot(val, "val", display=display.none)
+plot(volSpike, "volSpike", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 5) LEVELS (sr-breaks)
+// ─────────────────────────────────────────────────────────────────────────
+pl = ta.pivotlow(leftB, rightB)
+ph = ta.pivothigh(leftB, rightB)
+support = fixnan(pl)
+resistance = fixnan(ph)
+plot(support, "support")
+plot(resistance, "resistance")
+
+// ─────────────────────────────────────────────────────────────────────────
+// 6) OSCILLATOR / QUALITY (gold-divergence, shemar, trend TQI, dvi)
+// ─────────────────────────────────────────────────────────────────────────
+rsiV = ta.rsi(close, rsiLength)
+lbR = 5, lbL = 5, rU = 60, rL = 5
+plF = not na(ta.pivotlow(rsiV, lbL, lbR))
+phF = not na(ta.pivothigh(rsiV, lbL, lbR))
+inRange(c) =>
+    bars = ta.barssince(c)
+    rL <= bars and bars <= rU
+rsiHL = rsiV[lbR] > ta.valuewhen(plF, rsiV[lbR], 1) and inRange(plF[1])
+priceLL = low[lbR] < ta.valuewhen(plF, low[lbR], 1)
+bullDiv = priceLL and rsiHL and plF ? 1 : 0
+rsiLH = rsiV[lbR] < ta.valuewhen(phF, rsiV[lbR], 1) and inRange(phF[1])
+priceHH = high[lbR] > ta.valuewhen(phF, high[lbR], 1)
+bearDiv = priceHH and rsiLH and phF ? -1 : 0
+
+hma = ta.hma(close, hmaLength)
+[hmas, hdir] = ta.supertrend(stFactor, stAtr)
+hmaUp = hma > hma[1]
+hmaDown = hma < hma[1]
+kernel = ta.sma(close, kernelPeriod)
+distance = close - kernel
+swH = ta.pivothigh(high, 5, 5)
+swL = ta.pivotlow(low, 5, 5)
+lastSH = fixnan(swH)
+lastSL = fixnan(swL)
+bosB = close > lastSH
+bosS = close < lastSL
+score = 0
+score += (hmaUp and hdir == -1) or (hmaDown and hdir == 1) ? 20 : 0
+score += kernel > kernel[1] ? 20 : 0
+score += math.abs(distance) > ta.atr(14) * 0.5 ? 20 : 0
+score += bosB or bosS ? 20 : 0
+score += (hmaUp and hdir == -1) ? 10 : 0
+score := math.min(score, 100)
+confidence = score
+
+erDenom = math.sum(math.abs(close - close[1]), erLen)
+er = na(erDenom) ? na : math.abs(close - close[erLen]) / erDenom
+volNorm = 1 - math.min(1.0, atr / (ta.atr(100) + syminfo.mintick))
+structC = close > ta.sma(close, dviMomLen) ? 1.0 : 0.0
+momC = ta.roc(close, dviMomLen) > 0 ? 1.0 : 0.0
+tqi = math.max(0.0, math.min(1.0, 0.35 * er + 0.20 * volNorm + 0.25 * structC + 0.20 * momC))
+
+atrD = ta.atr(dviVolLen)
+mom = ta.roc(close, dviMomLen)
+smaC = ta.sma(close, dviMomLen)
+dviTrend = mom > 0 and close > smaC ? 1 : mom < 0 and close < smaC ? -1 : 0
+rocV = mom
+
+plot(rsiV, "rsi", display=display.none)
+plot(bullDiv, "bullDiv", display=display.none)
+plot(bearDiv, "bearDiv", display=display.none)
+plot(hma, "hma", display=display.none)
+plot(hmas, "supertrend", display=display.none)
+plot(confidence, "confidence", display=display.none)
+plot(tqi, "tqi", display=display.none)
+plot(dviTrend, "dviTrend", display=display.none)
+plot(rocV, "roc", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 7) LIQUIDITY TRIGGER (liq-sweep)
+// ─────────────────────────────────────────────────────────────────────────
+hh = ta.highest(high[1], sweepLookback)
+ll = ta.lowest(low[1], sweepLookback)
+avgVol = ta.sma(volume, 20)
+isHV = volume > avgVol * sweepMult
+bullSweep = low < ll and close > ll and isHV ? 1 : 0
+bearSweep = high > hh and close < hh and isHV ? -1 : 0
+liqSweep = bullSweep + bearSweep
+plot(liqSweep, "liqSweep", display=display.none)
+
+// ─────────────────────────────────────────────────────────────────────────
+// 8) COMPOSITE SIGNAL
+// ─────────────────────────────────────────────────────────────────────────
+scalpScore = 0.0
+scalpScore += biasWeighted * 25
+scalpScore += emaTrend * 10
+scalpScore += stTrend * 10
+scalpScore += (confidence - 50) / 50 * 20
+scalpScore += (tqi - 0.5) * 2 * 15
+scalpScore += bullDiv * 5 + bearDiv * 5
+scalpScore += liqSweep * 5
+scalpScore += volSpike * 5
+scalpScore := math.max(-100.0, math.min(100.0, scalpScore))
+scalpSignal = scalpScore > 30 ? 1 : scalpScore < -30 ? -1 : 0
+plot(scalpScore, "scalpScore", display=display.none)
+plot(scalpSignal, "scalpSignal", display=display.none)
+
+alertcondition(scalpSignal == 1, "Scalp BUY", "ScalpQuant BUY {{ticker}} @ {{close}}")
+alertcondition(scalpSignal == -1, "Scalp SELL", "ScalpQuant SELL {{ticker}} @ {{close}}")

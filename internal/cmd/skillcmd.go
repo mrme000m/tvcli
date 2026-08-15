@@ -44,6 +44,33 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	}
 	symbol = normalizedSymbol
 
+	// Public vs private gating. Public scripts (PUB;) run on any TradingView
+	// tier, including free. Only invite-only / private namespaces need an
+	// invitation, so we dynamically detect them (via the Pine ID prefix and,
+	// when reachable, the public script library search) and negate them
+	// before attempting a run. PUB scripts are never blocked on this check.
+	if !pinefacade.IsPublicPineID(c.skill.PineID) {
+		facade := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
+		sa, saErr := facade.GetScriptAccess(c.skill.PineID, cfg.CookieHeaderOrEmpty())
+		if flags.Has("verify-access") {
+			fmt.Fprintf(env.Stdout, "script %q (%s): access=%s type=%s source=%s\n",
+				c.skill.Name, c.skill.PineID, sa.Access, sa.Type, sa.Source)
+			return nil
+		}
+		if saErr == nil && sa.Access != "public" && sa.Access != "unknown" {
+			if flags.Has("allow-private") {
+				fmt.Fprintf(env.Stderr, "⚠ %s is a %s script; running anyway (--allow-private)\n", c.skill.Name, sa.Access)
+			} else {
+				return fmt.Errorf("skill %q uses a %s script (%s); it requires an invitation and is skipped. Use --allow-private to override",
+					c.skill.Name, sa.Access, c.skill.PineID)
+			}
+		}
+	} else if flags.Has("verify-access") {
+		fmt.Fprintf(env.Stdout, "script %q (%s): access=public type=%s source=prefix\n",
+			c.skill.Name, c.skill.PineID, pinefacade.AccessFromPineID(c.skill.PineID))
+		return nil
+	}
+
 	tf := flags.Get("tf")
 	if tf == "" {
 		tf = flags.Get("timeframe")
@@ -136,9 +163,13 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	// Pine script where metaInfo is available. We also fall back to it when a
 	// hand-coded parser yields no_data but a schema exists, so a renamed or
 	// mismatched script still produces structured output instead of silently
-	// reporting no_data.
+	// reporting no_data. Graphics-only skills (RequiresGraphic) are exempt:
+	// their per-skill parser already inspected the graphic layer and returned
+	// no_data on purpose, so routing them to a period-based extractor would
+	// only produce empty noise.
 	useSignals := flags.Has("signals")
-	if !useSignals && result.Status == "no_data" && res.Indicator != nil && res.Indicator.Schema != nil {
+	if !useSignals && result.Status == "no_data" && !c.skill.RequiresGraphic &&
+		res.Indicator != nil && res.Indicator.Schema != nil {
 		useSignals = true
 	}
 	if useSignals {
@@ -333,4 +364,5 @@ var reservedSkillKeys = []string{
 	"symbol", "tf", "timeframe", "bars", "json", "agent", "out",
 	"raw", "raw-out", "signals", "settle", "force-cleanup", "persistent",
 	"loop", "verbose", "preset", "help", "h", "v",
+	"allow-private", "verify-access",
 }

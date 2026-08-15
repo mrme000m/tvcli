@@ -1,0 +1,36 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:53:50Z",
+  "execution": {
+    "durationMs": 7905,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "shemar-smc-confidence",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64719.45,
+    "bias": "neutral"
+  },
+  "structure": {
+    "buyCount": 4,
+    "buySignal": false,
+    "sellCount": 3,
+    "sellSignal": false
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Buy signals: 4 | Sell signals: 3",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.4
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

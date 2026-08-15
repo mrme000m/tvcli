@@ -22,6 +22,7 @@ type Config struct {
 	MetaFile      string
 	Cookies       string
 	ExtraCookies  string
+	DeviceToken   string
 	Debug         bool
 }
 
@@ -49,6 +50,7 @@ func Load() *Config {
 		MetaFile:      envOrDefault("TV_META_FILE", ".tv-meta.json"),
 		Cookies:       os.Getenv("TV_COOKIES"),
 		ExtraCookies:  os.Getenv("EXTRA_COOKIES"),
+		DeviceToken:   firstNonEmpty("DEVICE_T", "TV_DEVICE_T"),
 		Debug:         os.Getenv("DEBUG") == "1" || os.Getenv("TW_DEBUG") == "1",
 	}
 	return c
@@ -96,6 +98,9 @@ func (c *Config) buildCookieString() string {
 	parts = append(parts, "sessionid="+c.SessionID)
 	if c.Signature != "" {
 		parts = append(parts, "sessionid_sign="+c.Signature)
+	}
+	if c.DeviceToken != "" {
+		parts = append(parts, "device_t="+c.DeviceToken)
 	}
 	if c.ExtraCookies != "" {
 		parts = append(parts, c.ExtraCookies)

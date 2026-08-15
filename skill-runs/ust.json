@@ -1,0 +1,39 @@
+{
+  "status": "ok",
+  "workflow": "ultra-sensitive-supertrend",
+  "market": {
+    "lastPrice": 4014.0534737441826,
+    "bias": "mixed"
+  },
+  "structure": {
+    "aligned": false,
+    "background": "BULLISH",
+    "buySignals": 21,
+    "combined": "MIXED",
+    "currentBuy": false,
+    "currentSell": false,
+    "currentUltraBuy": false,
+    "currentUltraSell": false,
+    "sellSignals": 21,
+    "st1": 4014.05,
+    "st2": 4015.5,
+    "ultraBuy": 21,
+    "ultraSell": 21
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Dual SuperTrend: MIXED. Aligned: false. ST1=4014 ST2=4015",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": [
+      "ST1 and ST2 disagree."
+    ]
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.2
+  }
+}

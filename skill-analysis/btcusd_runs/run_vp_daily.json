@@ -1,0 +1,52 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:57:19Z",
+  "execution": {
+    "durationMs": 6442,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "volume-profile",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64711.69,
+    "bias": "bullish"
+  },
+  "structure": {
+    "aboveVAHBuffer": false,
+    "belowVALBuffer": false,
+    "bias": "bullish",
+    "maxPrice": 64834.22,
+    "minPrice": 63952.98,
+    "poc": 64232.039333333334,
+    "rangeMid": 64393.6,
+    "vah": 64819.532666666666,
+    "val": 63967.66733333333
+  },
+  "opportunities": [
+    {
+      "rank": 2,
+      "setup": "vp_levels",
+      "direction": "bullish",
+      "confidence": "MED",
+      "confluenceScore": 0.45,
+      "distanceFromPrice": null,
+      "isStale": false,
+      "rationale": "POC=64232.04 VAH=64819.53 VAL=63967.67 range[63952.98-64834.22]"
+    }
+  ],
+  "narrative": {
+    "marketStructure": "POC: 64232.04 | VAH: 64819.53 | VAL: 63967.67 | Range: 63952.98 - 64834.22",
+    "primaryOpportunity": "POC=64232.04 VAH=64819.53 VAL=63967.67 range[63952.98-64834.22]",
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.7
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

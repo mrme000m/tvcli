@@ -1,0 +1,141 @@
+//@version=5
+indicator("XAUUSD Multi-Timeframe Trend Analyzer", overlay=true)
+
+// Inputs for timeframe selection
+show_M15 = input.bool(true, "Show M15", group="Timeframes")
+show_M30 = input.bool(true, "Show M30", group="Timeframes")
+show_H1 = input.bool(true, "Show H1", group="Timeframes")
+show_H4 = input.bool(true, "Show H4", group="Timeframes")
+show_D1 = input.bool(true, "Show D1", group="Timeframes")
+
+// Inputs for Moving Averages
+fastLength = input.int(10, "Fast MA Length", minval=1, group="Moving Averages")
+slowLength = input.int(20, "Slow MA Length", minval=1, group="Moving Averages")
+
+// Inputs for RSI
+rsiLength = input.int(14, "RSI Length", minval=1, group="RSI")
+rsiOverbought = input.float(70, "RSI Overbought Level", minval=50, maxval=100, group="RSI")
+rsiOversold = input.float(30, "RSI Oversold Level", minval=0, maxval=50, group="RSI")
+
+// Inputs for MACD
+macdFastLength = input.int(12, "MACD Fast Length", minval=1, group="MACD")
+macdSlowLength = input.int(26, "MACD Slow Length", minval=1, group="MACD")
+macdSignalLength = input.int(9, "MACD Signal Length", minval=1, group="MACD")
+
+// Inputs for Bollinger Bands
+bbLength = input.int(20, "BB Length", minval=1, group="Bollinger Bands")
+bbMultiplier = input.float(2.0, "BB Standard Deviation", minval=0.1, step=0.1, group="Bollinger Bands")
+
+// Inputs for DMI
+dmiLength = input.int(14, "DMI Length", minval=1, group="DMI")
+dmiSmoothing = input.int(14, "DMI Smoothing", minval=1, group="DMI")
+
+// Inputs for Parabolic SAR
+sarStartValue = input.float(0.02, "SAR Start Value", minval=0.01, step=0.01, group="Parabolic SAR")
+sarIncrement = input.float(0.02, "SAR Increment", minval=0.01, step=0.01, group="Parabolic SAR")
+sarMaxValue = input.float(0.2, "SAR Max Value", minval=0.1, step=0.1, group="Parabolic SAR")
+
+// Function to determine trend based on multiple indicators
+getTrend(closePrice) =>
+    // Moving Averages
+    fastMA = ta.sma(closePrice, fastLength)
+    slowMA = ta.sma(closePrice, slowLength)
+    maUptrend = fastMA > slowMA
+    
+    // RSI
+    rsi = ta.rsi(closePrice, rsiLength)
+    rsiUptrend = rsi > 50
+    
+    // MACD
+    [macdLine, signalLine, _] = ta.macd(closePrice, macdFastLength, macdSlowLength, macdSignalLength)
+    macdUptrend = macdLine > signalLine
+    
+    // Bollinger Bands
+    [middle, upper, lower] = ta.bb(closePrice, bbLength, bbMultiplier)
+    bbUptrend = closePrice > middle
+    
+    // DMI
+    [diplus, diminus, _] = ta.dmi(dmiLength, dmiSmoothing)
+    dmiUptrend = diplus > diminus
+    
+    // Parabolic SAR
+    psar = ta.sar(sarStartValue, sarIncrement, sarMaxValue)
+    psarUptrend = closePrice > psar
+    
+    // Calculate trend strength
+    trendStrength = (maUptrend ? 1 : -1) + (rsiUptrend ? 1 : -1) + (macdUptrend ? 1 : -1) + (bbUptrend ? 1 : -1) + (dmiUptrend ? 1 : -1) + (psarUptrend ? 1 : -1)
+    
+    // Determine overall trend
+    overallTrend = trendStrength >= 4 ? "Strong Uptrend" :
+                   trendStrength >= 2 ? "Weak Uptrend" :
+                   trendStrength <= -4 ? "Strong Downtrend" :
+                   trendStrength <= -2 ? "Weak Downtrend" :
+                   "Neutral"
+    
+    [overallTrend, trendStrength]
+
+// Calculate trends for all timeframes
+[trend_M15, strength_M15] = request.security(syminfo.tickerid, "15", getTrend(close))
+[trend_M30, strength_M30] = request.security(syminfo.tickerid, "30", getTrend(close))
+[trend_H1, strength_H1] = request.security(syminfo.tickerid, "60", getTrend(close))
+[trend_H4, strength_H4] = request.security(syminfo.tickerid, "240", getTrend(close))
+[trend_D1, strength_D1] = request.security(syminfo.tickerid, "D", getTrend(close))
+
+// Function to get the number of active timeframes
+getActiveTimeframes() =>
+    (show_M15 ? 1 : 0) + (show_M30 ? 1 : 0) + (show_H1 ? 1 : 0) + (show_H4 ? 1 : 0) + (show_D1 ? 1 : 0)
+
+// Plot trends on the chart
+var table trendTable = table.new(position.top_right, getActiveTimeframes() + 1, 3, bgcolor = color.new(color.blue, 70))
+
+displayTrend(timeframe, trend, strength) =>
+    trendText = na(trend) ? "N/A" : trend
+    strengthText = na(strength) ? "N/A" : str.tostring(strength)
+    trendColor = na(trend) ? color.gray : 
+                 (trend == "Strong Uptrend" or trend == "Weak Uptrend") ? color.green : 
+                 (trend == "Strong Downtrend" or trend == "Weak Downtrend") ? color.red : 
+                 color.yellow
+    [trendText, strengthText, trendColor]
+
+if barstate.islast
+    table.clear(trendTable, 0, 0)
+    col = 0
+    
+    table.cell(trendTable, col, 0, "Timeframe", bgcolor = color.new(color.blue, 70), text_color = color.white)
+    table.cell(trendTable, col, 1, "Trend", bgcolor = color.new(color.blue, 70), text_color = color.white)
+    table.cell(trendTable, col, 2, "Strength", bgcolor = color.new(color.blue, 70), text_color = color.white)
+    col := col + 1
+    
+    if show_M15
+        [trendText, strengthText, trendColor] = displayTrend("M15", trend_M15, strength_M15)
+        table.cell(trendTable, col, 0, "M15", bgcolor = color.new(color.blue, 70), text_color = color.white)
+        table.cell(trendTable, col, 1, trendText, text_color = trendColor)
+        table.cell(trendTable, col, 2, strengthText, text_color = color.white)
+        col := col + 1
+    
+    if show_M30
+        [trendText, strengthText, trendColor] = displayTrend("M30", trend_M30, strength_M30)
+        table.cell(trendTable, col, 0, "M30", bgcolor = color.new(color.blue, 70), text_color = color.white)
+        table.cell(trendTable, col, 1, trendText, text_color = trendColor)
+        table.cell(trendTable, col, 2, strengthText, text_color = color.white)
+        col := col + 1
+    
+    if show_H1
+        [trendText, strengthText, trendColor] = displayTrend("H1", trend_H1, strength_H1)
+        table.cell(trendTable, col, 0, "H1", bgcolor = color.new(color.blue, 70), text_color = color.white)
+        table.cell(trendTable, col, 1, trendText, text_color = trendColor)
+        table.cell(trendTable, col, 2, strengthText, text_color = color.white)
+        col := col + 1
+    
+    if show_H4
+        [trendText, strengthText, trendColor] = displayTrend("H4", trend_H4, strength_H4)
+        table.cell(trendTable, col, 0, "H4", bgcolor = color.new(color.blue, 70), text_color = color.white)
+        table.cell(trendTable, col, 1, trendText, text_color = trendColor)
+        table.cell(trendTable, col, 2, strengthText, text_color = color.white)
+        col := col + 1
+    
+    if show_D1
+        [trendText, strengthText, trendColor] = displayTrend("D1", trend_D1, strength_D1)
+        table.cell(trendTable, col, 0, "D1", bgcolor = color.new(color.blue, 70), text_color = color.white)
+        table.cell(trendTable, col, 1, trendText, text_color = trendColor)
+        table.cell(trendTable, col, 2, strengthText, text_color = color.white)

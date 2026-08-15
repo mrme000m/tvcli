@@ -1,0 +1,31 @@
+{
+  "status": "ok",
+  "workflow": "ema-atr-structure",
+  "market": {
+    "lastPrice": 4012.847991693152,
+    "bias": "bearish"
+  },
+  "structure": {
+    "buyReentry": false,
+    "buySignal": false,
+    "plot0": 4012.85,
+    "plot2": 4011.93,
+    "sellReentry": false,
+    "sellSignal": false,
+    "trailTrend": 1
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Plot0: 4013 | Plot2: 4012 | Bias: bearish",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": null
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.55
+  }
+}

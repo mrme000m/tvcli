@@ -1,0 +1,202 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:53:21Z",
+  "execution": {
+    "durationMs": 6878,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "order-flow",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "bias": "neutral"
+  },
+  "structure": {
+    "classifications": {
+      "Buy": "noise",
+      "Sell": "noise",
+      "bell": "noise",
+      "sell": "noise"
+    },
+    "events": [],
+    "graphicCounts": {},
+    "last": {},
+    "levels": [],
+    "meta": {
+      "pineId": "PUB;7uP2LNPDc8I150lUzs3Aqa5ju9usF0ZN",
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "15m",
+      "periodCount": 250,
+      "timestamp": 0
+    },
+    "series": [
+      {
+        "time": 1784223000
+      },
+      {
+        "time": 1784223900
+      },
+      {
+        "time": 1784224800
+      },
+      {
+        "time": 1784225700
+      },
+      {
+        "time": 1784226600
+      },
+      {
+        "time": 1784227500
+      },
+      {
+        "time": 1784228400
+      },
+      {
+        "time": 1784229300
+      },
+      {
+        "time": 1784230200
+      },
+      {
+        "time": 1784231100
+      },
+      {
+        "time": 1784232000
+      },
+      {
+        "time": 1784232900
+      },
+      {
+        "time": 1784233800
+      },
+      {
+        "time": 1784234700
+      },
+      {
+        "time": 1784235600
+      },
+      {
+        "time": 1784236500
+      },
+      {
+        "time": 1784237400
+      },
+      {
+        "time": 1784238300
+      },
+      {
+        "time": 1784239200
+      },
+      {
+        "time": 1784240100
+      },
+      {
+        "time": 1784241000
+      },
+      {
+        "time": 1784241900
+      },
+      {
+        "time": 1784242800
+      },
+      {
+        "time": 1784243700
+      },
+      {
+        "time": 1784244600
+      },
+      {
+        "time": 1784245500
+      },
+      {
+        "time": 1784246400
+      },
+      {
+        "time": 1784247300
+      },
+      {
+        "time": 1784248200
+      },
+      {
+        "time": 1784249100
+      },
+      {
+        "time": 1784250000
+      },
+      {
+        "time": 1784250900
+      },
+      {
+        "time": 1784251800
+      },
+      {
+        "time": 1784252700
+      },
+      {
+        "time": 1784253600
+      },
+      {
+        "time": 1784254500
+      },
+      {
+        "time": 1784255400
+      },
+      {
+        "time": 1784256300
+      },
+      {
+        "time": 1784257200
+      },
+      {
+        "time": 1784258100
+      },
+      {
+        "time": 1784259000
+      },
+      {
+        "time": 1784259900
+      },
+      {
+        "time": 1784260800
+      },
+      {
+        "time": 1784261700
+      },
+      {
+        "time": 1784262600
+      },
+      {
+        "time": 1784263500
+      },
+      {
+        "time": 1784264400
+      },
+      {
+        "time": 1784265300
+      },
+      {
+        "time": 1784266200
+      },
+      {
+        "time": 1784267100
+      }
+    ]
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "neutral | confidence=0.50 | fields=4",
+    "primaryOpportunity": "",
+    "warnings": [
+      "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy"
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.5
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

@@ -120,6 +120,7 @@ func FetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]OHLCVBar
 	client := tradingview.NewClient(
 		tradingview.WithToken(cfg.SessionID),
 		tradingview.WithSignature(cfg.Signature),
+			tradingview.WithDeviceToken(cfg.DeviceToken),
 		tradingview.WithDebug(cfg.Debug),
 	)
 	if err := client.Connect(); err != nil {

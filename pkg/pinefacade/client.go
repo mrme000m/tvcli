@@ -30,13 +30,17 @@ func NewClient(baseURL, userName string, timeout time.Duration) *Client {
 }
 
 func (c *Client) baseHeaders(cookie string) map[string]string {
-	return map[string]string{
+	h := map[string]string{
 		"Cookie":           cookie,
 		"Origin":           "https://www.tradingview.com",
 		"Referer":          "https://www.tradingview.com/",
 		"User-Agent":       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
 		"X-Requested-With": "XMLHttpRequest",
 	}
+	if c.userName != "" {
+		h["X-Userid"] = c.userName
+	}
+	return h
 }
 
 func (c *Client) Get(pineID, version, cookie string) (*ScriptResult, error) {
@@ -73,6 +77,53 @@ func (c *Client) fetchTranslate(pineID, version, cookie string) (*ScriptResult, 
 
 	body, _ := io.ReadAll(resp.Body)
 	return c.parseFetchResponse(body)
+}
+
+// GetSource pulls the human-readable Pine source of a published script via the
+// /get/ endpoint. Unlike /translate/ (which only returns the opaque IL blob),
+// /get/ returns the original source plus scriptName, version and scriptAccess.
+// Returns an error if the source is empty (e.g. not found / not accessible).
+func (c *Client) GetSource(pineID, cookie string) (*ScriptResult, error) {
+	encoded := url.PathEscape(strings.ReplaceAll(pineID, "%3B", ";"))
+	u := fmt.Sprintf("%s/get/%s/last", c.baseURL, encoded)
+
+	req, _ := http.NewRequest("GET", u, nil)
+	for k, v := range c.baseHeaders(cookie) {
+		req.Header.Set(k, v)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("get %s: %w", pineID, err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var raw map[string]any
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode %s: %w", pineID, err)
+	}
+
+	src, _ := raw["source"].(string)
+	if src == "" {
+		return nil, fmt.Errorf("no source for %s (status %d)", pineID, resp.StatusCode)
+	}
+
+	meta := &ScriptMeta{}
+	if n, ok := raw["scriptName"].(string); ok && n != "" {
+		meta.ScriptName = n
+	}
+	if v, ok := raw["version"].(string); ok && v != "" {
+		meta.Version = v
+	} else if v, ok := raw["lastVersionMaj"].(string); ok && v != "" {
+		meta.Version = v
+	}
+	if cr, ok := raw["created"].(string); ok && cr != "" {
+		meta.Created = cr
+	}
+
+	access, _ := raw["scriptAccess"].(string)
+	return &ScriptResult{Source: src, Meta: meta, Access: access}, nil
 }
 
 func (c *Client) tryGetVersion(pineID, version, cookie string) (*ScriptResult, error) {

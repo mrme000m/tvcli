@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:51:10Z",
+  "execution": {
+    "durationMs": 7050,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "gold-divergence",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64722.41,
+    "bias": "bearish"
+  },
+  "structure": {
+    "bearDivergences": 3,
+    "bullDivergences": 2,
+    "divergenceBias": "bearish",
+    "latestDivergence": "none",
+    "rsi": 70.17,
+    "totalDivergences": 5
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "RSI: 70.17 | Divergences: bull=2 bear=3 | Bias: bearish",
+    "primaryOpportunity": "",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.74
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

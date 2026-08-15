@@ -8,6 +8,7 @@ import (
 
 	"github.com/ch99q/tvcli/internal/cli"
 	"github.com/ch99q/tvcli/internal/skill"
+	"github.com/ch99q/tvcli/pkg/pinefacade"
 )
 
 type skillsCmd struct{}
@@ -30,6 +31,7 @@ func (c *skillsCmd) Run(env *cli.Env) error {
 			Name        string   `json:"name"`
 			Synopsis    string   `json:"synopsis"`
 			PineID      string   `json:"pineId"`
+			Access      string   `json:"access"`
 			Category    string   `json:"category"`
 			Tier        string   `json:"tier,omitempty"`
 			KnownBroken string   `json:"knownBroken,omitempty"`
@@ -47,6 +49,7 @@ func (c *skillsCmd) Run(env *cli.Env) error {
 				Name:        s.Name,
 				Synopsis:    s.Synopsis,
 				PineID:      s.PineID,
+				Access:      pinefacade.AccessFromPineID(s.PineID),
 				Category:    s.EffectiveCategory(),
 				Tier:        s.Tier,
 				KnownBroken: s.KnownBroken,
@@ -74,8 +77,12 @@ func printSkillsList(w io.Writer) {
 		} else if s.Tier != "" {
 			flag = fmt.Sprintf("  [tier: %s]", s.Tier)
 		}
-		fmt.Fprintf(w, "  tv %-14s %-10s %s  (%d inputs)%s\n",
-			s.Name, s.EffectiveCategory(), s.Synopsis, len(s.Inputs), flag)
+		access := pinefacade.AccessFromPineID(s.PineID)
+		if access != "public" {
+			flag += fmt.Sprintf("  [%s script]", access)
+		}
+		fmt.Fprintf(w, "  tv %-14s %-10s %s  (%d inputs)  [%s]%s\n",
+			s.Name, s.EffectiveCategory(), s.Synopsis, len(s.Inputs), access, flag)
 		if len(s.Presets) > 0 {
 			pk := make([]string, 0, len(s.Presets))
 			for k := range s.Presets {

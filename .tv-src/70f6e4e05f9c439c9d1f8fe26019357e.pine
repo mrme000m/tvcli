@@ -1,0 +1,195 @@
+//@version=6
+indicator(title = 'SHEMAR HMA ST + SMC Confidence Filter', overlay = true)
+
+// ============================================================
+// Inputs
+// ============================================================
+hmaLength        = input.int(50,    title = 'HMA Length')
+atrPeriod        = input.int(10,    title = 'ATR Period')
+factor           = input.float(3.0, title = 'ATR Multiplier')
+enableShorts     = input(true,      title = 'Enable Short Trades')
+useStopEntry    = input.bool(true,  title = 'Use Stop Entry Confirmation')
+stopEntryOffset = input.float(1.0,  title = 'Stop Entry Offset (points)')
+htfPeriod = input.int(50, title = 'HTF SMA Period')
+
+// ============================================================
+// Squeeze Inputs
+// ============================================================
+sqzLength    = input(20,  title = 'Squeeze BB Length')
+sqzMult      = input(2.0, title = 'Squeeze BB MultFactor')
+sqzKCLength  = input(20,  title = 'Squeeze KC Length')
+sqzKCMult    = input(1.5, title = 'Squeeze KC MultFactor')
+sqzThreshold = input(0.8, title = 'Squeeze Threshold')
+sqzTF        = input('5', title = 'Squeeze Timeframe')
+
+// ============================================================
+// SMC Confidence Inputs
+// ============================================================
+kernelPeriod     = input(30,   title = 'Kernel Period (SMC)')
+confidenceThresh = input(30,   title = 'Minimum Confidence Score (0-100)')
+showScore        = input(true, title = 'Show Confidence Score on Chart')
+
+// ============================================================
+// HMA + Supertrend Core
+// ============================================================
+hma     = ta.hma(close, hmaLength)
+hmaUp   = hma > hma[1]
+hmaDown = hma < hma[1]
+
+[st, dir] = ta.supertrend(factor, atrPeriod)
+
+bull = hmaUp   and dir == -1
+bear = hmaDown and dir == 1
+chop = (hmaUp and dir == 1) or (hmaDown and dir == -1)
+
+// ============================================================
+// HTF Filter
+// ============================================================
+htfClose  = request.security(syminfo.tickerid, '60', close)
+htfKernel = request.security(syminfo.tickerid, '60', ta.sma(close, htfPeriod))
+htfBull   = htfClose > htfKernel
+htfBear   = htfClose < htfKernel
+
+// ============================================================
+// Time Filter
+// ============================================================
+nextBarTime = time + 40 * 60 * 1000
+blockedHour = hour(nextBarTime, "UTC+1") == 2  or
+              hour(nextBarTime, "UTC+1") == 8  or
+              hour(nextBarTime, "UTC+1") == 9  or
+              hour(nextBarTime, "UTC+1") == 10 or
+              hour(nextBarTime, "UTC+1") == 11 or
+              hour(nextBarTime, "UTC+1") == 12 or
+              hour(nextBarTime, "UTC+1") == 13 or
+              hour(nextBarTime, "UTC+1") == 16 or
+              hour(nextBarTime, "UTC+1") == 17 or
+              hour(nextBarTime, "UTC+1") == 18 or
+              hour(nextBarTime, "UTC+1") == 19 or
+              hour(nextBarTime, "UTC+1") == 20 or
+              hour(nextBarTime, "UTC+1") == 21 or
+              hour(nextBarTime, "UTC+1") == 22
+// ============================================================
+// Squeeze Momentum
+// ============================================================
+sqzSource = request.security(syminfo.tickerid, sqzTF, close, lookahead = barmerge.lookahead_off)
+sqzHigh   = request.security(syminfo.tickerid, sqzTF, high,  lookahead = barmerge.lookahead_off)
+sqzLow    = request.security(syminfo.tickerid, sqzTF, low,   lookahead = barmerge.lookahead_off)
+
+sqzBasis   = ta.sma(sqzSource, sqzLength)
+sqzKCBasis = ta.sma(sqzSource, sqzKCLength)
+sqzTR      = math.max(sqzHigh - sqzLow, math.max(math.abs(sqzHigh - sqzSource[1]), math.abs(sqzLow - sqzSource[1])))
+sqzKCRange = ta.sma(sqzTR, sqzKCLength) * sqzKCMult
+sqzVal     = ta.linreg(sqzSource - math.avg(math.avg(ta.highest(sqzHigh, sqzLength), ta.lowest(sqzLow, sqzLength)), sqzBasis), sqzLength, 0)
+
+// ============================================================
+// SMC Confidence Score
+// ============================================================
+kernel     = ta.sma(close, kernelPeriod)
+prevKernel = ta.sma(close[1], kernelPeriod)
+distance   = close - kernel
+kernelBull = kernel > prevKernel
+kernelBear = kernel < prevKernel
+
+float swingHigh = ta.pivothigh(high, 5, 5)
+float swingLow  = ta.pivotlow(low, 5, 5)
+
+var float lastSwingHigh = na(swingHigh) ? high : swingHigh
+var float lastSwingLow  = na(swingLow)  ? low  : swingLow
+lastSwingHigh := not na(swingHigh) ? swingHigh : lastSwingHigh
+lastSwingLow  := not na(swingLow)  ? swingLow  : lastSwingLow
+
+bos_bull      = not na(lastSwingHigh) and close > lastSwingHigh
+bos_bear      = not na(lastSwingLow)  and close < lastSwingLow
+pullback      = kernelBull and distance < 0 or kernelBear and distance > 0
+expansion     = math.abs(distance) > ta.atr(14) * 0.5
+strongRevUp   = distance < -ta.atr(14)
+strongRevDown = distance >  ta.atr(14)
+
+var int barsSinceBOS = 0
+if bos_bull or bos_bear
+    barsSinceBOS := 0
+else
+    barsSinceBOS += 1
+firstPullback = barsSinceBOS < 10 and pullback
+
+score = 0
+if bos_bull or bos_bear or pullback or expansion
+    score += 20
+if pullback
+    score += 20
+if (bull and kernelBull) or (bear and kernelBear)
+    score += 20
+if math.abs(distance) > ta.atr(14) * 0.5
+    score += 20
+if firstPullback
+    score += 10
+if strongRevUp or strongRevDown
+    score += 10
+score := math.min(score, 100)
+
+// ============================================================
+// Position Tracking
+// ============================================================
+var int state = 0
+highConfidence = score >= confidenceThresh
+
+// ============================================================
+// Filtered Signals
+// ============================================================
+stopEntryBuyLevel  = high + stopEntryOffset
+stopEntrySellLevel = low  - stopEntryOffset
+
+buyConfirmed  = useStopEntry ? high >= stopEntryBuyLevel[1]  : true
+sellConfirmed = useStopEntry ? low  <= stopEntrySellLevel[1] : true
+
+filteredBuy  = state == 0 and bull and sqzVal[1] > sqzThreshold and sqzVal[1] > sqzVal[2] and highConfidence and kernelBull and htfBull and not blockedHour and buyConfirmed
+filteredSell = state == 0 and enableShorts and bear and sqzVal[1] < -sqzThreshold and sqzVal[1] < sqzVal[2] and highConfidence and kernelBear and htfBear and not blockedHour and sellConfirmed
+
+// ============================================================
+// Close Conditions
+// ============================================================
+closeBuy  = state == 1  and (bear or chop)
+closeSell = state == -1 and (bull or chop)
+
+// ============================================================
+// State Updates
+// ============================================================
+if filteredBuy
+    state := 1
+else if filteredSell
+    state := -1
+else if closeBuy or closeSell
+    state := 0
+
+// ============================================================
+// Plots
+// ============================================================
+plot(hma, 'HMA', color = chop ? color.gray : bull ? color.lime : color.red, linewidth = 3)
+plot(st,  'Supertrend', color = dir == -1 ? color.new(color.green, 50) : color.new(color.red, 50), style = plot.style_linebr)
+plot(kernel, 'Kernel', color = color.new(color.orange, 0), linewidth = 1)
+
+plotshape(filteredBuy,  title = 'Buy',        text = 'Buy',        style = shape.labelup,   location = location.belowbar, color = color.new(color.green,  0), textcolor = color.white, size = size.tiny)
+plotshape(filteredSell, title = 'Sell',       text = 'Sell',       style = shape.labeldown, location = location.abovebar, color = color.new(color.red,    0), textcolor = color.white, size = size.tiny)
+plotshape(closeBuy,     title = 'Close Buy',  text = 'Close Buy',  style = shape.labeldown, location = location.abovebar, color = color.new(color.orange, 0), textcolor = color.white, size = size.tiny)
+plotshape(closeSell,    title = 'Close Sell', text = 'Close Sell', style = shape.labelup,   location = location.belowbar, color = color.new(color.yellow, 0), textcolor = color.black,  size = size.tiny)
+
+if showScore and (filteredBuy or filteredSell)
+    label.new(bar_index, filteredBuy ? low - ta.atr(atrPeriod) : high + ta.atr(atrPeriod),
+        str.tostring(score),
+        style     = filteredBuy ? label.style_label_up : label.style_label_down,
+        color     = score >= 80 ? color.new(color.lime, 20) : color.new(color.yellow, 20),
+        textcolor = color.black,
+        size      = size.tiny)
+
+// ============================================================
+// Alert Conditions
+// ============================================================
+alertcondition(filteredBuy,  'Filtered Buy',  'Filtered Buy Signal')
+alertcondition(filteredSell, 'Filtered Sell', 'Filtered Sell Signal')
+alertcondition(closeBuy,     'Close Buy',     'Close Buy')
+alertcondition(closeSell,    'Close Sell',    'Close Sell')
+
+// ============================================================
+// Backtest Stream
+backTestStream = closeBuy ? 2 : closeSell ? -2 : filteredBuy ? 1 : filteredSell ? -1 : 0
+plot(backTestStream, 'Backtest Stream', display = display.none)

@@ -1,0 +1,28 @@
+//@version=4
+//--------------------------------------------------------------------------------------------------------------------//
+//This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/          //
+study("Volume Spike Strategy", shorttitle="VolSpike",overlay=true)                                                    //
+//      ©mvs1231 || xxattax                                                                                           //
+//--------------------------------------------------------------------------------------------------------------------//
+//      Based on Bitcoin Trading Challenge "Capitalize AI: Volume Spike Strategy" (with permission)                   //
+//      Added sells -- Original strategy is buy only                                                                  //
+//--------------------------------------------------------------------------------------------------------------------//
+
+//-----<Inputs>--------------------------------------------------------------------------------------------------------// 
+iVolumeMA_Len   = input(20,     "Volume MA Length(20)")              // Average Volume  
+iVolume_Mult    = input(500,    "Volume Multiplier%(500)")/100       // Volume Threshhold       
+iCoinMA_Len     = input(5,      "Coin MA Length(5)")                 // Coin Moving Average 
+iSells          = input(false,  "Show Sells?"  )
+//-----<Calc Vars>----------------------------------------------------------------------------------------------------//
+VolumeSMA       = sma(volume,iVolumeMA_Len)
+VolThreshhold   = VolumeSMA * iVolume_Mult
+CoinSMA         = sma(close,iCoinMA_Len)
+//-----<Signals>------------------------------------------------------------------------------------------------------//
+Buy             = volume > VolThreshhold    and     close < CoinSMA
+Sell            = volume > VolThreshhold    and     close > CoinSMA
+//-----<Plots>--------------------------------------------------------------------------------------------------------//
+plotchar        (Buy,             "Buy",    color=color.lime, size=size.small, location=location.belowbar, char="⬆")
+plotchar        (iSells and Sell, "Sell",   color=color.red,  size=size.small, location=location.abovebar, char="⬇")
+//-----<Alert>--------------------------------------------------------------------------------------------------------//
+alertcondition  (condition=Buy ,title="bell",message="buy")
+alertcondition	(condition=Sell ,title="sell",message="sell")

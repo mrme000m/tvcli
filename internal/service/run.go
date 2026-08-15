@@ -137,6 +137,7 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		client = tradingview.NewClient(
 			tradingview.WithToken(cfg.SessionID),
 			tradingview.WithSignature(cfg.Signature),
+			tradingview.WithDeviceToken(cfg.DeviceToken),
 			tradingview.WithDebug(cfg.Debug),
 		)
 		if err := client.Connect(); err != nil {
@@ -181,8 +182,10 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		return nil, err
 	}
 	defer func() {
-		chart.RemoveAllStudies()
-		chart.Delete()
+		if chart != nil {
+			chart.RemoveAllStudies()
+			chart.Delete()
+		}
 	}()
 
 	var periods []map[string]any

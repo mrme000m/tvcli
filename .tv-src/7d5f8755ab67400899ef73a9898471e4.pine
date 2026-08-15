@@ -1,0 +1,189 @@
+//@version=6
+indicator("EMA + ATR PRO Ultimate Engine", overlay=true, max_labels_count=500)
+
+//========================
+// INPUTS
+//========================
+ema2Len = input.int(20, "EMA 1")
+ema3Len = input.int(50, "EMA 2")
+
+useEMA2 = input.bool(true, "Use EMA 1")
+useEMA3 = input.bool(false, "Use EMA 2")
+
+pivotLen = input.int(1, "Swing Strength")
+
+atrLen  = input.int(7, "ATR Length")
+atrMult = input.float(1.4, "ATR Multiplier")
+
+confirmClose = input.bool(true, "Signal After Candle Close")
+
+fastMode      = input.bool(false, "Fast Entry Mode")
+enableReentry = input.bool(false, "Enable Re-entry Signals")
+
+// STYLE
+buyColor  = input.color(color.rgb(5, 7, 12))
+sellColor = input.color(color.gray)
+textColor = input.color(color.white)
+
+bullTrailColor = input.color(color.rgb(94, 255, 0))
+bearTrailColor = input.color(color.red)
+
+//========================
+// EMA
+//========================
+ema2 = ta.ema(close, ema2Len)
+ema3 = ta.ema(close, ema3Len)
+
+//========================
+// ATR TRAIL
+//========================
+atr = ta.atr(atrLen)
+
+longStop  = close - atr * atrMult
+shortStop = close + atr * atrMult
+
+var float trail = na
+var bool trendUp = true
+
+if na(trail)
+    trail := close
+
+if close > trail
+    trendUp := true
+    trail := math.max(trail, longStop)
+else
+    trendUp := false
+    trail := math.min(trail, shortStop)
+
+//========================
+// TREND FILTER
+//========================
+bullTrend = trendUp
+bearTrend = not trendUp
+
+if useEMA2
+    bullTrend := bullTrend and close > ema2
+    bearTrend := bearTrend and close < ema2
+
+if useEMA3
+    bullTrend := bullTrend and close > ema3
+    bearTrend := bearTrend and close < ema3
+
+//========================
+// STRUCTURE
+//========================
+ph = ta.pivothigh(high, pivotLen, pivotLen)
+pl = ta.pivotlow(low, pivotLen, pivotLen)
+
+var float lastHigh = na
+var float lastLow  = na
+var float lastHL   = na
+var float lastLH   = na
+
+var bool reentryUsed = false
+
+if not na(ph)
+    lastHigh := ph
+
+if not na(pl)
+    lastLow := pl
+
+// RESET re-entry
+if not na(pl) and bullTrend
+    lastHL := pl
+    reentryUsed := false
+
+if not na(ph) and bearTrend
+    lastLH := ph
+    reentryUsed := false
+
+//========================
+// FAST BREAK LOGIC
+//========================
+bool breakUp = false
+bool breakDown = false
+
+if fastMode
+    breakUp := not na(lastHigh) and high > lastHigh
+    breakDown := not na(lastLow) and low < lastLow
+else
+    breakUp := not na(lastHigh) and close > lastHigh and close[1] <= lastHigh
+    breakDown := not na(lastLow) and close < lastLow and close[1] >= lastLow
+
+//========================
+// ENTRY
+//========================
+rawBuy  = bullTrend and breakUp
+rawSell = bearTrend and breakDown
+
+//========================
+// SIGNAL SYSTEM
+//========================
+var int lastSignalDir = 0
+
+buyPrimary  = rawBuy  and lastSignalDir != 1
+sellPrimary = rawSell and lastSignalDir != -1
+
+bool buyReentry = false
+bool sellReentry = false
+
+if enableReentry
+    if lastSignalDir == 1 and not reentryUsed and breakUp
+        buyReentry := true
+        reentryUsed := true
+
+    if lastSignalDir == -1 and not reentryUsed and breakDown
+        sellReentry := true
+        reentryUsed := true
+
+buySignalRaw  = buyPrimary or buyReentry
+sellSignalRaw = sellPrimary or sellReentry
+
+buySignal  = confirmClose ? (buySignalRaw  and barstate.isconfirmed) : buySignalRaw
+sellSignal = confirmClose ? (sellSignalRaw and barstate.isconfirmed) : sellSignalRaw
+
+if buyPrimary
+    lastSignalDir := 1
+
+if sellPrimary
+    lastSignalDir := -1
+
+//========================
+// PLOT
+//========================
+plot(trail, color=trendUp ? bullTrailColor : bearTrailColor, linewidth=1)
+plot(useEMA2 ? ema2 : na, color=color.rgb(0, 45, 248))
+plot(useEMA3 ? ema3 : na, color=color.rgb(248, 0, 0))
+
+//========================
+// LABELS
+//========================
+if buySignal
+    label.new(bar_index, low,
+        buyReentry ? "BUY+" : "BUY",
+        style=label.style_label_up,
+        color=buyColor,
+        textcolor=textColor)
+
+if sellSignal
+    label.new(bar_index, high,
+        sellReentry ? "SELL+" : "SELL",
+        style=label.style_label_down,
+        color=sellColor,
+        textcolor=textColor)
+
+//========================
+// ALERTS (NOVO 🔔)
+//========================
+
+// PRIMARY SIGNAL ALERT
+alertcondition(buyPrimary,  title="BUY Signal",  message="BUY signal on {{ticker}} @ {{close}}")
+alertcondition(sellPrimary, title="SELL Signal", message="SELL signal on {{ticker}} @ {{close}}")
+
+// RE-ENTRY ALERT
+alertcondition(buyReentry,  title="BUY Re-entry",  message="BUY RE-ENTRY on {{ticker}} @ {{close}}")
+alertcondition(sellReentry, title="SELL Re-entry", message="SELL RE-ENTRY on {{ticker}} @ {{close}}")
+
+// FINAL SIGNAL ALERT (kombinovano)
+alertcondition(buySignal,  title="BUY (All)",  message="BUY signal (Primary/Re-entry) on {{ticker}} @ {{close}}")
+alertcondition(sellSignal, title="SELL (All)", message="SELL signal (Primary/Re-entry) on {{ticker}} @ {{close}}")

@@ -63,12 +63,38 @@ type Level struct {
 	Value float64 `json:"value"`
 }
 
+// Trade is a single trade from a strategy report.
+type Trade struct {
+	ID     string  `json:"id,omitempty"`
+	Side   string  `json:"side"` // "buy" or "sell"
+	Entry  float64 `json:"entry,omitempty"`
+	Price  float64 `json:"price,omitempty"`
+	Qty    float64 `json:"qty,omitempty"`
+	Profit float64 `json:"profit,omitempty"`
+}
+
 type StrategySummary struct {
-	NetProfit    float64 `json:"netProfit,omitempty"`
-	WinRate      float64 `json:"winRate,omitempty"`
-	TotalTrades  int     `json:"totalTrades"`
-	ProfitFactor float64 `json:"profitFactor,omitempty"`
-	MaxDrawdown  float64 `json:"maxDrawdown,omitempty"`
+	NetProfit        float64 `json:"netProfit,omitempty"`
+	NetProfitPercent float64 `json:"netProfitPercent,omitempty"`
+	GrossProfit      float64 `json:"grossProfit,omitempty"`
+	GrossLoss        float64 `json:"grossLoss,omitempty"`
+	WinRate          float64 `json:"winRate,omitempty"`
+	TotalTrades      int     `json:"totalTrades"`
+	WinningTrades    int     `json:"winningTrades,omitempty"`
+	LosingTrades     int     `json:"losingTrades,omitempty"`
+	ProfitFactor     float64 `json:"profitFactor,omitempty"`
+	MaxDrawdown      float64 `json:"maxDrawdown,omitempty"`
+	MaxDDPercent     float64 `json:"maxDrawdownPercent,omitempty"`
+	AvgTrade         float64 `json:"avgTrade,omitempty"`
+	LargestWin       float64 `json:"largestWin,omitempty"`
+	LargestLoss      float64 `json:"largestLoss,omitempty"`
+	CommissionPaid   float64 `json:"commissionPaid,omitempty"`
+	SharpeRatio      float64 `json:"sharpeRatio,omitempty"`
+	SortinoRatio     float64 `json:"sortinoRatio,omitempty"`
+	BuyHoldReturn    float64 `json:"buyHoldReturn,omitempty"`
+	OpenPL           float64 `json:"openPL,omitempty"`
+	Currency         string  `json:"currency,omitempty"`
+	Trades           []Trade `json:"trades,omitempty"`
 }
 
 // Extract turns raw TradingView study output into clean quantitative signals.
@@ -1127,12 +1153,81 @@ func extractReport(report map[string]any) *StrategySummary {
 		all = perf
 	}
 	s := &StrategySummary{}
+	// perf.all fields
 	s.NetProfit = floatOrZero(all["netProfit"])
+	s.NetProfitPercent = floatOrZero(all["netProfitPercent"])
+	s.GrossProfit = floatOrZero(all["grossProfit"])
+	s.GrossLoss = floatOrZero(all["grossLoss"])
 	s.WinRate = floatOrZero(all["percentProfitable"])
 	s.TotalTrades = int(floatOrZero(all["totalTrades"]))
+	s.WinningTrades = int(floatOrZero(all["numberOfWiningTrades"]))
+	s.LosingTrades = int(floatOrZero(all["numberOfLosingTrades"]))
 	s.ProfitFactor = floatOrZero(all["profitFactor"])
-	s.MaxDrawdown = floatOrZero(all["maxDrawdown"])
+	s.AvgTrade = floatOrZero(all["avgTrade"])
+	s.LargestWin = floatOrZero(all["largestWinTrade"])
+	s.LargestLoss = floatOrZero(all["largestLosTrade"])
+	s.CommissionPaid = floatOrZero(all["commissionPaid"])
+	// perf top-level fields
+	s.MaxDrawdown = floatOrZero(perf["maxStrategyDrawDown"])
+	s.MaxDDPercent = floatOrZero(perf["maxStrategyDrawDownPercent"])
+	s.SharpeRatio = floatOrZero(perf["sharpeRatio"])
+	s.SortinoRatio = floatOrZero(perf["sortinoRatio"])
+	s.BuyHoldReturn = floatOrZero(perf["buyHoldReturn"])
+	s.OpenPL = floatOrZero(perf["openPL"])
+	// currency from report top-level
+	if cur, ok := report["currency"].(string); ok {
+		s.Currency = cur
+	}
+	// extract per-trade data
+	s.Trades = extractTrades(report)
 	return s
+}
+
+// extractTrades extracts individual trade records from the strategy report.
+// TV sends trades as an array of objects with nested entry/exit info:
+// {e: {b, c, p, tm, tp}, x: {b, c, p, tm, tp}, q, v, cp: {p, v}, tp: {p, v}, ...}
+// e=entry, x=exit, q=qty, v=value, cp=cumulative P/L, tp=trade P/L
+func extractTrades(report map[string]any) []Trade {
+	tradesRaw, ok := report["trades"].([]any)
+	if !ok || len(tradesRaw) == 0 {
+		return nil
+	}
+	trades := make([]Trade, 0, len(tradesRaw))
+	for _, t := range tradesRaw {
+		tm, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		tr := Trade{}
+		// Entry info: e = {b, c, p, tm, tp}
+		if e, ok := tm["e"].(map[string]any); ok {
+			tr.Entry = floatOrZero(e["p"])
+			if tp, ok := e["tp"].(string); ok {
+				switch tp {
+				case "le":
+					tr.Side = "buy"
+				case "se":
+					tr.Side = "sell"
+				default:
+					tr.Side = tp
+				}
+			}
+			if c, ok := e["c"].(string); ok && tr.ID == "" {
+				tr.ID = c
+			}
+		}
+		// Exit info: x = {b, c, p, tm, tp}
+		if x, ok := tm["x"].(map[string]any); ok {
+			tr.Price = floatOrZero(x["p"])
+		}
+		tr.Qty = floatOrZero(tm["q"])
+		// Trade profit: tp = {p, v}
+		if tp, ok := tm["tp"].(map[string]any); ok {
+			tr.Profit = floatOrZero(tp["v"])
+		}
+		trades = append(trades, tr)
+	}
+	return trades
 }
 
 // --- helpers ---

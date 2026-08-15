@@ -1,0 +1,41 @@
+//@version=5
+indicator('Buying Selling Volume', format=format.volume, precision=0, overlay=false)
+
+BV = high == low ? 0 : volume * (close - low) / (high - low)
+SV = high == low ? 0 : volume * (high - close) / (high - low)
+vol = volume > 0 ? volume : 1
+TP = BV + SV
+BPV = BV / TP * vol
+SPV = SV / TP * vol
+BPc1 = BPV
+SPc1 = -math.abs(SPV)
+
+plot(BPc1, title='BuyVolume', color=#00ff08, style=plot.style_columns)
+plot(SPc1, title='SellVolume', color=#ff0000, style=plot.style_columns)
+
+// Moving Averages
+lengthMA1 = input.int(10, title="MA Length 1")
+lengthMA2 = input.int(10, title="MA Length 2")
+maType = input.string("SMA", title="MA Type", options=["SMA", "EMA", "WMA", "VWMA"])
+
+maBuy = 0.0
+maSell = 0.0
+
+if maType == "SMA"
+    maBuy := ta.sma(BPc1, lengthMA1)
+    maSell := ta.sma(SPc1, lengthMA2)
+else if maType == "EMA"
+    maBuy := ta.ema(BPc1, lengthMA1)
+    maSell := ta.ema(SPc1, lengthMA2)
+else if maType == "WMA"
+    maBuy := ta.wma(BPc1, lengthMA1)
+    maSell := ta.wma(SPc1, lengthMA2)
+else if maType == "VWMA"
+    maBuy := ta.vwma(BPc1, lengthMA1)
+    maSell := ta.vwma(SPc1, lengthMA2)
+
+plot(maBuy, color=#008cff, title="MA Buy")
+plot(maSell, color=#ff9900, title="MA Sell")
+
+barcolor(BPc1 > maBuy and SPc1 > maSell? #00ff08 : SPc1 < maSell and BPc1 < maBuy ? #ff0000 : BPc1 > maBuy and SPc1 < maSell ? #fffffd : #242424)
+bgcolor(BPc1 > maBuy and SPc1 > maSell ? color.new(color.green, 90) : SPc1 < maSell and BPc1 < maBuy ? color.new(color.red, 90) : BPc1 > maBuy and SPc1 < maSell ? color.new(color.yellow, 90) : color.new(color.gray, 90))

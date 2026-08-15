@@ -1,0 +1,78 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:54:51Z",
+  "execution": {
+    "durationMs": 7518,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "sniper",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "bias": "neutral"
+  },
+  "structure": {
+    "classifications": {
+      "Any_Signal_Buy_or_Sell": "noise",
+      "Buy_Signal": "noise",
+      "Buy_Signal_A_and_A": "noise",
+      "Buy_Signal_A_and_A_and_B": "noise",
+      "Buy_Signal_A_only": "noise",
+      "EMA_Fast": "metric",
+      "EMA_Slow": "metric",
+      "EMA_Trend": "metric",
+      "SL_Hit": "noise",
+      "Sell_Signal": "noise",
+      "Sell_Signal_A_and_A": "noise",
+      "Sell_Signal_A_and_A_and_B": "noise",
+      "Sell_Signal_A_only": "noise",
+      "TP1_Hit": "noise",
+      "TP2_Hit": "noise",
+      "TP3_Hit": "noise",
+      "Trend_Background": "noise",
+      "plot_4": "metric"
+    },
+    "events": [],
+    "graphicCounts": {},
+    "last": {
+      "EMA_Fast": 3003121701,
+      "EMA_Slow": 3003121702,
+      "EMA_Trend": 4283782485,
+      "plot_4": 520093734
+    },
+    "levels": [],
+    "meta": {
+      "pineId": "PUB;1fc29950178c42a1a88f52a18161dd53",
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "15m",
+      "periodCount": 1,
+      "timestamp": 0
+    },
+    "series": [
+      {
+        "EMA_Fast": 64728.88030364442,
+        "EMA_Slow": 64729.657469789985,
+        "EMA_Trend": 64647.62455981926,
+        "plot_4": 520093734,
+        "time": 1784447100
+      }
+    ]
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "neutral | confidence=0.50 | fields=18",
+    "primaryOpportunity": "",
+    "warnings": [
+      "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy"
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.5
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

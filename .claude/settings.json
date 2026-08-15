@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "async": true,
+            "command": "openknowledge insights observe --runtime claude",
+            "timeout": 30,
+            "type": "command"
+          }
+        ]
+      }
+    ]
+  }
+}

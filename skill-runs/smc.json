@@ -1,0 +1,36 @@
+{
+  "status": "ok",
+  "workflow": "smart-money-concepts",
+  "market": {
+    "lastPrice": 4016.905,
+    "bias": "bearish"
+  },
+  "structure": {
+    "bearishBOS": 8,
+    "bearishCHoCH": 7,
+    "bearishFVG": 14,
+    "bearishOB": 12,
+    "bosCount": 9,
+    "bullishBOS": 1,
+    "bullishCHoCH": 8,
+    "bullishFVG": 13,
+    "bullishOB": 12,
+    "chochCount": 15,
+    "fvgCount": 27,
+    "obCount": 24
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "BOS: 9 | CHoCH: 15 | FVG: 27 | OB: 24 | Bias: bearish",
+    "primaryOpportunity": "",
+    "warnings": null
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.75
+  }
+}

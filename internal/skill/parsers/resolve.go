@@ -4,8 +4,80 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ch99q/tvcli/pkg/pipeline"
 	"github.com/ch99q/tvcli/pkg/schema"
 )
+
+// ResolveGraphicDashboard reconstructs any dwgtable present in the graphic
+// layer into a structured, row-major form. It is the script-agnostic path for
+// "dashboard" indicators that emit a table instead of period/plot data. The
+// returned map has:
+//
+//	"grids":  []map[string]any  — one per table: {cols, rows, cells}
+//	"tables": int               — number of tables found
+//
+// ok is false when the graphic layer has no table draw types.
+func ResolveGraphicDashboard(graphic map[string]map[string]any) (map[string]any, bool) {
+	grids := pipeline.ReconstructTables(graphic)
+	if len(grids) == 0 {
+		return nil, false
+	}
+	converted := make([]map[string]any, 0, len(grids))
+	for _, g := range grids {
+		converted = append(converted, map[string]any{
+			"id":    g.ID,
+			"cols":  g.Cols,
+			"rows":  g.Rows,
+			"cells": g.Cells,
+		})
+	}
+	return map[string]any{"grids": converted, "tables": len(grids)}, true
+}
+
+// GraphicLabels extracts every dwglabel as {text, price} keyed by label id.
+// Some graphics-only scripts anchor text labels to a price (y/yl == "pr");
+// when present, the price is the most meaningful numeric signal on the chart.
+func GraphicLabels(graphic map[string]map[string]any) []map[string]any {
+	labels, ok := graphic["dwglabels"]
+	if !ok || len(labels) == 0 {
+		return nil
+	}
+	var out []map[string]any
+	for _, v := range labels {
+		m, ok := v.(map[string]any)
+		if !ok {
+			continue
+		}
+		text, _ := m["t"].(string)
+		out = append(out, map[string]any{
+			"id":     m["id"],
+			"text":   text,
+			"price":  toFloat(m["y"]),
+			"color":  m["tc"],
+		})
+	}
+	return out
+}
+
+// ResolveAny picks the most meaningful part of a run response in priority
+// order, so a graphics-only script is parsed without per-skill hand-coding:
+//
+//  1. periods present  → returns ok=false; the caller should use its schema
+//     parser (this helper only resolves the graphic layer).
+//  2. dwgtable present → table dashboard (ResolveGraphicDashboard).
+//  3. dwglabels present → label list (GraphicLabels).
+//
+// It returns (data, kind, ok). kind is "table" | "labels" | "" so callers can
+// branch on what was actually returned.
+func ResolveAny(graphic map[string]map[string]any) (any, string, bool) {
+	if dash, ok := ResolveGraphicDashboard(graphic); ok {
+		return dash, "table", true
+	}
+	if labels := GraphicLabels(graphic); len(labels) > 0 {
+		return labels, "labels", true
+	}
+	return nil, "", false
+}
 
 // SchemaField resolves a semantic field value from a period using the script
 // schema when available, and falls back to direct period-key lookup.

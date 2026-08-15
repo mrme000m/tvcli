@@ -4,6 +4,7 @@ type ScriptResult struct {
 	Source   string
 	Meta     *ScriptMeta
 	MetaInfo map[string]any // Full metaInfo from /translate/ (inputs, plots, etc.)
+	Access   string         // Raw scriptAccess from /get/ (e.g. "open_no_auth")
 }
 
 type ScriptMeta struct {

@@ -166,6 +166,7 @@ func (c *syncCmd) Run(env *cli.Env) error {
 		[]tradingview.ClientOption{
 			tradingview.WithToken(cfg.SessionID),
 			tradingview.WithSignature(cfg.Signature),
+			tradingview.WithDeviceToken(cfg.DeviceToken),
 			tradingview.WithDebug(cfg.Debug),
 		},
 		cfg.Debug,

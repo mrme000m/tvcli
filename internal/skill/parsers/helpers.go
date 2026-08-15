@@ -1,6 +1,10 @@
 package parsers
 
-import "math"
+import (
+	"math"
+	"strconv"
+	"strings"
+)
 
 // latestClosed returns the most recent CLOSED bar from periods.
 //
@@ -86,6 +90,20 @@ func confidenceLabel(score float64) string {
 
 func round2(f float64) float64 {
 	return math.Round(f*100) / 100
+}
+
+// parseNumeric parses a numeric string (e.g. a table-cell "6" or "-4") into a
+// float64. Returns 0 when the string is empty or not numeric. Used to read
+// graphic-table cells, which TradingView sends as text.
+func parseNumeric(s string) float64 {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return v
+	}
+	return 0
 }
 
 // latestGraphicPrice extracts the most recent label price from the graphic layer.

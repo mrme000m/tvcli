@@ -50,7 +50,7 @@ func (c *pullCmd) Run(env *cli.Env) error {
 	}
 
 	fmt.Fprintf(env.Stdout, "Pulling %s...\n", pineID)
-	result, err := client.Get(pineID, "last", cfg.CookieHeaderOrEmpty())
+	result, err := client.GetSource(pineID, cfg.CookieHeaderOrEmpty())
 	if err != nil {
 		return fmt.Errorf("failed to fetch %s: %w", pineID, err)
 	}
@@ -61,6 +61,9 @@ func (c *pullCmd) Run(env *cli.Env) error {
 
 	if scriptName == "" && result.Meta != nil {
 		scriptName = result.Meta.ScriptName
+	}
+	if result.Access != "" {
+		fmt.Fprintf(env.Stdout, "✓ Access: %s\n", result.Access)
 	}
 	if scriptName == "" {
 		scriptName = "script"

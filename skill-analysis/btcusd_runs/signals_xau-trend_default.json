@@ -1,0 +1,484 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:57:41Z",
+  "execution": {
+    "durationMs": 6298,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "xau-trend",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "1h"
+  },
+  "market": {
+    "lastPrice": 64705.94756375482,
+    "bias": "neutral"
+  },
+  "structure": {
+    "classifications": {
+      "Bollinger_Basis": "price",
+      "Bollinger_Lower": "price",
+      "Bollinger_Upper": "price",
+      "EMA_Court_Terme": "price",
+      "EMA_Long_Terme": "price"
+    },
+    "events": [],
+    "graphicCounts": {},
+    "last": {
+      "Bollinger_Basis": 64540.10499999994,
+      "Bollinger_Lower": 64000.571524349514,
+      "Bollinger_Upper": 65079.63847565036,
+      "EMA_Court_Terme": 64705.94756375482,
+      "EMA_Long_Terme": 64537.63289553331
+    },
+    "levels": [
+      {
+        "field": "Bollinger_Upper",
+        "kind": "support",
+        "value": 63004.983431757515
+      },
+      {
+        "field": "EMA_Long_Terme",
+        "kind": "support",
+        "value": 62378.82977729238
+      },
+      {
+        "field": "Bollinger_Basis",
+        "kind": "support",
+        "value": 62287.69799999994
+      },
+      {
+        "field": "EMA_Court_Terme",
+        "kind": "support",
+        "value": 62153.63064432646
+      },
+      {
+        "field": "Bollinger_Lower",
+        "kind": "support",
+        "value": 61570.41256824236
+      }
+    ],
+    "meta": {
+      "pineId": "PUB;a4e47455574243fe9731423c4ddb50ca",
+      "symbol": "BINANCE:BTCUSDT",
+      "timeframe": "1h",
+      "periodCount": 250,
+      "timestamp": 0
+    },
+    "series": [
+      {
+        "Bollinger_Basis": 62287.69799999994,
+        "Bollinger_Lower": 61570.41256824236,
+        "Bollinger_Upper": 63004.983431757515,
+        "EMA_Court_Terme": 62153.63064432646,
+        "EMA_Long_Terme": 62378.82977729238,
+        "time": 1783544400
+      },
+      {
+        "Bollinger_Basis": 62255.21849999994,
+        "Bollinger_Lower": 61611.17675566946,
+        "Bollinger_Upper": 62899.26024433041,
+        "EMA_Court_Terme": 62188.98451546117,
+        "EMA_Long_Terme": 62374.4270702658,
+        "time": 1783548000
+      },
+      {
+        "Bollinger_Basis": 62231.418499999934,
+        "Bollinger_Lower": 61630.93002314048,
+        "Bollinger_Upper": 62831.90697685939,
+        "EMA_Court_Terme": 62209.187612368936,
+        "EMA_Long_Terme": 62366.75188205982,
+        "time": 1783551600
+      },
+      {
+        "Bollinger_Basis": 62197.91799999995,
+        "Bollinger_Lower": 61656.16359021025,
+        "Bollinger_Upper": 62739.672409789644,
+        "EMA_Court_Terme": 62193.348089895146,
+        "EMA_Long_Terme": 62345.228074599836,
+        "time": 1783555200
+      },
+      {
+        "Bollinger_Basis": 62161.82399999994,
+        "Bollinger_Lower": 61646.58718780667,
+        "Bollinger_Upper": 62677.06081219322,
+        "EMA_Court_Terme": 62137.87847191612,
+        "EMA_Long_Terme": 62306.207340545305,
+        "time": 1783558800
+      },
+      {
+        "Bollinger_Basis": 62118.37349999994,
+        "Bollinger_Lower": 61632.013399543524,
+        "Bollinger_Upper": 62604.73360045636,
+        "EMA_Court_Terme": 62068.0627775329,
+        "EMA_Long_Terme": 62259.17030958664,
+        "time": 1783562400
+      },
+      {
+        "Bollinger_Basis": 62072.67299999994,
+        "Bollinger_Lower": 61735.37732520652,
+        "Bollinger_Upper": 62409.96867479335,
+        "EMA_Court_Terme": 62049.31822202632,
+        "EMA_Long_Terme": 62233.27664507876,
+        "time": 1783566000
+      },
+      {
+        "Bollinger_Basis": 62094.441999999945,
+        "Bollinger_Lower": 61719.84188509081,
+        "Bollinger_Upper": 62469.042114909076,
+        "EMA_Court_Terme": 62130.20257762106,
+        "EMA_Long_Terme": 62253.31876825342,
+        "time": 1783569600
+      },
+      {
+        "Bollinger_Basis": 62121.038999999946,
+        "Bollinger_Lower": 61689.45647243445,
+        "Bollinger_Upper": 62552.62152756544,
+        "EMA_Court_Terme": 62222.084062096845,
+        "EMA_Long_Terme": 62283.8906984122,
+        "time": 1783573200
+      },
+      {
+        "Bollinger_Basis": 62159.880999999936,
+        "Bollinger_Lower": 61594.005083399796,
+        "Bollinger_Upper": 62725.756916600076,
+        "EMA_Court_Terme": 62369.659249677476,
+        "EMA_Long_Terme": 62345.35154401109,
+        "time": 1783576800
+      },
+      {
+        "Bollinger_Basis": 62194.88149999994,
+        "Bollinger_Lower": 61522.163659118734,
+        "Bollinger_Upper": 62867.59934088114,
+        "EMA_Court_Terme": 62495.72739974198,
+        "EMA_Long_Terme": 62404.86504001008,
+        "time": 1783580400
+      },
+      {
+        "Bollinger_Basis": 62242.17749999993,
+        "Bollinger_Lower": 61512.22953095699,
+        "Bollinger_Upper": 62972.125469042876,
+        "EMA_Court_Terme": 62577.31191979359,
+        "EMA_Long_Terme": 62450.209127281894,
+        "time": 1783584000
+      },
+      {
+        "Bollinger_Basis": 62292.57299999994,
+        "Bollinger_Lower": 61513.96654857974,
+        "Bollinger_Upper": 63071.17945142014,
+        "EMA_Court_Terme": 62652.529535834874,
+        "EMA_Long_Terme": 62495.95375207445,
+        "time": 1783587600
+      },
+      {
+        "Bollinger_Basis": 62337.38349999994,
+        "Bollinger_Lower": 61553.51001928748,
+        "Bollinger_Upper": 63121.256980712395,
+        "EMA_Court_Terme": 62679.2316286679,
+        "EMA_Long_Terme": 62522.32522915859,
+        "time": 1783591200
+      },
+      {
+        "Bollinger_Basis": 62391.49999999994,
+        "Bollinger_Lower": 61641.28453684832,
+        "Bollinger_Upper": 63141.715463151566,
+        "EMA_Court_Terme": 62700.65330293432,
+        "EMA_Long_Terme": 62546.32657196235,
+        "time": 1783594800
+      },
+      {
+        "Bollinger_Basis": 62416.54949999994,
+        "Bollinger_Lower": 61671.76278338356,
+        "Bollinger_Upper": 63161.33621661633,
+        "EMA_Court_Terme": 62683.326642347456,
+        "EMA_Long_Terme": 62552.48051996577,
+        "time": 1783598400
+      },
+      {
+        "Bollinger_Basis": 62462.73599999994,
+        "Bollinger_Lower": 61687.12369356951,
+        "Bollinger_Upper": 63238.348306430365,
+        "EMA_Court_Terme": 62752.33131387796,
+        "EMA_Long_Terme": 62595.74138178706,
+        "time": 1783602000
+      },
+      {
+        "Bollinger_Basis": 62504.26999999994,
+        "Bollinger_Lower": 61703.956036238334,
+        "Bollinger_Upper": 63304.58396376154,
+        "EMA_Court_Terme": 62805.06505110237,
+        "EMA_Long_Terme": 62633.946710715514,
+        "time": 1783605600
+      },
+      {
+        "Bollinger_Basis": 62533.77349999994,
+        "Bollinger_Lower": 61725.5369260901,
+        "Bollinger_Upper": 63342.010073909776,
+        "EMA_Court_Terme": 62817.6620408819,
+        "EMA_Long_Terme": 62655.228827923194,
+        "time": 1783609200
+      },
+      {
+        "Bollinger_Basis": 62563.793499999934,
+        "Bollinger_Lower": 61778.0016168362,
+        "Bollinger_Upper": 63349.58538316367,
+        "EMA_Court_Terme": 62794.13163270552,
+        "EMA_Long_Terme": 62659.29984356654,
+        "time": 1783612800
+      },
+      {
+        "Bollinger_Basis": 62611.574499999944,
+        "Bollinger_Lower": 61807.20199608917,
+        "Bollinger_Upper": 63415.94700391072,
+        "EMA_Court_Terme": 62863.863306164414,
+        "EMA_Long_Terme": 62703.2534941514,
+        "time": 1783616400
+      },
+      {
+        "Bollinger_Basis": 62656.00599999995,
+        "Bollinger_Lower": 61821.076596228864,
+        "Bollinger_Upper": 63490.93540377104,
+        "EMA_Court_Terme": 62934.896644931534,
+        "EMA_Long_Terme": 62750.14226741037,
+        "time": 1783620000
+      },
+      {
+        "Bollinger_Basis": 62703.91099999994,
+        "Bollinger_Lower": 61848.7791179212,
+        "Bollinger_Upper": 63559.042882078684,
+        "EMA_Court_Terme": 62997.53731594523,
+        "EMA_Long_Terme": 62795.41115219124,
+        "time": 1783623600
+      },
+      {
+        "Bollinger_Basis": 62763.080499999945,
+        "Bollinger_Lower": 61911.22379469747,
+        "Bollinger_Upper": 63614.93720530242,
+        "EMA_Court_Terme": 63060.70585275618,
+        "EMA_Long_Terme": 62842.499229264766,
+        "time": 1783627200
+      },
+      {
+        "Bollinger_Basis": 62831.00999999994,
+        "Bollinger_Lower": 62046.13963011926,
+        "Bollinger_Upper": 63615.880369880615,
+        "EMA_Court_Terme": 63103.48268220494,
+        "EMA_Long_Terme": 62881.78020842251,
+        "time": 1783630800
+      },
+      {
+        "Bollinger_Basis": 62902.50899999995,
+        "Bollinger_Lower": 62263.442612785635,
+        "Bollinger_Upper": 63541.57538721426,
+        "EMA_Court_Terme": 63126.54214576395,
+        "EMA_Long_Terme": 62912.416553111376,
+        "time": 1783634400
+      },
+      {
+        "Bollinger_Basis": 62965.29199999994,
+        "Bollinger_Lower": 62473.57098212728,
+        "Bollinger_Upper": 63457.0130178726,
+        "EMA_Court_Terme": 63147.23371661116,
+        "EMA_Long_Terme": 62941.28777555579,
+        "time": 1783638000
+      },
+      {
+        "Bollinger_Basis": 62998.30149999994,
+        "Bollinger_Lower": 62562.971036646224,
+        "Bollinger_Upper": 63433.63196335366,
+        "EMA_Court_Terme": 63140.57297328893,
+        "EMA_Long_Terme": 62956.98252323254,
+        "time": 1783641600
+      },
+      {
+        "Bollinger_Basis": 63056.313999999955,
+        "Bollinger_Lower": 62550.73205902026,
+        "Bollinger_Upper": 63561.89594097965,
+        "EMA_Court_Terme": 63262.43037863114,
+        "EMA_Long_Terme": 63029.06229384776,
+        "time": 1783645200
+      },
+      {
+        "Bollinger_Basis": 63106.415499999945,
+        "Bollinger_Lower": 62467.85035643701,
+        "Bollinger_Upper": 63744.98064356288,
+        "EMA_Court_Terme": 63402.342302904915,
+        "EMA_Long_Terme": 63113.873903497966,
+        "time": 1783648800
+      },
+      {
+        "Bollinger_Basis": 63153.775499999945,
+        "Bollinger_Lower": 62420.35036576183,
+        "Bollinger_Upper": 63887.20063423806,
+        "EMA_Court_Terme": 63511.31384232393,
+        "EMA_Long_Terme": 63189.63082136179,
+        "time": 1783652400
+      },
+      {
+        "Bollinger_Basis": 63210.98699999995,
+        "Bollinger_Lower": 62391.11394712169,
+        "Bollinger_Upper": 64030.86005287821,
+        "EMA_Court_Terme": 63618.62707385914,
+        "EMA_Long_Terme": 63267.65347396526,
+        "time": 1783656000
+      },
+      {
+        "Bollinger_Basis": 63269.116499999946,
+        "Bollinger_Lower": 62369.554639291804,
+        "Bollinger_Upper": 64168.67836070809,
+        "EMA_Court_Terme": 63718.09965908731,
+        "EMA_Long_Terme": 63344.77497633206,
+        "time": 1783659600
+      },
+      {
+        "Bollinger_Basis": 63322.549999999945,
+        "Bollinger_Lower": 62417.17584859484,
+        "Bollinger_Upper": 64227.92415140505,
+        "EMA_Court_Terme": 63745.42172726985,
+        "EMA_Long_Terme": 63391.13270575642,
+        "time": 1783663200
+      },
+      {
+        "Bollinger_Basis": 63381.38299999995,
+        "Bollinger_Lower": 62470.12668361576,
+        "Bollinger_Upper": 64292.63931638414,
+        "EMA_Court_Terme": 63788.93738181588,
+        "EMA_Long_Terme": 63443.120641596746,
+        "time": 1783666800
+      },
+      {
+        "Bollinger_Basis": 63462.98249999995,
+        "Bollinger_Lower": 62548.925097192565,
+        "Bollinger_Upper": 64377.03990280733,
+        "EMA_Court_Terme": 63880.351905452706,
+        "EMA_Long_Terme": 63516.11058326977,
+        "time": 1783670400
+      },
+      {
+        "Bollinger_Basis": 63530.81949999995,
+        "Bollinger_Lower": 62556.46388337572,
+        "Bollinger_Upper": 64505.175116624174,
+        "EMA_Court_Terme": 63981.29952436216,
+        "EMA_Long_Terme": 63595.108712063426,
+        "time": 1783674000
+      },
+      {
+        "Bollinger_Basis": 63600.40949999995,
+        "Bollinger_Lower": 62585.12188990729,
+        "Bollinger_Upper": 64615.69711009261,
+        "EMA_Court_Terme": 64066.59961948973,
+        "EMA_Long_Terme": 63668.98973823948,
+        "time": 1783677600
+      },
+      {
+        "Bollinger_Basis": 63678.265999999945,
+        "Bollinger_Lower": 62660.74863851229,
+        "Bollinger_Upper": 64695.7833614876,
+        "EMA_Court_Terme": 64138.31569559179,
+        "EMA_Long_Terme": 63737.734307490435,
+        "time": 1783681200
+      },
+      {
+        "Bollinger_Basis": 63757.59749999994,
+        "Bollinger_Lower": 62812.7194878564,
+        "Bollinger_Upper": 64702.47551214348,
+        "EMA_Court_Terme": 64167.98055647343,
+        "EMA_Long_Terme": 63787.634824991306,
+        "time": 1783684800
+      },
+      {
+        "Bollinger_Basis": 63824.65799999994,
+        "Bollinger_Lower": 62873.4795303213,
+        "Bollinger_Upper": 64775.83646967857,
+        "EMA_Court_Terme": 64231.18444517874,
+        "EMA_Long_Terme": 63850.9407499921,
+        "time": 1783688400
+      },
+      {
+        "Bollinger_Basis": 63859.44999999994,
+        "Bollinger_Lower": 62949.412014950154,
+        "Bollinger_Upper": 64769.487985049724,
+        "EMA_Court_Terme": 64167.921556142996,
+        "EMA_Long_Terme": 63856.75249999282,
+        "time": 1783692000
+      },
+      {
+        "Bollinger_Basis": 63899.04499999994,
+        "Bollinger_Lower": 63030.9044732806,
+        "Bollinger_Upper": 64767.18552671928,
+        "EMA_Court_Terme": 64142.33724491439,
+        "EMA_Long_Terme": 63873.411363629835,
+        "time": 1783695600
+      },
+      {
+        "Bollinger_Basis": 63940.37649999994,
+        "Bollinger_Lower": 63109.80625591181,
+        "Bollinger_Upper": 64770.94674408807,
+        "EMA_Court_Terme": 64141.87179593152,
+        "EMA_Long_Terme": 63897.64760329985,
+        "time": 1783699200
+      },
+      {
+        "Bollinger_Basis": 63967.84649999995,
+        "Bollinger_Lower": 63192.679835650175,
+        "Bollinger_Upper": 64743.01316434972,
+        "EMA_Court_Terme": 64078.29543674521,
+        "EMA_Long_Terme": 63890.951457545314,
+        "time": 1783702800
+      },
+      {
+        "Bollinger_Basis": 63997.40749999995,
+        "Bollinger_Lower": 63297.299704110505,
+        "Bollinger_Upper": 64697.515295889396,
+        "EMA_Court_Terme": 64024.63634939617,
+        "EMA_Long_Terme": 63883.592234132106,
+        "time": 1783706400
+      },
+      {
+        "Bollinger_Basis": 64031.80149999994,
+        "Bollinger_Lower": 63424.42912051184,
+        "Bollinger_Upper": 64639.173879488044,
+        "EMA_Court_Terme": 64003.285079516936,
+        "EMA_Long_Terme": 63886.70930375646,
+        "time": 1783710000
+      },
+      {
+        "Bollinger_Basis": 64068.167499999945,
+        "Bollinger_Lower": 63618.305720928,
+        "Bollinger_Upper": 64518.02927907189,
+        "EMA_Court_Terme": 63970.87806361355,
+        "EMA_Long_Terme": 63882.5766397786,
+        "time": 1783713600
+      },
+      {
+        "Bollinger_Basis": 64081.27399999994,
+        "Bollinger_Lower": 63654.59408683923,
+        "Bollinger_Upper": 64507.95391316065,
+        "EMA_Court_Terme": 63979.10045089084,
+        "EMA_Long_Terme": 63894.34149070782,
+        "time": 1783717200
+      },
+      {
+        "Bollinger_Basis": 64088.78899999993,
+        "Bollinger_Lower": 63665.49653454089,
+        "Bollinger_Upper": 64512.08146545897,
+        "EMA_Court_Terme": 64005.73836071267,
+        "EMA_Long_Terme": 63914.15499155256,
+        "time": 1783720800
+      }
+    ]
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "neutral | confidence=0.50 | fields=5",
+    "primaryOpportunity": "",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.5
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

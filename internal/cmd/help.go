@@ -73,6 +73,19 @@ Commands:
   skills                        List available indicator skills
     --json                      JSON output
 
+  eval <file.pine>              Run arbitrary Pine Script source (no pre-published pineId needed)
+    --compile-only              Just validate syntax, don't run via WS
+    --script 'source'          Pass source inline instead of a file
+    --signals                   Extract trading signals from output
+    --agent                     Output agent-ready JSON envelope
+    --json                      JSON output
+    --force-cleanup             Aggressively retry when study limit hit
+  clean                         Clean chart sessions to free indicator slots
+    --iterations N              Number of cleanup cycles (default 3)
+    --delay Ms                  Delay between cycles in ms (default 500)
+    --symbol S                  Symbol to use for chart sessions (default BINANCE:BTCUSDT)
+  serve [--addr :8765]          Start HTTP server for AI agent integration
+    Endpoints: /health /compile /fetch /clean /run
   inputs <pineId|skillName>     Inspect Pine inputs (Pine-actual vs Go-declared)
     --json                      Structured JSON output
     --raw                       Raw Pine input list (id/name/type/defval/options)

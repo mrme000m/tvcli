@@ -1,0 +1,47 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T08:09:59Z",
+  "execution": {
+    "durationMs": 12768,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "ultra-sensitive-supertrend",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "lastPrice": 64691.373307525966,
+    "bias": "mixed"
+  },
+  "structure": {
+    "aligned": false,
+    "background": "BULLISH",
+    "buySignals": 13,
+    "combined": "MIXED",
+    "currentBuy": false,
+    "currentSell": false,
+    "currentUltraBuy": false,
+    "currentUltraSell": false,
+    "sellSignals": 12,
+    "st1": 64691.37,
+    "st2": 64749.75,
+    "ultraBuy": 13,
+    "ultraSell": 12
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Dual SuperTrend: MIXED. Aligned: false. ST1=64691 ST2=64750",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": [
+      "ST1 and ST2 disagree."
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.2
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

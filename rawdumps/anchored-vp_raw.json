@@ -1,0 +1,17 @@
+{
+  "bars": 300,
+  "graphic": {},
+  "inputs": {
+    "in_3": "5",
+    "in_4": "50",
+    "in_5": "20",
+    "in_6": "40",
+    "in_8": "true"
+  },
+  "periodCount": 0,
+  "periods": null,
+  "pineId": "PUB;92974e0a3cfb481eaf058cdab9f925a3",
+  "symbol": "OANDA:XAUUSD",
+  "timeframe": "1h",
+  "workflow": "anchored-vp"
+}

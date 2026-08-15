@@ -61,6 +61,15 @@ type Opportunity struct {
 	DistanceFromPrice any     `json:"distanceFromPrice"`
 	IsStale           bool    `json:"isStale"`
 	Rationale         string  `json:"rationale,omitempty"`
+	// Optional structured trade levels (ScalpQuant v2 and similar composite
+	// skills). Filled when the underlying Pine script emits dynamic TP/SL
+	// plots. Other parsers leave them at zero / omitempty.
+	Entry     float64 `json:"entry,omitempty"`
+	StopLoss  float64 `json:"stopLoss,omitempty"`
+	TP1       float64 `json:"tp1,omitempty"`
+	TP2       float64 `json:"tp2,omitempty"`
+	TP3       float64 `json:"tp3,omitempty"`
+	RiskReward float64 `json:"riskReward,omitempty"`
 }
 
 type Narrative struct {

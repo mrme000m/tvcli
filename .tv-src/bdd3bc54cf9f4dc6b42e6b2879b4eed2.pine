@@ -1,0 +1,58 @@
+//@version=6
+indicator("Trend Analysis with Volatility and Momentum", overlay=false, max_lines_count=500, max_labels_count=500)
+
+// === Input Parameters ===
+// Volatility and momentum settings
+length_volatility = input.int(14, title="Volatility Lookback Period")
+length_momentum = input.int(14, title="Momentum Lookback Period")
+
+// Support and resistance settings
+lookback_sr = input.int(7, title="Support/Resistance Lookback Period (weeks)")
+
+// === Calculations ===
+// Daily high, low, close analysis
+highs = request.security(syminfo.tickerid, "D", high)
+lows = request.security(syminfo.tickerid, "D", low)
+closes = request.security(syminfo.tickerid, "D", close)
+
+// Volatility: Average True Range (ATR)
+atr = ta.atr(length_volatility)
+
+// Momentum: Rate of Change (ROC)
+momentum = ta.roc(closes, length_momentum)
+
+// SMA calculation for trend
+sma_closes = ta.sma(closes, length_momentum)
+
+// Trend analysis
+trend = if momentum > 0 and closes > sma_closes
+    1  // Uptrend
+else if momentum < 0 and closes < sma_closes
+    -1 // Downtrend
+else
+    0  // Sideways
+
+// Weekly support and resistance
+highs_weekly = request.security(syminfo.tickerid, "W", high)
+lows_weekly = request.security(syminfo.tickerid, "W", low)
+support = ta.lowest(lows_weekly, lookback_sr)
+resistance = ta.highest(highs_weekly, lookback_sr)
+
+// === Plotting ===
+// Plot trend signals
+bgcolor(trend == 1 ? color.new(color.green, 80) : trend == -1 ? color.new(color.red, 80) : color.new(color.gray, 80))
+
+// Draw support and resistance levels as lines
+plot(support, title="Support", color=color.blue, linewidth=1, style=plot.style_line)
+plot(resistance, title="Resistance", color=color.orange, linewidth=1, style=plot.style_line)
+
+// Plot ATR in a separate window
+plot(atr * 10, title="Volatility (ATR)", color=color.purple, linewidth=2, offset=0)
+
+// Plot Momentum (ROC) in a separate window
+plot(momentum * 10, title="Momentum (ROC)", color=color.yellow, linewidth=2, offset=0)
+
+// Alerts
+alertcondition(trend == 1, title="Uptrend Alert", message="The market is in an uptrend!")
+alertcondition(trend == -1, title="Downtrend Alert", message="The market is in a downtrend!")
+alertcondition(trend == 0, title="Sideways Alert", message="The market is moving sideways.")

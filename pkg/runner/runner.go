@@ -66,11 +66,26 @@ type FieldMeta struct {
 }
 
 type StrategyMetrics struct {
-	NetProfit       float64 `json:"netProfit,omitempty"`
-	WinRate         float64 `json:"winRate,omitempty"`
-	TotalTrades     int     `json:"totalTrades"`
-	ProfitFactor    float64 `json:"profitFactor,omitempty"`
-	MaxDrawdown     float64 `json:"maxDrawdown,omitempty"`
+	NetProfit        float64 `json:"netProfit,omitempty"`
+	NetProfitPercent float64 `json:"netProfitPercent,omitempty"`
+	GrossProfit      float64 `json:"grossProfit,omitempty"`
+	GrossLoss        float64 `json:"grossLoss,omitempty"`
+	WinRate          float64 `json:"winRate,omitempty"`
+	TotalTrades      int     `json:"totalTrades"`
+	WinningTrades    int     `json:"winningTrades,omitempty"`
+	LosingTrades     int     `json:"losingTrades,omitempty"`
+	ProfitFactor     float64 `json:"profitFactor,omitempty"`
+	MaxDrawdown      float64 `json:"maxDrawdown,omitempty"`
+	MaxDDPercent     float64 `json:"maxDrawdownPercent,omitempty"`
+	AvgTrade         float64 `json:"avgTrade,omitempty"`
+	LargestWin       float64 `json:"largestWin,omitempty"`
+	LargestLoss      float64 `json:"largestLoss,omitempty"`
+	CommissionPaid   float64 `json:"commissionPaid,omitempty"`
+	SharpeRatio      float64 `json:"sharpeRatio,omitempty"`
+	SortinoRatio     float64 `json:"sortinoRatio,omitempty"`
+	BuyHoldReturn    float64 `json:"buyHoldReturn,omitempty"`
+	OpenPL           float64 `json:"openPL,omitempty"`
+	Currency         string  `json:"currency,omitempty"`
 }
 
 type GraphicData struct {
@@ -330,8 +345,18 @@ func extractStrategyMetrics(report map[string]any) *StrategyMetrics {
 	}
 
 	m := &StrategyMetrics{}
+	// perf.all fields
 	if v, ok := all["netProfit"].(float64); ok {
 		m.NetProfit = v
+	}
+	if v, ok := all["netProfitPercent"].(float64); ok {
+		m.NetProfitPercent = v
+	}
+	if v, ok := all["grossProfit"].(float64); ok {
+		m.GrossProfit = v
+	}
+	if v, ok := all["grossLoss"].(float64); ok {
+		m.GrossLoss = v
 	}
 	if v, ok := all["percentProfitable"].(float64); ok {
 		m.WinRate = v
@@ -339,11 +364,49 @@ func extractStrategyMetrics(report map[string]any) *StrategyMetrics {
 	if v, ok := all["totalTrades"].(float64); ok {
 		m.TotalTrades = int(v)
 	}
+	if v, ok := all["numberOfWiningTrades"].(float64); ok {
+		m.WinningTrades = int(v)
+	}
+	if v, ok := all["numberOfLosingTrades"].(float64); ok {
+		m.LosingTrades = int(v)
+	}
 	if v, ok := all["profitFactor"].(float64); ok {
 		m.ProfitFactor = v
 	}
-	if v, ok := all["maxDrawdown"].(float64); ok {
+	if v, ok := all["avgTrade"].(float64); ok {
+		m.AvgTrade = v
+	}
+	if v, ok := all["largestWinTrade"].(float64); ok {
+		m.LargestWin = v
+	}
+	if v, ok := all["largestLosTrade"].(float64); ok {
+		m.LargestLoss = v
+	}
+	if v, ok := all["commissionPaid"].(float64); ok {
+		m.CommissionPaid = v
+	}
+	// perf top-level fields
+	if v, ok := perf["maxStrategyDrawDown"].(float64); ok {
 		m.MaxDrawdown = v
+	}
+	if v, ok := perf["maxStrategyDrawDownPercent"].(float64); ok {
+		m.MaxDDPercent = v
+	}
+	if v, ok := perf["sharpeRatio"].(float64); ok {
+		m.SharpeRatio = v
+	}
+	if v, ok := perf["sortinoRatio"].(float64); ok {
+		m.SortinoRatio = v
+	}
+	if v, ok := perf["buyHoldReturn"].(float64); ok {
+		m.BuyHoldReturn = v
+	}
+	if v, ok := perf["openPL"].(float64); ok {
+		m.OpenPL = v
+	}
+	// currency from report top-level
+	if cur, ok := report["currency"].(string); ok {
+		m.Currency = cur
 	}
 	return m
 }
@@ -431,10 +494,41 @@ func FormatResults(result *RunResult, jsonOutput bool) string {
 	}
 
 	if result.StrategyMetrics != nil {
+		m := result.StrategyMetrics
 		sb.WriteString("\nSTRATEGY METRICS\n")
-		sb.WriteString(fmt.Sprintf("  Trades: %d | Win Rate: %.1f%% | Profit Factor: %.2f | Net: %.2f\n",
-			result.StrategyMetrics.TotalTrades, result.StrategyMetrics.WinRate*100,
-			result.StrategyMetrics.ProfitFactor, result.StrategyMetrics.NetProfit))
+		sb.WriteString(fmt.Sprintf("  Trades: %d | Win Rate: %.1f%% | Profit Factor: %.2f | Net: %.2f",
+			m.TotalTrades, m.WinRate*100, m.ProfitFactor, m.NetProfit))
+		if m.Currency != "" {
+			sb.WriteString(" " + m.Currency)
+		}
+		sb.WriteString("\n")
+		if m.SharpeRatio != 0 || m.SortinoRatio != 0 {
+			sb.WriteString(fmt.Sprintf("  Sharpe: %.2f | Sortino: %.2f", m.SharpeRatio, m.SortinoRatio))
+		}
+		if m.MaxDrawdown != 0 || m.MaxDDPercent != 0 {
+			sb.WriteString(fmt.Sprintf(" | MaxDD: %.2f", m.MaxDrawdown))
+			if m.MaxDDPercent != 0 {
+				sb.WriteString(fmt.Sprintf(" (%.1f%%)", m.MaxDDPercent))
+			}
+		}
+		if m.BuyHoldReturn != 0 {
+			sb.WriteString(fmt.Sprintf(" | Buy&Hold: %.2f", m.BuyHoldReturn))
+		}
+		if m.SharpeRatio != 0 || m.SortinoRatio != 0 || m.MaxDrawdown != 0 || m.BuyHoldReturn != 0 {
+			sb.WriteString("\n")
+		}
+		if m.WinningTrades > 0 || m.LosingTrades > 0 {
+			sb.WriteString(fmt.Sprintf("  Wins: %d | Losses: %d", m.WinningTrades, m.LosingTrades))
+		}
+		if m.AvgTrade != 0 {
+			sb.WriteString(fmt.Sprintf(" | Avg: %.2f", m.AvgTrade))
+		}
+		if m.GrossProfit != 0 || m.GrossLoss != 0 {
+			sb.WriteString(fmt.Sprintf(" | Gross P/L: %.2f / %.2f", m.GrossProfit, m.GrossLoss))
+		}
+		if m.WinningTrades > 0 || m.LosingTrades > 0 || m.AvgTrade != 0 || m.GrossProfit != 0 {
+			sb.WriteString("\n")
+		}
 	}
 
 	sb.WriteString(fmt.Sprintf("\nMETA\n  pineId: %s\n  Duration: %dms\n", result.Meta.PineID, result.Meta.DurationMs))

@@ -1,0 +1,41 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:50:21Z",
+  "execution": {
+    "durationMs": 7019,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "buying-selling-volume",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "lastPrice": 64722.43,
+    "bias": "neutral"
+  },
+  "structure": {
+    "bgConsensus": "neutral",
+    "buyDominant": 8,
+    "dominanceRatio": -0.15,
+    "neutral": 1,
+    "recentCrosses": 0,
+    "sellDominant": 11,
+    "totalBars": 249
+  },
+  "opportunities": null,
+  "narrative": {
+    "marketStructure": "Buy:8 Sell:11 Neutral:1 Dom:-0.15 BG:neutral",
+    "primaryOpportunity": "Wait for signal.",
+    "warnings": [
+      "Low volume dominance."
+    ]
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.4
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}

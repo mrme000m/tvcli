@@ -1,0 +1,30 @@
+{
+  "status": "ok",
+  "workflow": "liquidity-sweep",
+  "market": {
+    "lastPrice": 4016.605,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bearSweeps": 7,
+    "bullSweeps": 9,
+    "latestSweep": "none",
+    "price": 4016.605,
+    "sweepDominance": "bullish",
+    "totalSweeps": 16
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Sweeps: bull=9 bear=7 | Bias: bullish",
+    "primaryOpportunity": "",
+    "warnings": []
+  },
+  "validation": {
+    "passed": true,
+    "warnings": null
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.71
+  }
+}

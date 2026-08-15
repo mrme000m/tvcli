@@ -1,0 +1,38 @@
+{
+  "status": "ok",
+  "exitCode": 0,
+  "timestamp": "2026-07-19T07:52:38Z",
+  "execution": {
+    "durationMs": 8420,
+    "attempts": 1
+  },
+  "agentContext": {
+    "workflow": "liquidity-sweep",
+    "modelVersion": "agent-ready-v2",
+    "symbol": "BINANCE:BTCUSDT",
+    "timeframe": "15m"
+  },
+  "market": {
+    "lastPrice": 64967.25,
+    "bias": "bullish"
+  },
+  "structure": {
+    "bearSweeps": 7,
+    "bullSweeps": 11,
+    "latestSweep": "none",
+    "price": 64967.25,
+    "sweepDominance": "bullish",
+    "totalSweeps": 18
+  },
+  "opportunities": [],
+  "narrative": {
+    "marketStructure": "Sweeps: bull=11 bear=7 | Bias: bullish",
+    "primaryOpportunity": "",
+    "warnings": []
+  },
+  "conformance": {
+    "hasValidData": true,
+    "agenticScore": 0.72
+  },
+  "schemaVersion": "agent-ready-v2.0.0"
+}
