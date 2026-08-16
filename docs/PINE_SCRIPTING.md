@@ -46,6 +46,41 @@ The **agent `bias`** is derived from the *count of buy vs sell events*.
 **⇒ Craft scripts to emit both**: (a) price-valued plot lines for level detection,
 and (b) a +1/-1 signal line (or two 0/1 lines) for buy/sell event detection.
 
+## Indicator vs strategy separation
+
+`tvcli` explicitly distinguishes the two script kinds in its output, so an agent
+can read trade-driven results differently from plot-driven results.
+
+- **Detected from** the Pine `metaInfo` schema (`strategy()` declaration /
+  strategy-specific inputs) and confirmed by a received strategy report
+  (`performance`/`trades`).
+- **Exposed** as `Structure.kind` and `Structure.meta.scriptType`
+  (`"strategy" | "indicator"`).
+- **Strategies** additionally get:
+  - a `Structure.strategy` summary (net profit, win rate, total/losing/winning
+    trades, profit factor, drawdown, sharpe/sortino, per-trade list);
+  - **trade-derived events** — each executed `strategy.entry` becomes a
+    `buy`/`sell` event (a long entry → `buy`, short entry → `sell`), so the
+    agent reacts to *actual* fills, not just plotted lines;
+  - a **bias** taken from the *last executed trade side* (long → `long`,
+    short → `short`) when trade history exists.
+- **Indicators** get neither the `strategy` block nor trade events; their
+  events/levels/bias come from plotted signal lines and price levels only.
+
+Example strategy envelope (trimmed):
+
+```json
+{
+  "kind": "strategy",
+  "meta": { "scriptType": "strategy", "periodCount": 465 },
+  "events": [{"Field": "trade_Long", "Kind": "buy", "Value": 63151.58}],
+  "strategy": {
+    "totalTrades": 245, "winRate": 26.9, "netProfit": -13309.17,
+    "trades": [{"Side": "buy", "Entry": 71408.9, "Price": 71268.01, "Profit": -140.89}]
+  }
+}
+```
+
 ## 3. Bundled agent-analysis scripts (`scripts/agent/`)
 
 All verified to return data on BINANCE:BTCUSDT 15m.

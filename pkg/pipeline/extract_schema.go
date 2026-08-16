@@ -112,8 +112,24 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 	s.Events = capEvents(s.Events, 30)
 	s.Levels = capLevels(s.Levels, 50)
 
+	// Separate strategy from indicator scripts. Schema ground-truth wins;
+	// otherwise a non-empty strategy report marks the run as a strategy.
+	s.Meta.ScriptType = "indicator"
+	if sch != nil && sch.IsStrategy {
+		s.Meta.ScriptType = "strategy"
+	} else if resolveScriptType(false, strategyReport) == "strategy" {
+		s.Meta.ScriptType = "strategy"
+	}
+	if s.Meta.ScriptType == "strategy" {
+		s.Events = append(s.Events, strategyEvents(strategyReport)...)
+		s.Events = capEvents(s.Events, 30)
+	}
+
 	// Bias
 	s.Bias, s.Confidence = computeBias(s.Last, s.Events, s.Classifications)
+	if b := strategyBias(strategyReport); b != "" {
+		s.Bias = b
+	}
 
 	// Strategy report
 	s.Report = extractReport(strategyReport)

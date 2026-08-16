@@ -121,7 +121,15 @@ func nonNilOpps(opps []skill.Opportunity) []skill.Opportunity {
 // buildStructure creates the Structure map for the agent-ready envelope,
 // including strategy report data when available.
 func buildStructure(signals *pipeline.Signals) map[string]any {
+	// Expose the script kind explicitly so consumers can distinguish strategy
+	// output (trade-driven) from indicator output (plot-driven). Defaults to
+	// "indicator" when the extractor left it unset.
+	kind := signals.Meta.ScriptType
+	if kind == "" {
+		kind = "indicator"
+	}
 	structure := map[string]any{
+		"kind":            kind,
 		"classifications": signals.Classifications,
 		"last":            signals.Last,
 		"series":          signals.Series,
@@ -130,7 +138,8 @@ func buildStructure(signals *pipeline.Signals) map[string]any {
 		"graphicCounts":   signals.GraphicCounts,
 		"meta":            signals.Meta,
 	}
-	if signals.Report != nil {
+	// Only strategies carry a strategy summary; indicators get none.
+	if kind == "strategy" && signals.Report != nil {
 		structure["strategy"] = signals.Report
 	}
 	return structure

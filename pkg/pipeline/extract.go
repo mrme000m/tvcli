@@ -46,6 +46,7 @@ type Meta struct {
 	Timeframe   string `json:"timeframe"`
 	PeriodCount int    `json:"periodCount"`
 	Timestamp   int64  `json:"timestamp"`
+	ScriptType  string `json:"scriptType,omitempty"` // "strategy" | "indicator"
 }
 
 type Event struct {
@@ -100,7 +101,7 @@ type StrategySummary struct {
 // Extract turns raw TradingView study output into clean quantitative signals.
 // It accepts the parsed periods, the parsed graphic map, and the optional
 // strategy report.
-func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any) *Signals {
+func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic map[string]map[string]any, strategyReport map[string]any, isStrategy ...bool) *Signals {
 	s := &Signals{
 		Meta: Meta{
 			PineID:      pineID,
@@ -196,8 +197,18 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 	s.Events = capEvents(s.Events, 30)
 	s.Levels = capLevels(s.Levels, 50)
 
+	// Separate strategy from indicator scripts and enrich accordingly.
+	s.Meta.ScriptType = resolveScriptType(len(isStrategy) > 0 && isStrategy[0], strategyReport)
+	if s.Meta.ScriptType == "strategy" {
+		s.Events = append(s.Events, strategyEvents(strategyReport)...)
+		s.Events = capEvents(s.Events, 30)
+	}
+
 	// Aggregate directional bias.
 	s.Bias, s.Confidence = computeBias(s.Last, s.Events, s.Classifications)
+	if b := strategyBias(strategyReport); b != "" {
+		s.Bias = b
+	}
 
 	// Strategy report.
 	s.Report = extractReport(strategyReport)
@@ -212,6 +223,100 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 // JSON returns compact JSON.
 func (s *Signals) JSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
+}
+
+// resolveScriptType distinguishes a strategy from an indicator. An explicit
+// hint from the Pine schema declaration (IsStrategy) takes precedence; otherwise
+// a non-empty strategy report (performance/trades) marks the run as a strategy.
+// Scripts that produce periods but are neither are reported as indicators.
+func resolveScriptType(isStrategy bool, report map[string]any) string {
+	if isStrategy || hasStrategyReport(report) {
+		return "strategy"
+	}
+	return "indicator"
+}
+
+// hasStrategyReport reports whether a strategy report carries any real payload.
+func hasStrategyReport(report map[string]any) bool {
+	if report == nil {
+		return false
+	}
+	if _, ok := report["performance"].(map[string]any); ok {
+		return true
+	}
+	if _, ok := report["trades"].([]any); ok {
+		return true
+	}
+	if _, ok := report["settings"].(map[string]any); ok {
+		return true
+	}
+	return false
+}
+
+// strategyEvents converts a strategy report's executed trades into directional
+// buy/sell events so an agent can react to actual entries/exits rather than only
+// raw indicator plots. Entry type "le" = long entry (buy), "se" = short (sell).
+func strategyEvents(report map[string]any) []Event {
+	tradesRaw, ok := report["trades"].([]any)
+	if !ok {
+		return nil
+	}
+	var evs []Event
+	for _, t := range tradesRaw {
+		tm, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		e, ok := tm["e"].(map[string]any)
+		if !ok {
+			continue
+		}
+		var ev Event
+		tp, _ := e["tp"].(string)
+		switch tp {
+		case "le":
+			ev.Kind = "buy"
+		case "se":
+			ev.Kind = "sell"
+		default:
+			continue
+		}
+		ev.Field = "strategy_trade"
+		ev.Value = floatOrZero(e["p"])
+		if c, ok := e["c"].(string); ok {
+			ev.Field = "trade_" + c
+		}
+		if tmv, ok := e["tm"].(float64); ok {
+			ev.Time = int64(tmv)
+		}
+		evs = append(evs, ev)
+	}
+	return evs
+}
+
+// strategyBias derives a directional read from a strategy's most recent executed
+// trade side: the last long entry implies a bullish stance, a short entry a
+// bearish one. Returns "" when there is no trade history to reason from.
+func strategyBias(report map[string]any) string {
+	tradesRaw, ok := report["trades"].([]any)
+	if !ok || len(tradesRaw) == 0 {
+		return ""
+	}
+	last, ok := tradesRaw[len(tradesRaw)-1].(map[string]any)
+	if !ok {
+		return ""
+	}
+	e, ok := last["e"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	switch tp, _ := e["tp"].(string); tp {
+	case "le":
+		return "long"
+	case "se":
+		return "short"
+	}
+	return ""
 }
 
 // Compact returns a one-line summary for terminal output.
@@ -936,6 +1041,29 @@ func classifyGraphicsOnly(classifications map[string]PlotClass, graphic map[stri
 		}
 	}
 
+	// Enhanced: dwgboxes - extract y1/y2 as price levels
+	if boxes, ok := graphic["dwgboxes"]; ok {
+		for _, boxV := range boxes {
+			m, ok := boxV.(map[string]any)
+			if !ok {
+				continue
+			}
+			y1, y1Ok := toFloat(m["y1"])
+			y2, y2Ok := toFloat(m["y2"])
+			if y1Ok && y2Ok {
+				allVals = append(allVals, y1, y2)
+				// Box boundaries as price levels
+				if y1 > 2000 || y2 > 2000 {
+					_ = math.Max(y1, y2)
+					_ = math.Min(y1, y2)
+					if _, exists := classifications["box"]; !exists {
+						classifications["box"] = ClassPrice
+					}
+				}
+			}
+		}
+	}
+
 	// Classify based on value patterns
 	if len(allVals) > 0 {
 		sum := 0.0
@@ -1003,6 +1131,14 @@ func classifyGraphicsOnly(classifications map[string]PlotClass, graphic map[stri
 				}
 			}
 		}
+		// 4. High non-zero density with price-range values → price
+		if nonZeroDensity > 0.6 && mean > 100 && mean < 10000 {
+			for f := range classifications {
+				if classifications[f] == ClassMetric {
+					classifications[f] = ClassPrice
+				}
+			}
+		}
 		_ = nonZeroDensity
 		_ = integerRatio
 	}
@@ -1063,6 +1199,13 @@ func extractLastFromGraphics(last map[string]any, graphic map[string]map[string]
 			}
 			if text, ok := labelV["t"].(string); ok && text != "" {
 				last["last_label_text"] = text
+				// Detect BUY/SELL/LONG/SHORT signals from label text
+				upper := strings.ToUpper(text)
+				if strings.Contains(upper, "BUY") || strings.Contains(upper, "LONG") {
+					last["last_label_signal"] = "buy"
+				} else if strings.Contains(upper, "SELL") || strings.Contains(upper, "SHORT") {
+					last["last_label_signal"] = "sell"
+				}
 			}
 		}
 	}
@@ -1081,6 +1224,29 @@ func extractLastFromGraphics(last map[string]any, graphic map[string]map[string]
 			if y1Ok && y2Ok {
 				last["last_box_high"] = math.Max(y1, y2)
 				last["last_box_low"] = math.Min(y1, y2)
+				// Box price range as a level
+				last["last_box_level"] = (y1 + y2) / 2
+			}
+		}
+	}
+	// dwglines: last line values
+	if lines, ok := graphic["dwglines"]; ok {
+		lastKey := ""
+		for k := range lines {
+			if k > lastKey {
+				lastKey = k
+			}
+		}
+		if lineV, ok := lines[lastKey].(map[string]any); ok {
+			y1, y1Ok := toFloat(lineV["y1"])
+			y2, y2Ok := toFloat(lineV["y2"])
+			if y1Ok && y2Ok {
+				last["last_line_y1"] = y1
+				last["last_line_y2"] = y2
+				// Nearly horizontal line → price level
+				if math.Abs(y1-y2) < 1 {
+					last["last_horizontal_level"] = (y1 + y2) / 2
+				}
 			}
 		}
 	}
