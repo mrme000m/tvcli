@@ -48,3 +48,6 @@ CONSOLIDATED_SCALP_SCRIPT.md
 # Fetch output files (CSV/JSON at root)
 *.csv
 BINANCE_*.json
+
+# editor backups
+*.bak

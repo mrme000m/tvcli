@@ -426,7 +426,11 @@ func (s *ScriptSchema) Summary() string {
 	if s.Version != "" {
 		sb.WriteString(fmt.Sprintf("  Version: %s\n", s.Version))
 	}
-	sb.WriteString(fmt.Sprintf("  Strategy: %v | Overlay: %v\n", s.IsStrategy, s.IsOverlay))
+	strategyLabel := "Strategy"
+	if !s.IsStrategy {
+		strategyLabel = "Indicator"
+	}
+	sb.WriteString(fmt.Sprintf("  %s: %v | Overlay: %v\n", strategyLabel, s.IsStrategy, s.IsOverlay))
 	sb.WriteString(fmt.Sprintf("  Plots: %d | Inputs: %d\n", len(s.Plots), len(s.Inputs)))
 
 	if len(s.Plots) > 0 {
@@ -443,6 +447,28 @@ func (s *ScriptSchema) Summary() string {
 
 	if len(s.Graphics.ToggleInputs) > 0 {
 		sb.WriteString(fmt.Sprintf("  Graphics toggles: %v\n", s.Graphics.ToggleInputs))
+	}
+
+	// Strategy-specific info
+	if s.IsStrategy {
+		sb.WriteString("\n  Strategy-specific fields:\n")
+		// Check for common strategy inputs
+		strategyInputs := []string{"commission", "slippage", "pyramiding", "calc_on_order"}
+		foundStrategyInputs := []string{}
+		for _, inp := range s.Inputs {
+			for _, si := range strategyInputs {
+				if strings.Contains(strings.ToLower(inp.Name), strings.ToLower(si)) ||
+					strings.Contains(strings.ToLower(inp.ID), strings.ToLower(si)) {
+					foundStrategyInputs = append(foundStrategyInputs, inp.Name+" ("+inp.ID+")")
+					break
+				}
+			}
+		}
+		if len(foundStrategyInputs) > 0 {
+			sb.WriteString("    Strategy inputs detected: " + strings.Join(foundStrategyInputs, ", ") + "\n")
+		} else {
+			sb.WriteString("    No typical strategy inputs detected (commission, slippage, pyramiding, calc_on_order)\n")
+		}
 	}
 
 	return sb.String()

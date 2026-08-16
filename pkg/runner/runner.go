@@ -462,11 +462,48 @@ func validateOutput(numData *NumericalData, graphicInt *GraphicData) Validation 
 
 func computeAgenticScore(intelligence map[string]any, numData *NumericalData, graphicInt *GraphicData) float64 {
 	score := 0.2
+	// Base score for having any data
 	if numData.Count > 0 {
 		score += 0.2
 	}
 	if graphicInt.ItemCount > 0 {
 		score += 0.15
+	}
+	// Additional scoring based on data quality
+	if numData != nil {
+		// Diversity of fields indicates richer analysis
+		if len(numData.Fields) >= 3 {
+			score += 0.1
+		}
+		if len(numData.Fields) >= 5 {
+			score += 0.1
+		}
+		// Presence of key trading fields boosts score
+		tradingFields := []string{"open", "high", "low", "close", "volume"}
+		tradingFieldCount := 0
+		for _, f := range numData.Fields {
+			for _, tf := range tradingFields {
+				if f == tf {
+					tradingFieldCount++
+					break
+				}
+			}
+		}
+		if tradingFieldCount >= 2 {
+			score += 0.1
+		}
+		if tradingFieldCount >= 4 {
+			score += 0.1
+		}
+	}
+	if graphicInt != nil && graphicInt.ItemCount > 0 {
+		// Graphic diversity (different draw types) indicates richer analysis
+		if len(graphicInt.Summary) >= 3 {
+			score += 0.1
+		}
+		if len(graphicInt.Summary) >= 5 {
+			score += 0.1
+		}
 	}
 	return math.Min(score, 0.99)
 }
