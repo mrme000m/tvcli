@@ -110,7 +110,14 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 
 	// Cap
 	s.Events = capEvents(s.Events, 30)
-	s.Levels = capLevels(s.Levels, 50)
+	// Fallback: when plot-based dominant is 0 (graphics-only scripts),
+	// derive a representative price from graphic y-values so capLevels can
+	// sort levels by proximity to the market.
+	levelPrice := dominant
+	if levelPrice == 0 {
+		levelPrice = dominantPriceFromGraphics(graphic)
+	}
+	s.Levels = capLevels(s.Levels, 50, levelPrice)
 
 	// Separate strategy from indicator scripts. Schema ground-truth wins;
 	// otherwise a non-empty strategy report marks the run as a strategy.

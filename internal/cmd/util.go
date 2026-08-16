@@ -95,7 +95,7 @@ func ExtractVersion(data any) string {
 // it doesn't try to set them on the indicator.
 var ReservedRunKeys = []string{
 	"symbol", "tf", "timeframe", "bars", "json", "out",
-	"force-cleanup", "cleanup", "raw", "raw-out", "signals",
+	"force-cleanup", "cleanup", "raw", "raw-out", "signals", "agent",
 	"settle", "schema", "multi-run", "sweep",
 	"persistent", "loop",
 }

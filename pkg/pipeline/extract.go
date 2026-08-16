@@ -195,7 +195,14 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 
 	// Keep payloads small: newest events, largest absolute levels.
 	s.Events = capEvents(s.Events, 30)
-	s.Levels = capLevels(s.Levels, 50)
+	// Fallback: when plot-based dominantPrice is 0 (graphics-only scripts),
+	// derive a representative price from graphic y-values so capLevels can
+	// sort levels by proximity to the market.
+	levelPrice := dominantPrice
+	if levelPrice == 0 {
+		levelPrice = dominantPriceFromGraphics(graphic)
+	}
+	s.Levels = capLevels(s.Levels, 50, levelPrice)
 
 	// Separate strategy from indicator scripts and enrich accordingly.
 	s.Meta.ScriptType = resolveScriptType(len(isStrategy) > 0 && isStrategy[0], strategyReport)
@@ -234,6 +241,41 @@ func resolveScriptType(isStrategy bool, report map[string]any) string {
 		return "strategy"
 	}
 	return "indicator"
+}
+
+// dominantPriceFromGraphics extracts a representative price from the y-values
+// of drawing boxes, lines, and labels. Used as a fallback when the plot-based
+// dominantPrice is 0 (graphics-only scripts with no meaningful plot data).
+func dominantPriceFromGraphics(graphic map[string]map[string]any) float64 {
+	var prices []float64
+	collect := func(m map[string]any, keys ...string) {
+		for _, item := range m {
+			mm, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			for _, k := range keys {
+				if v, ok := toFloat(mm[k]); ok && v > 0 {
+					prices = append(prices, v)
+				}
+			}
+		}
+	}
+	if boxes, ok := graphic["dwgboxes"]; ok {
+		collect(boxes, "y1", "y2")
+	}
+	if lines, ok := graphic["dwglines"]; ok {
+		collect(lines, "y1", "y2")
+	}
+	if labels, ok := graphic["dwglabels"]; ok {
+		collect(labels, "y")
+	}
+	if len(prices) == 0 {
+		return 0
+	}
+	// Median price
+	sort.Float64s(prices)
+	return prices[len(prices)/2]
 }
 
 // hasStrategyReport reports whether a strategy report carries any real payload.
@@ -653,33 +695,56 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				x = 0
 			}
 
-			kind := "alert"
 			upper := strings.ToUpper(text)
+			kind := "alert"
+			lvlKind := ""
+
 			switch {
-			case strings.Contains(upper, "BUY") || strings.Contains(upper, "LONG"):
+			// Direct buy/sell signals
+			case strings.Contains(upper, "BUY") || strings.Contains(upper, "LONG") || strings.Contains(upper, "BULL"):
 				kind = "buy"
-			case strings.Contains(upper, "SELL") || strings.Contains(upper, "SHORT"):
+			case strings.Contains(upper, "SELL") || strings.Contains(upper, "SHORT") || strings.Contains(upper, "BEAR"):
 				kind = "sell"
+			// Break of resistance = bullish; break of support = bearish
+			case strings.Contains(upper, "BREAK") && (strings.Contains(upper, "RES") || strings.Contains(upper, "RESIST")):
+				kind = "buy"
+			case strings.Contains(upper, "BREAK") && (strings.Contains(upper, "SUP") || strings.Contains(upper, "SUPPORT")):
+				kind = "sell"
+			// SMC structural labels (direction encoded in color; keep as alert
+			// with original text so the agent can interpret the structure)
+			case upper == "BOS" || upper == "CHOCH" || strings.Contains(upper, "BREAK OF STRUCTURE") || strings.Contains(upper, "CHANGE OF CHARACTER"):
+				kind = "alert"
+			// SMC liquidity levels
+			case upper == "EQH" || strings.Contains(upper, "EQUAL HIGH") || strings.Contains(upper, "STRONG HIGH"):
+				lvlKind = "resistance"
+			case upper == "EQL" || strings.Contains(upper, "EQUAL LOW") || strings.Contains(upper, "WEAK LOW"):
+				lvlKind = "support"
+			// Standard support/resistance labels
+			case strings.Contains(upper, "SUPPORT") || strings.Contains(upper, "RESISTANCE"):
+				if strings.Contains(upper, "SUPPORT") {
+					lvlKind = "support"
+				} else {
+					lvlKind = "resistance"
+				}
+			case strings.Contains(upper, "POC") || strings.Contains(upper, "LEVEL"):
+				lvlKind = "band"
 			}
 
-			counts[kind]++
-			if len(events) < 20 {
+			if kind != "alert" {
+				counts[kind]++
+			} else {
+				counts["alert"]++
+			}
+			if len(events) < 50 {
 				events = append(events, Event{
 					Time:  int64(x),
 					Field: "label_" + text,
 					Kind:  kind,
 					Value: y,
+					Text:  text,
 				})
 			}
-
-			// Structural level labels (supports/resistances, POC, etc.)
-			if strings.Contains(upper, "SUPPORT") || strings.Contains(upper, "RESISTANCE") || strings.Contains(upper, "POC") || strings.Contains(upper, "LEVEL") {
-				lvlKind := "band"
-				if strings.Contains(upper, "SUPPORT") {
-					lvlKind = "support"
-				} else if strings.Contains(upper, "RESISTANCE") {
-					lvlKind = "resistance"
-				}
+			if lvlKind != "" {
 				levels = append(levels, Level{
 					Field: "dwglabels_" + text,
 					Kind:  lvlKind,
@@ -751,8 +816,10 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 					continue
 				}
 
-				// Nearly horizontal lines → S/R levels
-				if y1 > 2000 || y2 > 2000 { // price-scale values
+				// Nearly horizontal lines → S/R levels.  Use y > 0 to include
+				// all price scales (crypto, forex, equities) rather than the
+				// old y > 2000 threshold which excluded low-priced assets.
+				if y1 > 0 || y2 > 0 {
 					avgPrice := (y1 + y2) / 2
 					slope := math.Abs(y2-y1) / math.Max(math.Abs(y1), 1)
 					if slope < 0.001 { // nearly flat
@@ -778,8 +845,8 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				if !y1Ok || !y2Ok {
 					continue
 				}
-				// Box boundaries as price levels
-				if y1 > 2000 || y2 > 2000 {
+				// Box boundaries as price levels (y > 0 to cover all price scales)
+				if y1 > 0 || y2 > 0 {
 					high := math.Max(y1, y2)
 					low := math.Min(y1, y2)
 					levels = append(levels, Level{
@@ -1280,12 +1347,20 @@ func capEvents(events []Event, max int) []Event {
 	return events
 }
 
-func capLevels(levels []Level, max int) []Level {
-	// Sort by kind priority (resistance/support > band > other), then by absolute value.
+func capLevels(levels []Level, max int, lastPrice float64) []Level {
+	// Sort by kind priority (resistance/support > band > other), then by
+	// proximity to the last price so the most relevant levels survive the cap.
 	sort.Slice(levels, func(i, j int) bool {
 		ki, kj := kindPriority(levels[i].Kind), kindPriority(levels[j].Kind)
 		if ki != kj {
 			return ki < kj // lower = higher priority
+		}
+		// Closer to last price = higher priority. When lastPrice is 0
+		// (unknown), fall back to largest absolute value (old behaviour).
+		if lastPrice != 0 {
+			di := math.Abs(levels[i].Value - lastPrice)
+			dj := math.Abs(levels[j].Value - lastPrice)
+			return di < dj
 		}
 		return math.Abs(levels[i].Value) > math.Abs(levels[j].Value)
 	})
