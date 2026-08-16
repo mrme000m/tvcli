@@ -1,0 +1,449 @@
+// Package agent provides report generation for marketing and analysis.
+package agent
+
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
+// ReportConfig configures report generation.
+type ReportConfig struct {
+	Title       string
+	Symbol      string
+	Timeframe   string
+	IncludeCharts bool
+	Format      string // "markdown", "html", "text"
+}
+
+// GenerateReport creates a comprehensive market analysis report from agent results.
+func GenerateReport(result *AgentResult, cfg ReportConfig) string {
+	if cfg.Title == "" {
+		cfg.Title = "Market Analysis Report"
+	}
+	if cfg.Format == "" {
+		cfg.Format = "markdown"
+	}
+
+	switch strings.ToLower(cfg.Format) {
+	case "markdown", "md":
+		return generateMarkdownReport(result, cfg)
+	case "html":
+		return generateHTMLReport(result, cfg)
+	case "marketing", "social", "tweet", "thread":
+		return generateMarketingReport(result, cfg)
+	default:
+		return generateTextReport(result, cfg)
+	}
+}
+
+func generateMarkdownReport(result *AgentResult, cfg ReportConfig) string {
+	var sb strings.Builder
+
+	// Header
+	sb.WriteString(fmt.Sprintf("# %s\n\n", cfg.Title))
+	sb.WriteString(fmt.Sprintf("**Symbol:** %s  |  **Timeframe:** %s  |  **Generated:** %s\n\n",
+		result.Config.Symbol, result.Config.Timeframe, result.Timestamp.Format("2006-01-02 15:04:05 UTC")))
+
+	// Executive Summary
+	sb.WriteString("## Executive Summary\n\n")
+	sb.WriteString(fmt.Sprintf("Analysis of **%s** on **%s** timeframe using **%d** technical indicators.\n\n",
+		result.Config.Symbol, result.Config.Timeframe, result.Summary.Successful))
+
+	sb.WriteString(fmt.Sprintf("**Market Bias Consensus:** %s  \n", strings.Title(result.Summary.BiasConsensus)))
+	sb.WriteString(fmt.Sprintf("**Average Agentic Score:** %.2f/1.00  \n", result.Summary.AvgAgenticScore))
+	sb.WriteString(fmt.Sprintf("**Analysis Duration:** %v  \n\n", result.Duration.Round(time.Second)))
+
+	// Key Findings
+	if len(result.Summary.TopOpportunities) > 0 {
+		sb.WriteString("## Key Trading Opportunities\n\n")
+		sb.WriteString("| # | Setup | Direction | Confidence | Confluence | R:R | Rationale |\n")
+		sb.WriteString("|---|-------|-----------|------------|------------|-----|-----------|\n")
+		for i, opp := range result.Summary.TopOpportunities {
+			rr := "-"
+			if opp.RiskReward > 0 {
+				rr = fmt.Sprintf("%.1f", opp.RiskReward)
+			}
+			rationale := opp.Rationale
+			if len(rationale) > 80 {
+				rationale = rationale[:80] + "..."
+			}
+			sb.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %.2f | %s | %s |\n",
+				i+1, opp.Setup, strings.Title(opp.Direction), opp.Confidence, opp.ConfluenceScore, rr, rationale))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Per-Indicator Analysis
+	sb.WriteString("## Indicator Analysis\n\n")
+	for _, sr := range result.SkillResults {
+		if sr.Status != "ok" || sr.AgentResult == nil {
+			continue
+		}
+		ar := sr.AgentResult
+
+		sb.WriteString(fmt.Sprintf("### %s\n\n", sr.SkillName))
+		sb.WriteString(fmt.Sprintf("- **Status:** %s  \n", strings.ToUpper(sr.Status)))
+		sb.WriteString(fmt.Sprintf("- **Duration:** %v  \n", sr.Duration.Round(time.Millisecond)))
+		if ar.Market.Bias != "" {
+			sb.WriteString(fmt.Sprintf("- **Bias:** %s  \n", strings.Title(ar.Market.Bias)))
+		}
+		if ar.Market.LastPrice != nil {
+			sb.WriteString(fmt.Sprintf("- **Last Price:** %v  \n", ar.Market.LastPrice))
+		}
+		if ar.Conformance.AgenticScore > 0 {
+			sb.WriteString(fmt.Sprintf("- **Agentic Score:** %.2f  \n", ar.Conformance.AgenticScore))
+		}
+
+		if len(ar.Opportunities) > 0 {
+			sb.WriteString("- **Opportunities:**\n")
+			for _, opp := range ar.Opportunities {
+				sb.WriteString(fmt.Sprintf("  - %s %s [%s] score=%.2f\n",
+					strings.Title(opp.Direction), opp.Setup, opp.Confidence, opp.ConfluenceScore))
+				if opp.Rationale != "" {
+					sb.WriteString(fmt.Sprintf("    - %s\n", opp.Rationale))
+				}
+			}
+		}
+
+		if len(ar.Narrative.Warnings) > 0 {
+			sb.WriteString("- **Warnings:**\n")
+			for _, w := range ar.Narrative.Warnings {
+				sb.WriteString(fmt.Sprintf("  - ⚠ %s\n", w))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Consensus View
+	sb.WriteString("## Consensus View\n\n")
+	sb.WriteString("### Agreements\n\n")
+	agreements := findAgreements(result)
+	if len(agreements) > 0 {
+		for _, a := range agreements {
+			sb.WriteString(fmt.Sprintf("- %s\n", a))
+		}
+	} else {
+		sb.WriteString("- No strong agreements detected across indicators.\n")
+	}
+	sb.WriteString("\n")
+
+	sb.WriteString("### Divergences\n\n")
+	divergences := findDivergences(result)
+	if len(divergences) > 0 {
+		for _, d := range divergences {
+			sb.WriteString(fmt.Sprintf("- %s\n", d))
+		}
+	} else {
+		sb.WriteString("- No significant divergences detected.\n")
+	}
+	sb.WriteString("\n")
+
+	// Risk Assessment
+	sb.WriteString("## Risk Assessment\n\n")
+	risks := assessRisks(result)
+	for _, r := range risks {
+		sb.WriteString(fmt.Sprintf("- %s\n", r))
+	}
+	sb.WriteString("\n")
+
+	// Footer
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("*Report generated by tvcli agent system at %s*\n",
+		time.Now().Format("2006-01-02 15:04:05 UTC")))
+
+	return sb.String()
+}
+
+func generateHTMLReport(result *AgentResult, cfg ReportConfig) string {
+	// Simple HTML wrapper around markdown-like content
+	md := generateMarkdownReport(result, cfg)
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>%s</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #1a1a2e; border-bottom: 2px solid #16213e; padding-bottom: 10px; }
+        h2 { color: #16213e; margin-top: 30px; }
+        h3 { color: #0f3460; }
+        table { border-collapse: collapse; width: 100%%; margin: 15px 0; }
+        th, td { border: 1px solid #e0e0e0; padding: 8px 12px; text-align: left; }
+        th { background-color: #1a1a2e; color: white; }
+        tr:nth-child(even) { background-color: #f5f5f5; }
+        code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+        .warning { color: #e67e22; }
+        .bullish { color: #27ae60; font-weight: bold; }
+        .bearish { color: #e74c3c; font-weight: bold; }
+        .neutral { color: #3498db; }
+    </style>
+</head>
+<body>
+%s
+</body>
+</html>`, cfg.Title, markdownToHTML(md))
+}
+
+func generateTextReport(result *AgentResult, cfg ReportConfig) string {
+	return FormatText(result)
+}
+
+// findAgreements identifies where multiple indicators agree.
+func findAgreements(result *AgentResult) []string {
+	var agreements []string
+	biasCount := make(map[string]int)
+
+	for _, sr := range result.SkillResults {
+		if sr.Status == "ok" && sr.AgentResult != nil && sr.AgentResult.Market.Bias != "" {
+			biasCount[sr.AgentResult.Market.Bias]++
+		}
+	}
+
+	// Only report the dominant bias (majority)
+	maxCount := 0
+	dominantBias := ""
+	for bias, count := range biasCount {
+		if count > maxCount {
+			maxCount = count
+			dominantBias = bias
+		}
+	}
+	if maxCount >= 2 {
+		agreements = append(agreements, fmt.Sprintf("%d of %d indicators show %s bias", maxCount, len(result.SkillResults), dominantBias))
+	} else if len(biasCount) > 0 {
+		agreements = append(agreements, "No clear bias consensus — indicators are mixed")
+	}
+
+	// Check for common opportunity types
+	oppCount := make(map[string]int)
+	for _, sr := range result.SkillResults {
+		if sr.Status == "ok" && sr.AgentResult != nil {
+			for _, opp := range sr.AgentResult.Opportunities {
+				key := fmt.Sprintf("%s %s", opp.Direction, opp.Setup)
+				oppCount[key]++
+			}
+		}
+	}
+
+	for opp, count := range oppCount {
+		if count >= 2 {
+			agreements = append(agreements, fmt.Sprintf("%d indicators signal %s", count, opp))
+		}
+	}
+
+	return agreements
+}
+
+// findDivergences identifies conflicting signals.
+func findDivergences(result *AgentResult) []string {
+	var divergences []string
+
+	// Check for opposing biases
+	hasBullish, hasBearish := false, false
+	for _, sr := range result.SkillResults {
+		if sr.Status == "ok" && sr.AgentResult != nil {
+			if sr.AgentResult.Market.Bias == "bullish" {
+				hasBullish = true
+			} else if sr.AgentResult.Market.Bias == "bearish" {
+				hasBearish = true
+			}
+		}
+	}
+	if hasBullish && hasBearish {
+		divergences = append(divergences, "Indicators show conflicting bullish/bearish biases")
+	}
+
+	// Check for opposing opportunities
+	longSetups, shortSetups := make(map[string]bool), make(map[string]bool)
+	for _, sr := range result.SkillResults {
+		if sr.Status == "ok" && sr.AgentResult != nil {
+			for _, opp := range sr.AgentResult.Opportunities {
+				if opp.Direction == "long" {
+					longSetups[opp.Setup] = true
+				} else if opp.Direction == "short" {
+					shortSetups[opp.Setup] = true
+				}
+			}
+		}
+	}
+
+	for setup := range longSetups {
+		if shortSetups[setup] {
+			divergences = append(divergences, fmt.Sprintf("Conflicting signals on %s (both long and short)", setup))
+		}
+	}
+
+	return divergences
+}
+
+// assessRisks identifies key risk factors.
+func assessRisks(result *AgentResult) []string {
+	var risks []string
+
+	// Low agentic score
+	if result.Summary.AvgAgenticScore < 0.4 {
+		risks = append(risks, fmt.Sprintf("Low average agentic score (%.2f) — signals may be unreliable", result.Summary.AvgAgenticScore))
+	}
+
+	// Mixed consensus
+	if result.Summary.BiasConsensus == "mixed" {
+		risks = append(risks, "Mixed bias consensus — no clear directional edge")
+	}
+
+	// Failed skills
+	if result.Summary.Failed > 0 {
+		risks = append(risks, fmt.Sprintf("%d indicator(s) failed to execute — incomplete analysis", result.Summary.Failed))
+	}
+
+	// Warnings
+	warningCount := len(result.Summary.AllWarnings)
+	if warningCount > 5 {
+		risks = append(risks, fmt.Sprintf("High warning count (%d) — elevated uncertainty", warningCount))
+	}
+
+	// Low opportunity quality
+	highConfOpps := 0
+	for _, opp := range result.Summary.TopOpportunities {
+		if opp.ConfluenceScore > 0.7 {
+			highConfOpps++
+		}
+	}
+	if highConfOpps == 0 && len(result.Summary.TopOpportunities) > 0 {
+		risks = append(risks, "No high-confidence opportunities (confluence > 0.70)")
+	}
+
+	if len(risks) == 0 {
+		risks = append(risks, "No major risk factors identified")
+	}
+
+	return risks
+}
+
+// markdownToHTML does a very basic markdown to HTML conversion.
+func markdownToHTML(md string) string {
+	html := md
+	html = strings.ReplaceAll(html, "\n\n", "</p><p>")
+	html = strings.ReplaceAll(html, "\n", "<br>")
+	html = strings.ReplaceAll(html, "# ", "<h1>")
+	html = strings.ReplaceAll(html, "## ", "<h2>")
+	html = strings.ReplaceAll(html, "### ", "<h3>")
+	html = strings.ReplaceAll(html, "**", "<strong>")
+	html = strings.ReplaceAll(html, "*", "<em>")
+	html = strings.ReplaceAll(html, "`", "<code>")
+	html = "<p>" + html + "</p>"
+
+	// Very basic table conversion (not complete, but usable)
+	lines := strings.Split(html, "<br>")
+	inTable := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "|") && strings.HasSuffix(line, "|") {
+			if !inTable {
+				lines[i] = "<table>" + line
+				inTable = true
+			} else {
+				lines[i] = line
+			}
+		} else if inTable {
+			lines[i-1] = lines[i-1] + "</table>"
+			inTable = false
+		}
+	}
+	if inTable {
+		lines[len(lines)-1] = lines[len(lines)-1] + "</table>"
+	}
+
+	return strings.Join(lines, "<br>")
+}
+
+// generateMarketingReport creates a social-media ready report (Twitter thread, LinkedIn post, etc.)
+func generateMarketingReport(result *AgentResult, cfg ReportConfig) string {
+	var sb strings.Builder
+
+	symbol := result.Config.Symbol
+	tf := result.Config.Timeframe
+	bias := result.Summary.BiasConsensus
+	score := result.Summary.AvgAgenticScore
+	topOpp := ""
+	if len(result.Summary.TopOpportunities) > 0 {
+		opp := result.Summary.TopOpportunities[0]
+		topOpp = fmt.Sprintf("%s %s (conf: %.0f%%)", opp.Direction, opp.Setup, opp.ConfluenceScore*100)
+	}
+
+	// Twitter/X Thread Format
+	sb.WriteString("🧵 MARKET ANALYSIS THREAD\n\n")
+	sb.WriteString(fmt.Sprintf("📊 %s | %s\n", symbol, tf))
+	sb.WriteString(fmt.Sprintf("🎯 Bias: %s | Confidence: %.0f%%\n\n", strings.Title(bias), score*100))
+
+	if topOpp != "" {
+		sb.WriteString(fmt.Sprintf("💡 Top Setup: %s\n\n", topOpp))
+	}
+
+	// Key indicators
+	sb.WriteString("📈 Indicators Analyzed:\n")
+	for _, sr := range result.SkillResults {
+		if sr.Status == "ok" && sr.AgentResult != nil {
+			b := sr.AgentResult.Market.Bias
+			emoji := "⚪"
+			if b == "bullish" {
+				emoji = "🟢"
+			} else if b == "bearish" {
+				emoji = "🔴"
+			}
+			sb.WriteString(fmt.Sprintf("%s %s: %s\n", emoji, sr.SkillName, strings.Title(b)))
+		}
+	}
+	sb.WriteString("\n")
+
+	// Opportunities
+	if len(result.Summary.TopOpportunities) > 0 {
+		sb.WriteString("🎯 Key Opportunities:\n")
+		for i, opp := range result.Summary.TopOpportunities {
+			if i >= 3 {
+				break
+			}
+			dirEmoji := "🟢"
+			if opp.Direction == "short" {
+				dirEmoji = "🔴"
+			}
+			sb.WriteString(fmt.Sprintf("%s %s %s | Conf: %.0f%% | R:R: %.1f\n",
+				dirEmoji, strings.Title(opp.Direction), opp.Setup, opp.ConfluenceScore*100, opp.RiskReward))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Warnings
+	warnings := uniqueWarnings(result.Summary.AllWarnings)
+	if len(warnings) > 0 {
+		sb.WriteString("⚠️ Watchouts:\n")
+		for _, w := range warnings[:min(3, len(warnings))] {
+			sb.WriteString(fmt.Sprintf("• %s\n", w))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("Generated: %s | tvcli agent\n", time.Now().Format("2006-01-02 15:04")))
+	sb.WriteString("#Trading #TechnicalAnalysis #" + strings.ReplaceAll(symbol, ":", ""))
+
+	return sb.String()
+}
+
+func uniqueWarnings(warnings []string) []string {
+	seen := make(map[string]bool)
+	var unique []string
+	for _, w := range warnings {
+		if !seen[w] {
+			seen[w] = true
+			unique = append(unique, w)
+		}
+	}
+	return unique
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
