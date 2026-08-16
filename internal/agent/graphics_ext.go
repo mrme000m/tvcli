@@ -25,11 +25,14 @@ import (
 const profileMinStack = 3 // min boxes sharing a left edge to count as a profile
 
 // postProcessGraphics fills GraphicSummary.VolumePeaks and Zones and
-// re-classifies instance boxes that belong to a detected volume-profile stack.
+// re-classifies instance boxes/lines/labels using the generic, topology-based
+// grouping in graphics_generic.go. This replaces the per-script pattern
+// matchers (findVolumeProfilePeaks, findLineFillZones) with a universal
+// approach that works across any script without script-specific knowledge.
+//
 // It must run AFTER the flat box/line/label parsers have populated analysis.
 func (a *UniversalAnalyzer) postProcessGraphics(analysis *GraphicAnalysis, graphic map[string]map[string]any) {
-	a.findVolumeProfilePeaks(analysis)
-	a.findLineFillZones(analysis, graphic)
+	a.postProcessGraphicsGeneric(analysis, graphic)
 }
 
 // boxW returns the X-extent of a box graphic.

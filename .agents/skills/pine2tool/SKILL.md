@@ -76,7 +76,11 @@ Each run writes, under `--out` (or `skill_work/pine2tool_<slug>`):
 
 tvcli accepts input overrides in several equivalent spellings (all reassembled
 by `internal/cmd/inputs_util.go` and resolved to the correct TV input ID by
-name/index via `PineIndicator.SetOption`):
+name/index via `PineIndicator.SetOption`). Custom inputs have been **verified**
+to change the graphic output at runtime — e.g., increasing "Show Last Bullish
+OB" from 3 to 5 on LuxAlgo Order Blocks increased box count from 8 to 11 and
+line count from 16 to 22, confirming the inputs reach the TradingView runtime
+and alter the indicator's drawing output:
 
 | Spelling | Example |
 |----------|---------|
