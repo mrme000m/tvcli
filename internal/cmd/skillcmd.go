@@ -12,9 +12,9 @@ import (
 	"github.com/ch99q/tvcli/internal/cli"
 	"github.com/ch99q/tvcli/internal/config"
 	"github.com/ch99q/tvcli/internal/service"
+	"github.com/ch99q/tvcli/internal/skill"
 	"github.com/ch99q/tvcli/pkg/pinefacade"
 	"github.com/ch99q/tvcli/pkg/runner"
-	"github.com/ch99q/tvcli/internal/skill"
 )
 
 type skillCmd struct {
@@ -250,16 +250,17 @@ func (c *skillCmd) resolveInputs(flags cli.Flags) map[string]string {
 			inputs[inp.TVInputID] = flags.Get(flagName)
 		}
 	}
-	// 4) Apply --input key=value passthrough. Translate known JS variable
-	// names to TVInputID; pass through unknown keys (lets users target raw
-	// Pine IDs like `in_3` directly).
-	for k, v := range flags.All() {
-		if skill.ReservedFlags[k] {
-			continue
-		}
-		if _, isDef := inputs[k]; isDef {
-			continue
-		}
+	// 4) Apply explicit input overrides. collectInputs reassembles the Flag
+	// parser's split representation ("--input k=v", "--input.k=v", positional
+	// "k=v", raw "--in_3=42") into one map, then every key is translated to the
+	// canonical TVInputID (by name or by kebab-case flag name) before being sent
+	// to Pine. Unknown keys pass through so raw Pine IDs still work.
+	reserved := make([]string, 0, len(skill.ReservedFlags))
+	for k := range skill.ReservedFlags {
+		reserved = append(reserved, k)
+	}
+	explicit := collectInputs(flags, 0, reserved)
+	for k, v := range explicit {
 		if tvID, ok := nameToTV[k]; ok {
 			inputs[tvID] = v
 			continue

@@ -84,7 +84,13 @@ tvcli eval --script '//@version=5 ...' [options]
 | `--raw-out <file>` | — | Write raw dump to file |
 | `--out <file>` | — | Save output to file |
 | `--settle <ms>` | `1500` | Wait after first update for graphics |
-| `<key>=<value>` | — | Pine script input overrides |
+| `<key>=<value>` | — | Pine input override (positional, after the file path) |
+| `--input key=value` | — | Pine input override, space or comma list form |
+| `--input.k=v` | — | Dotted Pine input override (agent/universal form) |
+| `--<in_N>=<v>` | — | Raw TV input ID override (e.g. `--in_1=4`) |
+
+All input spellings are merged by `internal/cmd/inputs_util.go` and resolved to
+the canonical TV input ID by ID, index, or name (`PineIndicator.SetOption`).
 
 **Signal extraction fields:**
 - `Meta`: pineId, symbol, timeframe, periodCount, timestamp
@@ -142,8 +148,12 @@ tvcli run <pineId> [options]
 | `--persistent` | false | Keep WS connection across runs |
 | `--loop <interval>` | — | Re-run periodically (implies --persistent) |
 | `--multi-run` | false | Generate input sweep configs |
-| `--input key=value` | — | Override Pine input (repeatable) |
+| `--input key=value` | — | Override Pine input (comma lists allowed: `--input "in_1=4,in_0=3"`) |
+| `--input.k=v` | — | Dotted Pine input override |
+| `--in_N=v` | — | Raw TV input ID override |
 | `--preset <name>` | — | Use a skill preset |
+
+Input overrides are resolved to canonical TV input IDs by ID, index, or name.
 
 **Examples:**
 ```bash

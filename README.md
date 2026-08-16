@@ -117,6 +117,39 @@ tvcli/
 
 ## Output Formats
 
+## Turn Any Script Into an Analysis Tool
+
+The workspace ships an agent skill — `.agents/skills/pine2tool` — that turns any
+Pine script (public ID, private ID, or local `.pine`) into a reusable, structured
+analysis tool without a hand-written parser:
+
+```bash
+# analyze a public script + generate a reusable skill stub
+./.agents/skills/pine2tool/bin/pine2tool.sh \
+    "PUB;3b3ebba156574e058cc8ae73dc5c7fa2" \
+    --symbol BINANCE:BTCUSDT --tf 1H --input "in_1=4,in_0=3" --out skill_work/vp_ob
+
+# same for a local .pine file
+./.agents/skills/pine2tool/bin/pine2tool.sh ./my_script.pine --tf 5m --out skill_work/tool
+```
+
+It downloads the source, introspects inputs, runs with custom inputs, runs the
+universal analyzer (`tv analyze`), and emits agent-ready JSON plus a registrable
+`skill.yaml` / `SKILL.md` stub. Deep-graphics recovery (`internal/agent/graphics_ext.go`)
+auto-extracts volume-profile **POC/VAH/VAL**, **order-block zones**, **FVG/OB/liquidity**
+and **session markers** purely from the drawing layer.
+
+### Passing Pine inputs (all spellings work)
+```
+tvcli eval s.pine length=20 src=close        # positional after the file
+tvcli run  "PUB;x" --input in_1=4,in_0=3      # --input key=value / comma list
+tvcli analyze "PUB;x" --input.lookback=50     # dotted form
+tvcli eval  s.pine --in_1=4                   # raw TV input ID
+```
+All are merged by `internal/cmd/inputs_util.go` and resolved to canonical TV
+input IDs by ID, index, or human-readable name (`PineIndicator.SetOption`).
+
+
 ### `--json` (signals format)
 Raw extracted signals: classifications, last values, series, levels, events, graphic counts, strategy report.
 

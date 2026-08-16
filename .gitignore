@@ -51,3 +51,6 @@ BINANCE_*.json
 
 # editor backups
 *.bak
+
+# working artifacts from agent runs
+skill_work/

@@ -21,24 +21,24 @@ type InputDef struct {
 }
 
 type PineIndicator struct {
-	PineID          string
-	PineVersion     string
-	Description     string
-	ShortDesc       string
-	Inputs          map[string]*InputDef
-	InputsOrder     []string // Preserves insertion order for deterministic color indexing
-	Plots           map[string]string
-	Script          string
-	Type            string
-	Schema          *schema.PineSchema // Compiled from metaInfo (plots, styles, palettes)
-	metaInfo        map[string]any
+	PineID      string
+	PineVersion string
+	Description string
+	ShortDesc   string
+	Inputs      map[string]*InputDef
+	InputsOrder []string // Preserves insertion order for deterministic color indexing
+	Plots       map[string]string
+	Script      string
+	Type        string
+	Schema      *schema.PineSchema // Compiled from metaInfo (plots, styles, palettes)
+	metaInfo    map[string]any
 }
 
 func NewPineIndicator(opts map[string]any) *PineIndicator {
 	ind := &PineIndicator{
-		Type:    "Script@tv-scripting-101!",
-		Inputs:  make(map[string]*InputDef),
-		Plots:   make(map[string]string),
+		Type:   "Script@tv-scripting-101!",
+		Inputs: make(map[string]*InputDef),
+		Plots:  make(map[string]string),
 	}
 
 	if v, ok := opts["pineId"].(string); ok {
@@ -72,29 +72,29 @@ func NewPineIndicator(opts map[string]any) *PineIndicator {
 				if id == "" || id == "text" || id == "pineId" || id == "pineVersion" || id == "__profile" {
 					continue
 				}
-			def := &InputDef{
-				Name: id,
-				Type: "float",
-				Value: inp["defval"],
-			}
-			if n, ok := inp["name"].(string); ok {
-				def.Name = n
-			}
-			if t, ok := inp["type"].(string); ok {
-				def.Type = t
-			}
-			if inline, ok := inp["inline"].(string); ok {
-				def.InternalID = inline
-			}
-			if tooltip, ok := inp["tooltip"].(string); ok {
-				def.Tooltip = tooltip
-			}
-			if isFake, ok := inp["isFake"].(bool); ok {
-				def.IsFake = isFake
-			}
-			if isHidden, ok := inp["isHidden"].(bool); ok {
-				def.IsHidden = isHidden
-			}
+				def := &InputDef{
+					Name:  id,
+					Type:  "float",
+					Value: inp["defval"],
+				}
+				if n, ok := inp["name"].(string); ok {
+					def.Name = n
+				}
+				if t, ok := inp["type"].(string); ok {
+					def.Type = t
+				}
+				if inline, ok := inp["inline"].(string); ok {
+					def.InternalID = inline
+				}
+				if tooltip, ok := inp["tooltip"].(string); ok {
+					def.Tooltip = tooltip
+				}
+				if isFake, ok := inp["isFake"].(bool); ok {
+					def.IsFake = isFake
+				}
+				if isHidden, ok := inp["isHidden"].(bool); ok {
+					def.IsHidden = isHidden
+				}
 				if opts, ok := inp["options"].([]any); ok {
 					for _, o := range opts {
 						if s, ok := o.(string); ok {
@@ -146,19 +146,29 @@ func toTypedValue(raw any, typ string) any {
 }
 
 func (ind *PineIndicator) SetOption(key string, value any) error {
-	// Try direct key match
+	// Try direct key match (canonical TV input ID, e.g. "in_0")
 	if def, ok := ind.Inputs[key]; ok {
 		def.Value = toTypedValue(value, def.Type)
 		return nil
 	}
-	// Try "in_" prefix
-	if def, ok := ind.Inputs["in_"+key]; ok {
+	// Try "in_" prefix (caller passed "0" as a shorthand for "in_0")
+	if def, ok := ind.Inputs["in_"+strings.TrimPrefix(key, "in_")]; ok {
 		def.Value = toTypedValue(value, def.Type)
 		return nil
 	}
-	// Try matching by inline/internalID
+	// Try matching by inline/internalID (the Pine `inline` group key)
 	for _, def := range ind.Inputs {
 		if def.InternalID == key {
+			def.Value = toTypedValue(value, def.Type)
+			return nil
+		}
+	}
+	// Try matching by the human-readable input name from metaInfo, so any
+	// spelling the user sees in the Pine settings panel resolves to the right
+	// TV input ID. This makes custom-input passing work regardless of whether
+	// the caller uses the Pine ID, the index, or the display name.
+	for _, def := range ind.Inputs {
+		if def.Name != "" && strings.EqualFold(strings.TrimSpace(def.Name), strings.TrimSpace(key)) {
 			def.Value = toTypedValue(value, def.Type)
 			return nil
 		}
@@ -210,12 +220,12 @@ var builtinDefaults = map[string]map[string]any{
 		"col_prev_close": false,
 	},
 	"VbPFixed@tv-basicstudies-241": {
-		"rowsLayout":            "Number Of Rows",
-		"rows":                  24,
-		"volume":                "Up/Down",
-		"vaVolume":              70,
-		"subscribeRealtime":     false,
-		"extendToRight":         false,
+		"rowsLayout":                     "Number Of Rows",
+		"rows":                           24,
+		"volume":                         "Up/Down",
+		"vaVolume":                       70,
+		"subscribeRealtime":              false,
+		"extendToRight":                  false,
 		"mapRightBoundaryToBarStartTime": true,
 	},
 }

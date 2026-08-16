@@ -30,7 +30,9 @@ type evalCmd struct{ app *App }
 
 func (c *evalCmd) Name() string      { return "eval" }
 func (c *evalCmd) Aliases() []string { return nil }
-func (c *evalCmd) Synopsis() string  { return "Run arbitrary Pine Script source (no pre-published pineId needed)" }
+func (c *evalCmd) Synopsis() string {
+	return "Run arbitrary Pine Script source (no pre-published pineId needed)"
+}
 
 // sanitizeForJSON recursively walks a value and replaces NaN/Inf floats with 0.
 // Go's encoding/json cannot marshal NaN or Inf, so we must sanitize before
@@ -263,15 +265,12 @@ func (c *evalCmd) Run(env *cli.Env) error {
 	}
 	indicator := tradingview.NewPineIndicator(indicatorOpts)
 
-	// Apply input overrides from flags (skip reserved keys).
-	skip := make(map[string]bool, len(evalReservedKeys))
-	for _, k := range evalReservedKeys {
-		skip[k] = true
-	}
-	for k, v := range flags.All() {
-		if skip[k] {
-			continue
-		}
+	// Collect Pine input overrides from every supported spelling and apply them
+	// to the locally-built indicator (for diagnostics) and to the run request.
+	// collectInputs merges --input k=v, --input.k=v, positional "k=v" args
+	// after the script path, and raw --in_N=v flags into one map.
+	inputOverrides := collectInputs(env.Flags, 1, evalReservedKeys)
+	for k, v := range inputOverrides {
 		if err := indicator.SetOption(k, v); err != nil {
 			fmt.Fprintf(env.Stderr, "⚠ Input '%s': %v\n", k, err)
 		}
@@ -290,7 +289,7 @@ func (c *evalCmd) Run(env *cli.Env) error {
 		Symbol:       symbol,
 		Timeframe:    tf,
 		Bars:         bars,
-		Inputs:       flags.All(),
+		Inputs:       inputOverrides,
 		ReservedKeys: evalReservedKeys,
 		SettleMs:     flags.GetInt("settle", 1500),
 		ForceCleanup: flags.Has("force-cleanup") || flags.Has("cleanup"),
@@ -322,7 +321,7 @@ func (c *evalCmd) Run(env *cli.Env) error {
 			result := signalsToAgent(signals, workflow, symbol, tf, time.Since(start).Milliseconds())
 			// Sanitize NaN/Inf floats before JSON marshal.
 			sanitized := sanitizeForJSON(result)
-				emitJSON(env, sanitized, flags.Get("out"))
+			emitJSON(env, sanitized, flags.Get("out"))
 		} else if flags.Has("json") {
 			emitJSON(env, sanitizeForJSON(signals), flags.Get("out"))
 		} else {

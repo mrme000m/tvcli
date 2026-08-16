@@ -113,7 +113,7 @@ func (c *runCmd) Run(env *cli.Env) error {
 	}
 
 	if flags.Has("schema") {
-		indicator, err := service.LoadIndicator(cfg, pineID, flags.All(), ReservedRunKeys)
+		indicator, err := service.LoadIndicator(cfg, pineID, collectInputs(flags, 1, ReservedRunKeys), ReservedRunKeys)
 		if err != nil {
 			return fmt.Errorf("failed to load indicator: %w", err)
 		}
@@ -136,7 +136,7 @@ func (c *runCmd) Run(env *cli.Env) error {
 		Symbol:       symbol,
 		Timeframe:    tf,
 		Bars:         bars,
-		Inputs:       flags.All(),
+		Inputs:       collectInputs(flags, 1, ReservedRunKeys),
 		ReservedKeys: ReservedRunKeys,
 		SettleMs:     flags.GetInt("settle", 1500),
 		ForceCleanup: forceCleanup,
@@ -254,7 +254,7 @@ func (c *runCmd) runPersistent(env *cli.Env) error {
 		bars = limits.MaxBars
 	}
 
-	indicator, err := service.LoadIndicator(cfg, pineID, flags.All(), ReservedRunKeys)
+	indicator, err := service.LoadIndicator(cfg, pineID, collectInputs(flags, 1, ReservedRunKeys), ReservedRunKeys)
 	if err != nil {
 		return fmt.Errorf("failed to load indicator: %w", err)
 	}

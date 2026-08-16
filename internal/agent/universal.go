@@ -29,8 +29,8 @@ type UniversalAnalyzerConfig struct {
 	Debug          bool
 	SettleMs       int
 	Timeout        time.Duration
-	ValidateInputs bool               // Validate inputs against schema before running
-	ListInputsOnly bool               // Only fetch and list inputs, don't run analysis
+	ValidateInputs bool // Validate inputs against schema before running
+	ListInputsOnly bool // Only fetch and list inputs, don't run analysis
 }
 
 // UniversalResult contains the full analysis from any Pine script.
@@ -57,12 +57,12 @@ type ScriptInfo struct {
 }
 
 type MarketData struct {
-	Symbol        string
-	Timeframe     string
-	LastPrice     float64
-	PriceSource   string // "plot", "graphic", "ohlcv"
-	BarCount      int
-	TimeRange     string
+	Symbol      string
+	Timeframe   string
+	LastPrice   float64
+	PriceSource string // "plot", "graphic", "ohlcv"
+	BarCount    int
+	TimeRange   string
 }
 
 type GraphicAnalysis struct {
@@ -75,13 +75,13 @@ type GraphicAnalysis struct {
 }
 
 type BoxGraphic struct {
-	ID       string
-	X1, X2   float64 // Time indices
-	Y1, Y2   float64 // Price levels
-	High     float64
-	Low      float64
-	Mid      float64
-	Text     string
+	ID          string
+	X1, X2      float64 // Time indices
+	Y1, Y2      float64 // Price levels
+	High        float64
+	Low         float64
+	Mid         float64
+	Text        string
 	BorderColor int
 	FillColor   int
 	Style       string
@@ -92,49 +92,49 @@ type BoxGraphic struct {
 }
 
 type LineGraphic struct {
-	ID          string
-	X1, X2      float64
-	Y1, Y2      float64
-	Color       int
-	Width       float64
-	Style       string
-	Extend      string
+	ID           string
+	X1, X2       float64
+	Y1, Y2       float64
+	Color        int
+	Width        float64
+	Style        string
+	Extend       string
 	IsHorizontal bool
-	AvgPrice    float64
-	Slope       float64
+	AvgPrice     float64
+	Slope        float64
 	InferredType string // "support", "resistance", "trendline", "ema", "vwap", "other"
 	Confidence   float64
 }
 
 type LabelGraphic struct {
-	ID     string
-	X      float64
-	Y      float64
-	Text   string
-	Color  int
-	Size   string
-	Align  string
-	VAlign string
+	ID           string
+	X            float64
+	Y            float64
+	Text         string
+	Color        int
+	Size         string
+	Align        string
+	VAlign       string
 	InferredType string // "buy", "sell", "bos", "choch", "liquidity", "level", "text"
 	Confidence   float64
 }
 
 type TableGraphic struct {
-	ID    string
-	Cols  int
-	Rows  int
-	Cells [][]string
-	Headers []string
+	ID           string
+	Cols         int
+	Rows         int
+	Cells        [][]string
+	Headers      []string
 	InferredType string // "dashboard", "stats", "signals", "profile", "other"
 }
 
 type HistogramGraphic struct {
-	ID         string
-	PriceLow   float64
-	PriceHigh  float64
-	FirstBar   float64
-	LastBar    float64
-	Rates      []float64
+	ID           string
+	PriceLow     float64
+	PriceHigh    float64
+	FirstBar     float64
+	LastBar      float64
+	Rates        []float64
 	InferredType string // "volume_profile", "tpo", "other"
 }
 
@@ -147,6 +147,33 @@ type GraphicSummary struct {
 	PriceRange      [2]float64 // [min, max]
 	TimeRange       [2]float64 // [min bar index, max bar index]
 	InferredTypes   map[string]int
+	// VolumePeaks are the point-of-control (POC) + value-area levels recovered
+	// from volume-profile style box stacks (many uniformly-spaced boxes sharing
+	// a left edge, where each box's X-extent is proportional to its volume).
+	VolumePeaks []VolumePeak `json:"volumePeaks,omitempty"`
+	// Zones are price regions bounded by graphic elements (e.g. a linefill
+	// between two horizontal lines), often an order-block boxed region.
+	Zones []Zone `json:"zones,omitempty"`
+}
+
+// VolumePeak is one recovered volume-profile stack summary.
+type VolumePeak struct {
+	PocPrice   float64 `json:"poc"`
+	Vah        float64 `json:"vah"`
+	Val        float64 `json:"val"`
+	StackCount int     `json:"stackCount"`
+	LeftBar    float64 `json:"leftBar,omitempty"`
+	Confidence float64 `json:"confidence"`
+}
+
+// Zone is a bounded price region recovered from graphics (linefill/box pairs).
+type Zone struct {
+	Top        float64 `json:"top"`
+	Bottom     float64 `json:"bottom"`
+	Mid        float64 `json:"mid"`
+	LeftBar    float64 `json:"leftBar,omitempty"`
+	RightBar   float64 `json:"rightBar,omitempty"`
+	Confidence float64 `json:"confidence"`
 }
 
 type AnalysisSummary struct {
@@ -166,8 +193,8 @@ type KeyLevel struct {
 	Strength    float64
 	Source      string // "plot", "box", "line", "label", "table", "histogram"
 	Description string
-	Age         int    // bars since formation
-	IsActive    bool   // price near level
+	Age         int  // bars since formation
+	IsActive    bool // price near level
 }
 
 type SignalEvent struct {
@@ -190,12 +217,12 @@ type Pattern struct {
 }
 
 type RiskMetrics struct {
-	ATR              float64
-	VolatilityRank   float64
-	DistanceToSupport float64
+	ATR                  float64
+	VolatilityRank       float64
+	DistanceToSupport    float64
 	DistanceToResistance float64
-	RiskRewardLong   float64
-	RiskRewardShort  float64
+	RiskRewardLong       float64
+	RiskRewardShort      float64
 }
 
 type SkillAgentResult struct {
@@ -259,10 +286,10 @@ type ConformanceAgent struct {
 }
 
 type RawData struct {
-	Periods       []map[string]any
-	Graphic       map[string]map[string]any
+	Periods        []map[string]any
+	Graphic        map[string]map[string]any
 	StrategyReport map[string]any
-	Schema        *schema.PineSchema
+	Schema         *schema.PineSchema
 }
 
 // UniversalAnalyzer analyzes any Pine script automatically.
@@ -643,10 +670,10 @@ func (a *UniversalAnalyzer) analyzeGraphics(graphic map[string]map[string]any, s
 		grids := pipeline.ReconstructTables(graphic)
 		for _, grid := range grids {
 			table := TableGraphic{
-				ID:    grid.ID,
-				Cols:  grid.Cols,
-				Rows:  grid.Rows,
-				Cells: grid.Cells,
+				ID:      grid.ID,
+				Cols:    grid.Cols,
+				Rows:    grid.Rows,
+				Cells:   grid.Cells,
 				Headers: grid.Header(),
 			}
 			table.InferredType = a.inferTableType(table)
@@ -670,6 +697,9 @@ func (a *UniversalAnalyzer) analyzeGraphics(graphic map[string]map[string]any, s
 			analysis.updatePriceRange(hist.PriceHigh, hist.PriceLow)
 		}
 	}
+
+	// Deep-graphics recovery: volume-profile POC/VAH/VAL and linefill zones.
+	a.postProcessGraphics(&analysis, graphic)
 
 	// Ensure price range is valid (not the initial sentinel values)
 	if analysis.Summary.PriceRange[0] == math.MaxFloat64 {
@@ -724,22 +754,22 @@ func (a *UniversalAnalyzer) parseLine(id string, m map[string]any) LineGraphic {
 	ex, _ := m["ex"].(string)
 
 	avgPrice := (y1 + y2) / 2
-	slope := math.Abs(y2 - y1) / math.Max(math.Abs(y1), 1)
+	slope := math.Abs(y2-y1) / math.Max(math.Abs(y1), 1)
 	isHorizontal := slope < 0.001
 
 	return LineGraphic{
-		ID:            id,
-		X1:            x1,
-		X2:            x2,
-		Y1:            y1,
-		Y2:            y2,
-		Color:         int(ci),
-		Width:         w,
-		Style:         st,
-		Extend:        ex,
-		IsHorizontal:  isHorizontal,
-		AvgPrice:      avgPrice,
-		Slope:         slope,
+		ID:           id,
+		X1:           x1,
+		X2:           x2,
+		Y1:           y1,
+		Y2:           y2,
+		Color:        int(ci),
+		Width:        w,
+		Style:        st,
+		Extend:       ex,
+		IsHorizontal: isHorizontal,
+		AvgPrice:     avgPrice,
+		Slope:        slope,
 	}
 }
 
@@ -780,12 +810,12 @@ func (a *UniversalAnalyzer) parseHistogram(id string, m map[string]any) Histogra
 	}
 
 	return HistogramGraphic{
-		ID:         id,
-		PriceLow:   priceLow,
-		PriceHigh:  priceHigh,
-		FirstBar:   firstBar,
-		LastBar:    lastBar,
-		Rates:      rates,
+		ID:           id,
+		PriceLow:     priceLow,
+		PriceHigh:    priceHigh,
+		FirstBar:     firstBar,
+		LastBar:      lastBar,
+		Rates:        rates,
 		InferredType: "volume_profile",
 	}
 }
@@ -874,10 +904,14 @@ func (a *UniversalAnalyzer) inferBoxType(box BoxGraphic, signals *pipeline.Signa
 
 // inferLineType classifies line graphics.
 func (a *UniversalAnalyzer) inferLineType(line LineGraphic, signals *pipeline.Signals) (string, float64) {
+	// Vertical marker (x1 == x2) — market open/close or session boundary lines.
+	if math.Abs(line.X1-line.X2) < 1e-6 {
+		return "session", 0.8
+	}
 	if line.IsHorizontal {
 		// Check if it's near a known level from signals
 		for _, lvl := range signals.Levels {
-			if math.Abs(lvl.Value - line.AvgPrice) / math.Max(math.Abs(lvl.Value), 1) < 0.001 {
+			if math.Abs(lvl.Value-line.AvgPrice)/math.Max(math.Abs(lvl.Value), 1) < 0.001 {
 				return lvl.Kind, 0.9
 			}
 		}
@@ -917,7 +951,7 @@ func (a *UniversalAnalyzer) inferLabelType(label LabelGraphic, signals *pipeline
 
 	// Liquidity
 	if strings.Contains(text, "LIQUIDITY") || strings.Contains(text, "BSL") || strings.Contains(text, "SSL") ||
-	   strings.Contains(text, "BUYSIDE") || strings.Contains(text, "SELLSIDE") {
+		strings.Contains(text, "BUYSIDE") || strings.Contains(text, "SELLSIDE") {
 		return "liquidity", 0.9
 	}
 
@@ -1018,26 +1052,26 @@ func (a *UniversalAnalyzer) buildMarketData(periods []map[string]any, graphic Gr
 	}
 
 	return MarketData{
-		Symbol:    a.config.Symbol,
-		Timeframe: a.config.Timeframe,
-		LastPrice: price,
+		Symbol:      a.config.Symbol,
+		Timeframe:   a.config.Timeframe,
+		LastPrice:   price,
 		PriceSource: source,
-		BarCount:  len(periods),
-		TimeRange: timeRange,
+		BarCount:    len(periods),
+		TimeRange:   timeRange,
 	}
 }
 
 // buildSummary creates a high-level analysis summary.
 func (a *UniversalAnalyzer) buildSummary(signals *pipeline.Signals, graphic GraphicAnalysis, market MarketData) AnalysisSummary {
 	summary := AnalysisSummary{
-		Bias:        signals.Bias,
-		Confidence:  signals.Confidence,
-		KeyLevels:   []KeyLevel{},
-		Signals:     []SignalEvent{},
-		Patterns:    []Pattern{},
-		RiskMetrics: RiskMetrics{},
+		Bias:            signals.Bias,
+		Confidence:      signals.Confidence,
+		KeyLevels:       []KeyLevel{},
+		Signals:         []SignalEvent{},
+		Patterns:        []Pattern{},
+		RiskMetrics:     RiskMetrics{},
 		Recommendations: []string{},
-		Warnings:    append([]string{}, signals.Warnings...),
+		Warnings:        append([]string{}, signals.Warnings...),
 	}
 
 	// Extract key levels from signals.Levels
@@ -1045,7 +1079,7 @@ func (a *UniversalAnalyzer) buildSummary(signals *pipeline.Signals, graphic Grap
 		age := 0
 		isActive := false
 		if market.LastPrice > 0 {
-			dist := math.Abs(lvl.Value - market.LastPrice) / market.LastPrice * 100
+			dist := math.Abs(lvl.Value-market.LastPrice) / market.LastPrice * 100
 			isActive = dist < 2.0 // within 2%
 		}
 		summary.KeyLevels = append(summary.KeyLevels, KeyLevel{
@@ -1095,17 +1129,43 @@ func (a *UniversalAnalyzer) buildSummary(signals *pipeline.Signals, graphic Grap
 		}
 	}
 
+	// Recovered volume-profile peaks: POC (point of control), VAH, VAL.
+	for _, pk := range graphic.Summary.VolumePeaks {
+		isActive := market.LastPrice > 0 && math.Abs(pk.PocPrice-market.LastPrice)/market.LastPrice < 0.02
+		summary.KeyLevels = append(summary.KeyLevels, KeyLevel{
+			Price: pk.PocPrice, Kind: "poc", Strength: pk.Confidence,
+			Source: "histogram", Description: fmt.Sprintf("POC (volume profile, %d bins) at %.2f", pk.StackCount, pk.PocPrice),
+			IsActive: isActive,
+		})
+		summary.KeyLevels = append(summary.KeyLevels, KeyLevel{
+			Price: pk.Vah, Kind: "vah", Strength: pk.Confidence * 0.8,
+			Source: "histogram", Description: fmt.Sprintf("Value area high at %.2f", pk.Vah), IsActive: false,
+		})
+		summary.KeyLevels = append(summary.KeyLevels, KeyLevel{
+			Price: pk.Val, Kind: "val", Strength: pk.Confidence * 0.8,
+			Source: "histogram", Description: fmt.Sprintf("Value area low at %.2f", pk.Val), IsActive: false,
+		})
+	}
+	// Recovered linefill zones (order-block box regions).
+	for _, z := range graphic.Summary.Zones {
+		summary.KeyLevels = append(summary.KeyLevels, KeyLevel{
+			Price: z.Mid, Kind: "order_block", Strength: z.Confidence,
+			Source: "linefill", Description: fmt.Sprintf("Order-block zone %.2f..%.2f", z.Bottom, z.Top),
+			IsActive: market.LastPrice > 0 && math.Abs(z.Mid-market.LastPrice)/market.LastPrice < 0.02,
+		})
+	}
+
 	// Extract signals from graphic labels
 	for _, label := range graphic.Labels {
 		if label.InferredType != "text" && label.InferredType != "unknown" {
 			summary.Signals = append(summary.Signals, SignalEvent{
 				Time:       int64(label.X),
-				Kind:        label.InferredType,
-				Price:       label.Y,
-				Strength:    label.Confidence,
-				Source:      "label",
-				Text:        label.Text,
-				Confidence:  label.Confidence,
+				Kind:       label.InferredType,
+				Price:      label.Y,
+				Strength:   label.Confidence,
+				Source:     "label",
+				Text:       label.Text,
+				Confidence: label.Confidence,
 			})
 		}
 	}
@@ -1124,12 +1184,12 @@ func (a *UniversalAnalyzer) buildSummary(signals *pipeline.Signals, graphic Grap
 		}
 		summary.Signals = append(summary.Signals, SignalEvent{
 			Time:       ev.Time,
-			Kind:        ev.Kind,
-			Price:       ev.Value,
-			Strength:    0.7,
-			Source:      "plot",
-			Text:        ev.Text,
-			Confidence:  0.7,
+			Kind:       ev.Kind,
+			Price:      ev.Value,
+			Strength:   0.7,
+			Source:     "plot",
+			Text:       ev.Text,
+			Confidence: 0.7,
 		})
 	}
 
@@ -1223,19 +1283,19 @@ func (a *UniversalAnalyzer) buildAgentEnvelope(signals *pipeline.Signals, graphi
 			"warnings":   signals.Warnings,
 		},
 		"graphic": map[string]any{
-			"boxes":      len(graphic.Boxes),
-			"lines":      len(graphic.Lines),
-			"labels":     len(graphic.Labels),
-			"tables":     len(graphic.Tables),
-			"histograms": len(graphic.Histograms),
+			"boxes":         len(graphic.Boxes),
+			"lines":         len(graphic.Lines),
+			"labels":        len(graphic.Labels),
+			"tables":        len(graphic.Tables),
+			"histograms":    len(graphic.Histograms),
 			"inferredTypes": graphic.Summary.InferredTypes,
 		},
 		"market": map[string]any{
-			"symbol":    market.Symbol,
-			"timeframe": market.Timeframe,
-			"lastPrice": market.LastPrice,
+			"symbol":      market.Symbol,
+			"timeframe":   market.Timeframe,
+			"lastPrice":   market.LastPrice,
 			"priceSource": market.PriceSource,
-			"barCount":  market.BarCount,
+			"barCount":    market.BarCount,
 		},
 	}
 
@@ -1332,8 +1392,8 @@ func (a *UniversalAnalyzer) buildAgentEnvelope(signals *pipeline.Signals, graphi
 	}
 
 	return &SkillAgentResult{
-		Status:   "ok",
-		ExitCode: 0,
+		Status:    "ok",
+		ExitCode:  0,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Execution: ExecutionMeta{
 			DurationMs: duration.Milliseconds(),

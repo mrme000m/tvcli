@@ -36,8 +36,17 @@ tvcli analyze PUB;09ebff5ba23c452b89ea82522f2aab35 --tf 15m --bars 200
 | Flag | Description |
 |------|-------------|
 | `--input.key=VALUE` | Override script inputs (e.g., `--input.lookback=50`) |
+| `--input key=value` | Same, space form; comma lists allowed: `--input "in_1=4,in_0=3"` |
+| `key=value` (positional) | Input override after the pineId (e.g. `analyze PUB;x in_1=4`) |
+| `--in_N=VALUE` | Raw TV input ID flag (e.g. `--in_1=4`) |
 | `--list-inputs` | List available inputs from schema and exit |
 | `--validate-inputs` | Validate inputs against schema before running |
+
+Every spelling is reassembled by `internal/cmd/inputs_util.go` and resolved to
+the script's canonical TV input ID by ID, index, or human-readable name (see
+`PineIndicator.SetOption`), so inputs always reach the runtime regardless of
+which form the caller used. Use `tv analyze --list-inputs <pineId>` or `tv
+inputs <pineId> --raw --json` to discover the canonical IDs.
 | `--settle` | `1500` | Settle time in ms |
 | `--timeout` | `120` | Timeout in seconds |
 | `--force-schema` | false | Re-fetch schema from TradingView |
@@ -54,7 +63,8 @@ tvcli analyze PUB;09ebff5ba23c452b89ea82522f2aab35 --tf 15m --bars 200
 
 ## Supported Graphic Types (Auto-Detected)
 
-The analyzer examines TradingView's graphic draw types and classifies them:
+The analyzer examines TradingView's graphic draw types and classifies them
+(deep-graphics recovery lives in `internal/agent/graphics_ext.go`):
 
 | Graphic Type | Detected As | Confidence |
 |--------------|-------------|------------|
@@ -66,6 +76,9 @@ The analyzer examines TradingView's graphic draw types and classifies them:
 | `dwgboxes` wide, tall | **Session** | 70% |
 | `dwglines` horizontal | **Support/Resistance/Band** | 70-90% |
 | `dwglines` sloped | **Trendline** | 70% |
+| `dwglines` vertical (`x1==x2`) | **Session / market open-close** | 80% |
+| `dwglinefills` (two horizontal rails) | **Order-block zone** | 75% |
+| `dwgboxes` stacked sharing a left edge | **Volume-profile POC/VAH/VAL** | 80-95% |
 | `dwglabels` with BUY/LONG/BULL | **Buy Signal** | 90% |
 | `dwglabels` with SELL/SHORT/BEAR | **Sell Signal** | 90% |
 | `dwglabels` with BOS/CHOCH | **Structure Break** | 90% |

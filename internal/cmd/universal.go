@@ -19,7 +19,9 @@ type universalCmd struct {
 
 func (c *universalCmd) Name() string      { return "analyze" }
 func (c *universalCmd) Aliases() []string { return []string{"universal", "ua"} }
-func (c *universalCmd) Synopsis() string  { return "Universal script analyzer - auto-analyze any Pine script" }
+func (c *universalCmd) Synopsis() string {
+	return "Universal script analyzer - auto-analyze any Pine script"
+}
 
 func (c *universalCmd) Run(env *cli.Env) error {
 	flags := env.Flags
@@ -70,13 +72,17 @@ func (c *universalCmd) Run(env *cli.Env) error {
 	listInputs := flags.Has("list-inputs")
 	validateInputs := flags.Has("validate-inputs")
 
-	// Parse inputs
-	inputs := make(map[string]string)
-	for k, v := range flags.All() {
-		if strings.HasPrefix(k, "input.") {
-			inputs[strings.TrimPrefix(k, "input.")] = v
-		}
+	// Parse inputs. Supports "--input.key=VALUE" (documented), the "--input
+	// key=value" spelling, and positional "key=value" args after the pineId.
+	// All end up keyed the same way in UniversalAnalyzerConfig.Inputs and are
+	// resolved to canonical TV input IDs (by ID, index, or name) inside the
+	// analyzer / SetOption.
+	univReserved := []string{
+		"symbol", "tf", "timeframe", "bars", "pine", "json", "report",
+		"format", "title", "out", "settle", "timeout", "force-schema",
+		"list-inputs", "validate-inputs", "verbose", "help", "h", "input",
 	}
+	inputs := collectInputs(flags, 1, univReserved)
 
 	// Build analyzer config
 	analyzerConfig := agent.UniversalAnalyzerConfig{
@@ -173,12 +179,12 @@ func (c *universalCmd) emitJSON(env *cli.Env, result *agent.UniversalResult, fla
 	out := flags.Get("out")
 	// Create JSON-serializable version
 	data := map[string]any{
-		"script":   result.ScriptInfo,
-		"market":   result.MarketData,
-		"signals":  result.Signals,
-		"graphic":  result.GraphicData,
-		"summary":  result.Summary,
-		"agent":    result.AgentEnvelope,
+		"script":  result.ScriptInfo,
+		"market":  result.MarketData,
+		"signals": result.Signals,
+		"graphic": result.GraphicData,
+		"summary": result.Summary,
+		"agent":   result.AgentEnvelope,
 	}
 	b, err := json.MarshalIndent(data, "", "  ")
 	if err != nil {
@@ -203,10 +209,10 @@ func (c *universalCmd) emitReport(env *cli.Env, result *agent.UniversalResult, f
 	}
 
 	report := agent.GenerateUniversalReport(result, agent.ReportConfig{
-		Title:       title,
-		Symbol:      result.MarketData.Symbol,
-		Timeframe:   result.MarketData.Timeframe,
-		Format:      format,
+		Title:         title,
+		Symbol:        result.MarketData.Symbol,
+		Timeframe:     result.MarketData.Timeframe,
+		Format:        format,
 		IncludeCharts: false,
 	})
 
