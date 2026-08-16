@@ -5,6 +5,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,15 +19,17 @@ import (
 
 // AgentConfig configures an agent run.
 type AgentConfig struct {
-	Symbol     string            // Market symbol (e.g., "OANDA:XAUUSD")
-	Timeframe  string            // Timeframe (e.g., "5m")
-	Bars       int               // Number of bars
-	Skills     []string          // Skill names to run (empty = all)
-	Presets    map[string]string // Skill name -> preset name
-	Inputs     map[string]string // Global inputs applied to all skills
-	Parallel   bool              // Run skills in parallel
-	Timeout    time.Duration     // Per-skill timeout
-	Debug      bool
+	Symbol          string            // Market symbol (e.g., "OANDA:XAUUSD")
+	Timeframe       string            // Timeframe (e.g., "5m")
+	Bars            int               // Number of bars
+	Skills          []string          // Skill names to run (empty = all)
+	Presets         map[string]string // Skill name -> preset name
+	Inputs          map[string]string // Global inputs applied to all skills
+	Parallel        bool              // Run skills in parallel
+	Timeout         time.Duration     // Per-skill timeout
+	Debug           bool
+	ValidateInputs  bool              // Validate inputs against skill schemas before running
+	ListInputsOnly  bool              // Only list available inputs, don't run skills
 }
 
 // SkillResult holds the result of running one skill.
@@ -106,10 +110,15 @@ func (a *Agent) Run(ctx context.Context) (*AgentResult, error) {
 		}
 	}
 
-	// Normalize symbol
+	// Normalize symbol (needed for validation)
 	symbol, err := pinefacade.ValidateSymbol(a.config.Symbol)
 	if err != nil {
 		return nil, fmt.Errorf("invalid symbol: %w", err)
+	}
+
+	// Handle ListInputsOnly mode - just return skill inputs without running
+	if a.config.ListInputsOnly {
+		return a.runListInputs(symbol, skillsToRun, start)
 	}
 
 	// Prepare results slice
@@ -122,6 +131,46 @@ func (a *Agent) Run(ctx context.Context) (*AgentResult, error) {
 	}
 
 	// Build summary
+	summary := a.buildSummary(results)
+
+	return &AgentResult{
+		Config:       a.config,
+		Timestamp:    start,
+		Duration:     time.Since(start),
+		SkillResults: results,
+		Summary:      summary,
+	}, nil
+}
+
+// runListInputs returns skill input definitions without running the skills.
+func (a *Agent) runListInputs(symbol string, skillsToRun []string, start time.Time) (*AgentResult, error) {
+	results := make([]SkillResult, len(skillsToRun))
+
+	for i, skillName := range skillsToRun {
+		s := skill.Get(skillName)
+		if s == nil {
+			results[i] = SkillResult{
+				SkillName: skillName,
+				Status:    "error",
+				Error:     "skill not found",
+				Duration:  0,
+			}
+			continue
+		}
+
+		// Build inputs to show defaults
+		inputs := a.buildInputs(s)
+
+		results[i] = SkillResult{
+			SkillName: skillName,
+			Status:    "ok",
+			Duration:  0,
+			Result:    &skill.SkillResult{Status: "ok"},
+		}
+		// We'll use the inputs built above for display
+		_ = inputs
+	}
+
 	summary := a.buildSummary(results)
 
 	return &AgentResult{
@@ -266,7 +315,51 @@ func (a *Agent) buildInputs(s *skill.Skill) map[string]string {
 		inputs[k] = v
 	}
 
+	// 4. Validate against schema if requested
+	if a.config.ValidateInputs {
+		inputs = a.validateAndConvertInputs(inputs, s)
+	}
+
 	return inputs
+}
+
+// validateAndConvertInputs validates user inputs against skill's input definitions.
+func (a *Agent) validateAndConvertInputs(inputs map[string]string, s *skill.Skill) map[string]string {
+	if len(s.Inputs) == 0 {
+		return inputs // No schema, pass through as-is
+	}
+
+	// Build lookup: TVInputID, Name -> InputDef
+	byID := make(map[string]*skill.InputDef)
+	for i := range s.Inputs {
+		inp := &s.Inputs[i]
+		byID[inp.TVInputID] = inp
+		if inp.Name != "" && inp.Name != inp.TVInputID {
+			byID[inp.Name] = inp
+		}
+	}
+
+	validated := make(map[string]string)
+	for key, val := range inputs {
+		inpDef, ok := byID[key]
+		if !ok {
+			// Unknown input, pass through (could be a valid input not in our static list)
+			validated[key] = val
+			continue
+		}
+
+		// Type conversion and validation
+		converted, err := convertInputValue(val, inpDef)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ Input '%s' for skill %s: %v\n", key, s.Name, err)
+			continue
+		}
+
+		// Use the canonical TV input ID
+		validated[inpDef.TVInputID] = converted
+	}
+
+	return validated
 }
 
 // buildSummary creates a high-level summary from all skill results.
@@ -448,6 +541,38 @@ func FormatText(result *AgentResult) string {
 
 	sb.WriteString(strings.Repeat("=", 70) + "\n")
 	return sb.String()
+}
+
+// convertInputValue converts and validates a single input value.
+func convertInputValue(val string, inp *skill.InputDef) (string, error) {
+	switch inp.Type {
+	case "integer", "int":
+		if _, err := strconv.Atoi(val); err != nil {
+			return "", fmt.Errorf("expected integer, got %q", val)
+		}
+		return val, nil
+	case "float":
+		if _, err := strconv.ParseFloat(val, 64); err != nil {
+			return "", fmt.Errorf("expected float, got %q", val)
+		}
+		return val, nil
+	case "bool":
+		lower := strings.ToLower(val)
+		if lower == "true" || lower == "1" || lower == "yes" || lower == "on" {
+			return "true", nil
+		}
+		if lower == "false" || lower == "0" || lower == "no" || lower == "off" {
+			return "false", nil
+		}
+		return "", fmt.Errorf("expected boolean, got %q", val)
+	case "string":
+		// skill.InputDef doesn't have Options field, just validate as string
+		return val, nil
+	case "color":
+		return val, nil
+	default:
+		return val, nil
+	}
 }
 
 // ToJSON serializes the agent result to JSON-compatible map.

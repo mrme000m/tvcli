@@ -55,6 +55,8 @@ func (c *agentCmd) Run(env *cli.Env) error {
 	parallel := !flags.Has("sequential")
 	timeout := flags.GetInt("timeout", 120)
 	debug := flags.Has("verbose") || cfg.Debug
+	validateInputs := flags.Has("validate-inputs")
+	listInputs := flags.Has("list-inputs")
 
 	// Parse skills list
 	skillsFlag := flags.Get("skills")
@@ -103,15 +105,17 @@ func (c *agentCmd) Run(env *cli.Env) error {
 
 	// Build agent config
 	agentConfig := agent.AgentConfig{
-		Symbol:    symbol,
-		Timeframe: tf,
-		Bars:      bars,
-		Skills:    skillsToRun,
-		Presets:   presets,
-		Inputs:    inputs,
-		Parallel:  parallel,
-		Timeout:   time.Duration(timeout) * time.Second,
-		Debug:     debug,
+		Symbol:          symbol,
+		Timeframe:       tf,
+		Bars:            bars,
+		Skills:          skillsToRun,
+		Presets:         presets,
+		Inputs:          inputs,
+		Parallel:        parallel,
+		Timeout:         time.Duration(timeout) * time.Second,
+		Debug:           debug,
+		ValidateInputs:  validateInputs,
+		ListInputsOnly:  listInputs,
 	}
 
 	// Create and run agent
@@ -121,6 +125,11 @@ func (c *agentCmd) Run(env *cli.Env) error {
 	result, err := agt.Run(ctx)
 	if err != nil {
 		return fmt.Errorf("agent run failed: %w", err)
+	}
+
+	// Handle list-inputs mode
+	if listInputs {
+		return c.emitInputsList(env, result, flags)
 	}
 
 	// Output
@@ -181,6 +190,64 @@ func (c *agentCmd) emitReport(env *cli.Env, result *agent.AgentResult, flags cli
 	return nil
 }
 
+func (c *agentCmd) emitInputsList(env *cli.Env, result *agent.AgentResult, flags cli.Flags) error {
+	if flags.Has("json") {
+		// List all skills' inputs
+		skills := skill.All()
+		if len(result.Config.Skills) > 0 {
+			skills = []*skill.Skill{}
+			for _, name := range result.Config.Skills {
+				if s := skill.Get(name); s != nil {
+					skills = append(skills, s)
+				}
+			}
+		}
+		data := map[string]any{}
+		for _, s := range skills {
+			data[s.Name] = s.Inputs
+		}
+		b, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return err
+		}
+		out := flags.Get("out")
+		if out != "" {
+			return os.WriteFile(out, b, 0644)
+		}
+		fmt.Fprintln(env.Stdout, string(b))
+		return nil
+	}
+
+	// Text output
+	w := env.Stdout
+	skills := skill.All()
+	if len(result.Config.Skills) > 0 {
+		skills = []*skill.Skill{}
+		for _, name := range result.Config.Skills {
+			if s := skill.Get(name); s != nil {
+				skills = append(skills, s)
+			}
+		}
+	}
+
+	for _, s := range skills {
+		if len(s.Inputs) == 0 {
+			continue
+		}
+		fmt.Fprintf(w, "\n=== %s (%s) ===\n", s.Name, s.PineID)
+		fmt.Fprintf(w, "%-25s %-10s %-15s %s\n", "Name", "TVInputID", "Type", "Default")
+		fmt.Fprintln(w, strings.Repeat("-", 70))
+		for _, inp := range s.Inputs {
+			defVal := ""
+			if inp.Default != nil {
+				defVal = fmt.Sprintf("%v", inp.Default)
+			}
+			fmt.Fprintf(w, "%-25s %-10s %-15s %s\n", inp.Name, inp.TVInputID, inp.Type, defVal)
+		}
+	}
+	return nil
+}
+
 func (c *agentCmd) printHelp(env *cli.Env) {
 	w := env.Stdout
 	fmt.Fprintln(w, "agent — Multi-Skill Market Analysis Agent")
@@ -195,6 +262,8 @@ func (c *agentCmd) printHelp(env *cli.Env) {
 	fmt.Fprintln(w, "  --preset NAME                Global preset for all skills that have it")
 	fmt.Fprintln(w, "  --preset.skill=NAME          Skill-specific preset (e.g. --preset.cust=scalping)")
 	fmt.Fprintln(w, "  --input.key=VALUE            Global input override (e.g. --input.atrLen=14)")
+	fmt.Fprintln(w, "  --validate-inputs            Validate inputs against skill schemas before running")
+	fmt.Fprintln(w, "  --list-inputs                List available inputs for all skills and exit")
 	fmt.Fprintln(w, "  --sequential                 Run skills sequentially (default: parallel)")
 	fmt.Fprintln(w, "  --timeout SECONDS            Per-skill timeout (default: 120)")
 	fmt.Fprintln(w, "  --json                       Output full JSON")
@@ -216,4 +285,6 @@ func (c *agentCmd) printHelp(env *cli.Env) {
 	fmt.Fprintln(w, "  tv agent --skills bsv,dvi,ema-atr --report --format markdown")
 	fmt.Fprintln(w, "  tv agent --skills bsv,dvi --report --format marketing --out thread.txt")
 	fmt.Fprintln(w, "  tv agent --sequential --timeout 180 --out analysis.json")
+	fmt.Fprintln(w, "  tv agent --validate-inputs --input.atrLen=20")
+	fmt.Fprintln(w, "  tv agent --list-inputs --skills bsv,dvi")
 }

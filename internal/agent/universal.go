@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,15 +20,17 @@ import (
 
 // UniversalAnalyzerConfig configures the universal analyzer.
 type UniversalAnalyzerConfig struct {
-	Symbol      string
-	Timeframe   string
-	Bars        int
-	Inputs      map[string]string
-	Schema      *schema.PineSchema // Pre-fetched schema (optional)
-	ForceSchema bool               // Force schema fetch even if cached
-	Debug       bool
-	SettleMs    int
-	Timeout     time.Duration
+	Symbol         string
+	Timeframe      string
+	Bars           int
+	Inputs         map[string]string
+	Schema         *schema.PineSchema // Pre-fetched schema (optional)
+	ForceSchema    bool               // Force schema fetch even if cached
+	Debug          bool
+	SettleMs       int
+	Timeout        time.Duration
+	ValidateInputs bool               // Validate inputs against schema before running
+	ListInputsOnly bool               // Only fetch and list inputs, don't run analysis
 }
 
 // UniversalResult contains the full analysis from any Pine script.
@@ -289,6 +292,150 @@ func NewUniversalAnalyzer(cfg *config.Config, config UniversalAnalyzerConfig) *U
 }
 
 // Analyze runs the script and produces a complete universal analysis.
+// ListInputs fetches the schema and returns available input definitions.
+func (a *UniversalAnalyzer) ListInputs(ctx context.Context, pineID string) ([]schema.InputDef, error) {
+	pfClient := pinefacade.NewClient(a.cfg.PineFacadeURL, a.cfg.UserName, a.config.Timeout)
+	indResult, err := pfClient.Get(pineID, "last", a.cfg.CookieHeaderOrEmpty())
+	if err != nil {
+		return nil, fmt.Errorf("fetch script: %w", err)
+	}
+	if indResult.MetaInfo == nil {
+		return nil, fmt.Errorf("no metaInfo available for script")
+	}
+	sch := schema.FromMetaInfo(pineID, indResult.MetaInfo)
+	if sch == nil {
+		return nil, fmt.Errorf("failed to build schema")
+	}
+	return sch.Inputs, nil
+}
+
+// ValidateAndConvertInputs validates user inputs against schema and converts types.
+func (a *UniversalAnalyzer) ValidateAndConvertInputs(inputs map[string]string, sch *schema.PineSchema) (map[string]string, []string, error) {
+	if sch == nil {
+		return inputs, nil, nil // No schema, pass through as-is
+	}
+
+	// Build lookup: input ID (with/without in_ prefix) and name -> InputDef
+	byID := make(map[string]*schema.InputDef)
+	for i := range sch.Inputs {
+		inp := &sch.Inputs[i]
+		byID[inp.ID] = inp
+		if strings.HasPrefix(inp.ID, "in_") {
+			byID[inp.ID[3:]] = inp // Also index without "in_" prefix
+		}
+		if inp.Name != "" && inp.Name != inp.ID {
+			byID[inp.Name] = inp
+		}
+	}
+
+	validated := make(map[string]string)
+	var warnings []string
+
+	for key, val := range inputs {
+		inpDef, ok := byID[key]
+		if !ok {
+			warnings = append(warnings, fmt.Sprintf("input '%s' not found in script (available: %s)", key, a.listInputIDs(sch)))
+			continue
+		}
+
+		// Type conversion and validation
+		converted, err := a.convertInputValue(val, inpDef)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("input '%s': %v", key, err))
+			continue
+		}
+
+		// Use the canonical TV input ID (with in_ prefix)
+		canonicalKey := inpDef.ID
+		validated[canonicalKey] = converted
+	}
+
+	return validated, warnings, nil
+}
+
+func (a *UniversalAnalyzer) listInputIDs(sch *schema.PineSchema) string {
+	ids := make([]string, len(sch.Inputs))
+	for i, inp := range sch.Inputs {
+		ids[i] = inp.ID
+	}
+	return strings.Join(ids, ", ")
+}
+
+func (a *UniversalAnalyzer) convertInputValue(val string, inp *schema.InputDef) (string, error) {
+	switch inp.Type {
+	case "integer", "int":
+		if _, err := strconv.Atoi(val); err != nil {
+			return "", fmt.Errorf("expected integer, got %q", val)
+		}
+		// Validate min/max if specified
+		if inp.Min != nil {
+			if minVal, ok := toFloat(inp.Min); ok {
+				if f, _ := strconv.ParseFloat(val, 64); f < minVal {
+					return "", fmt.Errorf("value %s below minimum %v", val, inp.Min)
+				}
+			}
+		}
+		if inp.Max != nil {
+			if maxVal, ok := toFloat(inp.Max); ok {
+				if f, _ := strconv.ParseFloat(val, 64); f > maxVal {
+					return "", fmt.Errorf("value %s above maximum %v", val, inp.Max)
+				}
+			}
+		}
+		return val, nil
+	case "float":
+		if _, err := strconv.ParseFloat(val, 64); err != nil {
+			return "", fmt.Errorf("expected float, got %q", val)
+		}
+		if inp.Min != nil {
+			if minVal, ok := toFloat(inp.Min); ok {
+				if f, _ := strconv.ParseFloat(val, 64); f < minVal {
+					return "", fmt.Errorf("value %s below minimum %v", val, inp.Min)
+				}
+			}
+		}
+		if inp.Max != nil {
+			if maxVal, ok := toFloat(inp.Max); ok {
+				if f, _ := strconv.ParseFloat(val, 64); f > maxVal {
+					return "", fmt.Errorf("value %s above maximum %v", val, inp.Max)
+				}
+			}
+		}
+		return val, nil
+	case "bool":
+		lower := strings.ToLower(val)
+		if lower == "true" || lower == "1" || lower == "yes" || lower == "on" {
+			return "true", nil
+		}
+		if lower == "false" || lower == "0" || lower == "no" || lower == "off" {
+			return "false", nil
+		}
+		return "", fmt.Errorf("expected boolean, got %q", val)
+	case "string":
+		// Validate against options if specified
+		if len(inp.Options) > 0 {
+			found := false
+			for _, opt := range inp.Options {
+				if opt == val {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return "", fmt.Errorf("value %q not in allowed options: %v", val, inp.Options)
+			}
+		}
+		return val, nil
+	case "color":
+		// Color inputs accept hex or named colors - pass through
+		return val, nil
+	default:
+		// Unknown type, pass through
+		return val, nil
+	}
+}
+
+// Analyze runs the script and produces a complete universal analysis.
 func (a *UniversalAnalyzer) Analyze(ctx context.Context, pineID string) (*UniversalResult, error) {
 	start := time.Now()
 
@@ -322,13 +469,45 @@ func (a *UniversalAnalyzer) Analyze(ctx context.Context, pineID string) (*Univer
 		}
 	}
 
+	// 1b. Validate inputs against schema if requested
+	inputs := a.config.Inputs
+	if a.config.ValidateInputs && sch != nil {
+		var err error
+		inputs, _, err = a.ValidateAndConvertInputs(inputs, sch)
+		if err != nil {
+			return nil, fmt.Errorf("input validation: %w", err)
+		}
+	}
+
+	// 1c. If list-inputs-only mode, return early with input info
+	if a.config.ListInputsOnly {
+		if sch == nil {
+			return nil, fmt.Errorf("no schema available")
+		}
+		// Return a result with just script info and inputs
+		return &UniversalResult{
+			ScriptInfo: ScriptInfo{
+				PineID:       pineID,
+				Name:         scriptName,
+				Version:      sch.Version,
+				IsStrategy:   isStrategy,
+				IsOverlay:    isOverlay,
+				PlotCount:    len(sch.Plots),
+				InputCount:   len(sch.Inputs),
+				HasSchema:    true,
+				GraphicTypes: []string{},
+			},
+			Raw: &RawData{Schema: sch},
+		}, nil
+	}
+
 	// 2. Run script via WebSocket (LoadIndicator is called internally)
 	res, err := service.RunScript(ctx, a.cfg, service.RunRequest{
 		PineID:       pineID,
 		Symbol:       a.config.Symbol,
 		Timeframe:    a.config.Timeframe,
 		Bars:         a.config.Bars,
-		Inputs:       a.config.Inputs,
+		Inputs:       inputs,
 		ReservedKeys: nil,
 		SettleMs:     a.config.SettleMs,
 		ForceCleanup: false,

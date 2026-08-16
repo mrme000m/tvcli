@@ -67,6 +67,8 @@ func (c *universalCmd) Run(env *cli.Env) error {
 	timeout := flags.GetInt("timeout", 120)
 	debug := flags.Has("verbose") || cfg.Debug
 	forceSchema := flags.Has("force-schema")
+	listInputs := flags.Has("list-inputs")
+	validateInputs := flags.Has("validate-inputs")
 
 	// Parse inputs
 	inputs := make(map[string]string)
@@ -78,14 +80,16 @@ func (c *universalCmd) Run(env *cli.Env) error {
 
 	// Build analyzer config
 	analyzerConfig := agent.UniversalAnalyzerConfig{
-		Symbol:      symbol,
-		Timeframe:   tf,
-		Bars:        bars,
-		Inputs:      inputs,
-		ForceSchema: forceSchema,
-		Debug:       debug,
-		SettleMs:    settle,
-		Timeout:     time.Duration(timeout) * time.Second,
+		Symbol:         symbol,
+		Timeframe:      tf,
+		Bars:           bars,
+		Inputs:         inputs,
+		ForceSchema:    forceSchema,
+		Debug:          debug,
+		SettleMs:       settle,
+		Timeout:        time.Duration(timeout) * time.Second,
+		ValidateInputs: validateInputs,
+		ListInputsOnly: listInputs,
 	}
 
 	// Create and run analyzer
@@ -95,6 +99,11 @@ func (c *universalCmd) Run(env *cli.Env) error {
 	result, err := analyzer.Analyze(ctx, pineID)
 	if err != nil {
 		return fmt.Errorf("analysis failed: %w", err)
+	}
+
+	// Handle list-inputs mode
+	if listInputs {
+		return c.emitInputsList(env, result, flags)
 	}
 
 	// Output
@@ -109,6 +118,54 @@ func (c *universalCmd) Run(env *cli.Env) error {
 	// Default: text output
 	text := agent.FormatUniversal(result)
 	fmt.Fprintln(env.Stdout, text)
+	return nil
+}
+
+func (c *universalCmd) emitInputsList(env *cli.Env, result *agent.UniversalResult, flags cli.Flags) error {
+	if result.Raw == nil || result.Raw.Schema == nil {
+		return fmt.Errorf("no schema available")
+	}
+	sch := result.Raw.Schema
+
+	if flags.Has("json") {
+		b, err := json.MarshalIndent(sch.Inputs, "", "  ")
+		if err != nil {
+			return err
+		}
+		out := flags.Get("out")
+		if out != "" {
+			return os.WriteFile(out, b, 0644)
+		}
+		fmt.Fprintln(env.Stdout, string(b))
+		return nil
+	}
+
+	// Text output
+	w := env.Stdout
+	fmt.Fprintf(w, "Inputs for %s (%s):\n\n", result.ScriptInfo.Name, result.ScriptInfo.PineID)
+	fmt.Fprintf(w, "%-25s %-12s %-10s %s\n", "ID", "Type", "Default", "Description")
+	fmt.Fprintln(w, strings.Repeat("-", 80))
+
+	for _, inp := range sch.Inputs {
+		defVal := ""
+		if inp.Default != nil {
+			defVal = fmt.Sprintf("%v", inp.Default)
+		}
+		desc := inp.Tooltip
+		if desc == "" {
+			desc = inp.Name
+		}
+		if len(desc) > 40 {
+			desc = desc[:37] + "..."
+		}
+		fmt.Fprintf(w, "%-25s %-12s %-10s %s\n", inp.ID, inp.Type, defVal, desc)
+		if inp.Min != nil || inp.Max != nil {
+			fmt.Fprintf(w, "  min=%v max=%v\n", inp.Min, inp.Max)
+		}
+		if len(inp.Options) > 0 {
+			fmt.Fprintf(w, "  options: %v\n", inp.Options)
+		}
+	}
 	return nil
 }
 
@@ -177,23 +234,27 @@ func (c *universalCmd) printHelp(env *cli.Env) {
 	fmt.Fprintln(w, "  --pine <pineId>       Alternative way to specify Pine ID")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Options:")
-	fmt.Fprintln(w, "  --symbol EXCHANGE:SYMBOL  Market symbol (default: OANDA:XAUUSD)")
-	fmt.Fprintln(w, "  --tf 5m                   Timeframe (default: 5m)")
-	fmt.Fprintln(w, "  --bars 500                Number of bars")
-	fmt.Fprintln(w, "  --input.key=VALUE         Input overrides (e.g., --input.lookback=50)")
-	fmt.Fprintln(w, "  --settle 1500             Settle time in ms (default: 1500)")
-	fmt.Fprintln(w, "  --timeout 120             Timeout in seconds")
-	fmt.Fprintln(w, "  --force-schema            Re-fetch schema from TradingView")
-	fmt.Fprintln(w, "  --json                    Output full JSON")
-	fmt.Fprintln(w, "  --report                  Generate analysis report")
+	fmt.Fprintln(w, "  --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)")
+	fmt.Fprintln(w, "  --tf 5m                      Timeframe (default: 5m)")
+	fmt.Fprintln(w, "  --bars 500                   Number of bars")
+	fmt.Fprintln(w, "  --input.key=VALUE            Input overrides (e.g., --input.lookback=50)")
+	fmt.Fprintln(w, "  --list-inputs                List available inputs from schema and exit")
+	fmt.Fprintln(w, "  --validate-inputs            Validate inputs against schema before running")
+	fmt.Fprintln(w, "  --settle 1500                Settle time in ms (default: 1500)")
+	fmt.Fprintln(w, "  --timeout 120                Timeout in seconds")
+	fmt.Fprintln(w, "  --force-schema               Re-fetch schema from TradingView")
+	fmt.Fprintln(w, "  --json                       Output full JSON")
+	fmt.Fprintln(w, "  --report                     Generate analysis report")
 	fmt.Fprintln(w, "  --format markdown|html|marketing|text  Report format (default: markdown)")
-	fmt.Fprintln(w, "  --title TITLE             Report title")
-	fmt.Fprintln(w, "  --out FILE                Save output to file")
-	fmt.Fprintln(w, "  --verbose                 Verbose output")
+	fmt.Fprintln(w, "  --title TITLE                Report title")
+	fmt.Fprintln(w, "  --out FILE                   Save output to file")
+	fmt.Fprintln(w, "  --verbose                    Verbose output")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Examples:")
 	fmt.Fprintln(w, "  tv analyze PUB;aea729456b7a44e09661b70ce9e4e987 --symbol OANDA:XAUUSD --tf 1h")
 	fmt.Fprintln(w, "  tv analyze --pine PUB;fVSb3j0I87LvTzPKrQTY5hDUEdsGdnm6 --report --format markdown")
 	fmt.Fprintln(w, "  tv analyze PUB;ff639e15f24646fbaf19ae22ac663140 --json --out fvg_analysis.json")
 	fmt.Fprintln(w, "  tv analyze PUB;09ebff5ba23c452b89ea82522f2aab35 --report --format marketing")
+	fmt.Fprintln(w, "  tv analyze PUB;aea729456b7a44e09661b70ce9e4e987 --list-inputs")
+	fmt.Fprintln(w, "  tv analyze PUB;aea729456b7a44e09661b70ce9e4e987 --validate-inputs --input.lookback=20")
 }

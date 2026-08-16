@@ -48,6 +48,8 @@ tvcli agent --skills bsv,dvi,smc,trend --sequential --timeout 180
 | `--preset NAME` | Global preset for all skills that have it (e.g., `scalping`, `swing`) |
 | `--preset.skill=NAME` | Skill-specific preset (e.g., `--preset.cust=scalping`) |
 | `--input.key=VALUE` | Global input override (e.g., `--input.atrLen=14`) |
+| `--validate-inputs` | Validate inputs against skill schemas before running |
+| `--list-inputs` | List available inputs for all skills and exit |
 
 ### Output Options
 

@@ -36,6 +36,8 @@ tvcli analyze PUB;09ebff5ba23c452b89ea82522f2aab35 --tf 15m --bars 200
 | Flag | Description |
 |------|-------------|
 | `--input.key=VALUE` | Override script inputs (e.g., `--input.lookback=50`) |
+| `--list-inputs` | List available inputs from schema and exit |
+| `--validate-inputs` | Validate inputs against schema before running |
 | `--settle` | `1500` | Settle time in ms |
 | `--timeout` | `120` | Timeout in seconds |
 | `--force-schema` | false | Re-fetch schema from TradingView |
