@@ -254,9 +254,12 @@ func (c *WSClient) Close() {
 		}
 	}
 
-	// Allow delete messages to flush before closing socket. Increasing this
-	// makes the server-side study limit much less likely to leak between runs.
-	time.Sleep(300 * time.Millisecond)
+	// Allow delete messages to flush before closing socket. The 500ms delay
+	// gives TradingView's server time to process session deletions and
+	// release study slots before a new connection arrives. This is critical
+	// for free/essential tier accounts where the study limit is strict and
+	// stale sessions from a closed connection can block new ones.
+	time.Sleep(500 * time.Millisecond)
 
 	c.sessions = make(map[string]*sessionEntry)
 

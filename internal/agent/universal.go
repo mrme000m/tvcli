@@ -26,6 +26,7 @@ type UniversalAnalyzerConfig struct {
 	Inputs         map[string]string
 	Schema         *schema.PineSchema // Pre-fetched schema (optional)
 	ForceSchema    bool               // Force schema fetch even if cached
+	ForceCleanup   bool               // Force cleanup/retry on study limit errors
 	Debug          bool
 	SettleMs       int
 	Timeout        time.Duration
@@ -537,7 +538,7 @@ func (a *UniversalAnalyzer) Analyze(ctx context.Context, pineID string) (*Univer
 		Inputs:       inputs,
 		ReservedKeys: nil,
 		SettleMs:     a.config.SettleMs,
-		ForceCleanup: false,
+		ForceCleanup: a.config.ForceCleanup,
 		CalcTimeout:  a.config.Timeout,
 		Debug:        a.config.Debug,
 	})

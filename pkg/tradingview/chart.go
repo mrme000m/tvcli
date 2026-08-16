@@ -253,7 +253,11 @@ func (cs *ChartSession) Delete() {
 
 	cs.client.Send("chart_delete_session", []any{cs.sessionID})
 	cs.client.UnregisterSession(cs.sessionID)
-	time.Sleep(100 * time.Millisecond)
+	// 500ms flush delay so the server processes the chart_delete_session and
+	// releases all study slots before the caller closes the WS connection.
+	// Without this, the next run may hit a study-limit error because the
+	// server has not yet released the slot.
+	time.Sleep(500 * time.Millisecond)
 }
 
 // GetSymbolInfo returns the resolved symbol info for this chart session.

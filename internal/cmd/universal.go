@@ -81,10 +81,13 @@ func (c *universalCmd) Run(env *cli.Env) error {
 		"symbol", "tf", "timeframe", "bars", "pine", "json", "report",
 		"format", "title", "out", "settle", "timeout", "force-schema",
 		"list-inputs", "validate-inputs", "verbose", "help", "h", "input",
+		"force-cleanup", "cleanup",
 	}
 	inputs := collectInputs(flags, 1, univReserved)
 
 	// Build analyzer config
+	forceCleanup := flags.Has("force-cleanup") || flags.Has("cleanup")
+
 	analyzerConfig := agent.UniversalAnalyzerConfig{
 		Symbol:         symbol,
 		Timeframe:      tf,
@@ -96,6 +99,7 @@ func (c *universalCmd) Run(env *cli.Env) error {
 		Timeout:        time.Duration(timeout) * time.Second,
 		ValidateInputs: validateInputs,
 		ListInputsOnly: listInputs,
+		ForceCleanup:   forceCleanup,
 	}
 
 	// Create and run analyzer

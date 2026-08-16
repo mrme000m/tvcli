@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"time"
 )
 
 type ChartStudy struct {
@@ -346,4 +347,7 @@ func (cs *ChartStudy) OnReady(fn func()) {
 func (cs *ChartStudy) Remove() {
 	cs.session.Send("remove_study", []any{cs.session.sessionID, cs.studyID})
 	delete(cs.session.studyListeners, cs.studyID)
+	// 100ms flush so the server processes the removal before the caller
+	// proceeds to chart cleanup or connection close.
+	time.Sleep(100 * time.Millisecond)
 }

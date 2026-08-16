@@ -207,18 +207,10 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		maxAttempts = 5
 	}
 
-	// Pre-cleanup: fresh session to clear stale state.
-	fmt.Fprintf(os.Stderr, "🧹 Pre-cleanup: fresh session...\n")
-	chart.RemoveAllStudies()
-	chart.Delete()
-	time.Sleep(500 * time.Millisecond)
-	if err := connectFresh(); err != nil {
-		return nil, fmt.Errorf("pre-cleanup reconnect: %w", err)
-	}
-	chart, err = createChart()
-	if err != nil {
-		return nil, fmt.Errorf("pre-cleanup chart recreate: %w", err)
-	}
+	// No pre-cleanup: the chart session was just created fresh on a new WS
+	// connection, so it has zero studies. The old pre-cleanup created a
+	// throwaway chart session just to delete it, which left stale state on
+	// the TradingView server and made study-limit errors worse, not better.
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		if existing := chart.GetStudies(); len(existing) > 0 {
@@ -301,17 +293,54 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 
 		if studyErr == nil && (len(periods) > 0 || len(graphicData) > 0 || len(stratReport) > 0) {
 			study.Remove()
+			// Wait for the server to process the study removal so the slot is
+			// released before the deferred chart.Delete() and client.Close()
+			// run. Without this, the next run may hit a study-limit error
+			// because the server hasn't released the slot yet.
+			time.Sleep(200 * time.Millisecond)
 			fmt.Fprintf(os.Stderr, "✓ Study data received (%d periods, %d graphic types)\n", len(periods), len(graphicData))
 			break
 		}
 
 		study.Remove()
+		// Wait for the server to process the study removal before cleaning
+		// up the chart session.
+		time.Sleep(200 * time.Millisecond)
 
 		if isStudyLimitError(studyErr) && attempt < maxAttempts {
-			fmt.Fprintf(os.Stderr, "⚠ Study limit hit (attempt %d/%d). Reconnecting in %ds...\n", attempt, maxAttempts, attempt*3)
+			// Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped).
+			retryDelay := time.Duration(attempt*5) * time.Second
+			if retryDelay > 60*time.Second {
+				retryDelay = 60 * time.Second
+			}
+			fmt.Fprintf(os.Stderr, "⚠ Study limit hit (attempt %d/%d). Reconnecting in %v...\n", attempt, maxAttempts, retryDelay)
+			fmt.Fprintf(os.Stderr, "  (This is an account-level limit. Close TradingView charts in\n")
+			fmt.Fprintf(os.Stderr, "   your browser or wait for stale sessions to expire.)\n")
 			chart.RemoveAllStudies()
 			chart.Delete()
-			time.Sleep(time.Duration(attempt*3) * time.Second)
+
+			// Between retries, run a cleanup cycle: create and delete chart
+			// sessions to flush stale study slots from the TradingView server.
+			// This is more effective than just waiting because it forces the
+			// server to allocate and release chart session resources.
+			for cleanupIdx := 0; cleanupIdx < attempt; cleanupIdx++ {
+				if client != nil {
+					client.Close()
+				}
+				if err := connectFresh(); err != nil {
+					return nil, fmt.Errorf("cleanup reconnect: %w", err)
+				}
+				cleanupChart := tradingview.NewChartSession(client)
+				cleanupChart.SetMarket(req.Symbol, map[string]any{
+					"timeframe": pinefacade.NormalizeTimeframe(req.Timeframe),
+					"range":     1,
+				})
+				_ = cleanupChart.WaitForSymbol(5 * time.Second)
+				cleanupChart.RemoveAllStudies()
+				cleanupChart.Delete()
+			}
+
+			time.Sleep(retryDelay)
 			if err := connectFresh(); err != nil {
 				return nil, fmt.Errorf("reconnect: %w", err)
 			}
