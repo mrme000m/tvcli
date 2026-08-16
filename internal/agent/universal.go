@@ -600,7 +600,11 @@ func (a *UniversalAnalyzer) Analyze(ctx context.Context, pineID string) (*Univer
 	}, nil
 }
 
-// analyzeGraphics performs deep semantic analysis of graphic data.
+// analyzeGraphics performs deep semantic analysis of graphic data using the
+// two-layer generic design:
+//   Layer 1: flat parsing of boxes/lines/labels/tables/histograms (below)
+//   Layer 2: topology-based grouping and semantic inference
+//            (postProcessGraphics → postProcessGraphicsGeneric)
 func (a *UniversalAnalyzer) analyzeGraphics(graphic map[string]map[string]any, signals *pipeline.Signals) GraphicAnalysis {
 	analysis := GraphicAnalysis{
 		Summary: GraphicSummary{
@@ -902,7 +906,9 @@ func (a *UniversalAnalyzer) inferBoxType(box BoxGraphic, signals *pipeline.Signa
 	return "price_zone", 0.5
 }
 
-// inferLineType classifies line graphics.
+// inferLineType classifies line graphics using flat heuristics (Layer 1).
+// These classifications are overridden by the topology-based grouping in
+// graphics_generic.go (Layer 2) during postProcessGraphics.
 func (a *UniversalAnalyzer) inferLineType(line LineGraphic, signals *pipeline.Signals) (string, float64) {
 	// Vertical marker (x1 == x2) — market open/close or session boundary lines.
 	if math.Abs(line.X1-line.X2) < 1e-6 {
@@ -929,7 +935,9 @@ func (a *UniversalAnalyzer) inferLineType(line LineGraphic, signals *pipeline.Si
 	return "trendline_down", 0.7
 }
 
-// inferLabelType classifies text labels.
+// inferLabelType classifies text labels using flat heuristics (Layer 1).
+// These classifications are overridden by the topology-based grouping in
+// graphics_generic.go (Layer 2) during postProcessGraphics.
 func (a *UniversalAnalyzer) inferLabelType(label LabelGraphic, signals *pipeline.Signals) (string, float64) {
 	text := strings.ToUpper(label.Text)
 

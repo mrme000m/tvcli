@@ -37,6 +37,11 @@ Agent/CLI → `tv run "PUB;<id>" --symbol X --tf 5m --bars 500 --signals --agent
 6. **Tier-aware limits** — Bars, indicators, timeouts are capped per TradingView subscription.
 7. **Study cleanup** — Aggressive retry + cleanup prevents study-limit leaks.
 8. **PersistentRunner** — Long-lived WS connection for repeated runs (used in `--persistent`/`--loop`).
+9. **Two-layer generic graphics design** — Any script's graphics are analyzed without per-script matchers:
+   - **Layer 1** (`pkg/pipeline/extract.go`): flat signal extraction from all draw types (boxes→S/R, lines→levels, labels→events, tables→grids, hhists→volume bins). Zero script-specific code.
+   - **Layer 2** (`internal/agent/graphics_generic.go`): topology-based structural analysis that groups elements by geometric topology (shared edges, width, extension) and infers semantics. Detects POC/VAH/VAL, order blocks, FVGs, breaker blocks, liquidity levels, session markers — from any arrangement, no per-script knowledge needed.
+10. **Custom input passing** — All input spellings work (`--input k=v`, `--input.k=v`, positional `k=v`, raw `--in_N=v`) and are resolved to TV input IDs by name/index/inline. Verified to change runtime graphic output.
+11. **`pine2tool` skill** — Turnkey workflow: download source → introspect inputs → run with custom inputs → analyze → emit agent-ready JSON + skill stub. Works for any `PUB;xxx` or local `.pine` file.
 
 ## Key Gaps for Arbitrary Agent-Driven Pine Execution
 

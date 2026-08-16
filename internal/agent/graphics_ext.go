@@ -1,20 +1,21 @@
-// graphics_ext.go — deep-graphics recovery for the universal analyzer.
+// graphics_ext.go — legacy per-script graphics matchers (preserved as
+// documentation, no longer called).
 //
-// Graphics-heavy Pine scripts (volume-profile bars, order-block boxes, FVGs,
-// liquidity zones) often emit no meaningful plot columns; everything lives in
-// the drawing layer (dwgboxes / dwglines / dwglinefills / dwglabels). These
-// helpers reconstruct structured information that the flat box/line parsers
-// cannot, based on the raw layouts observed for real TradingView scripts:
+// This file previously contained two per-script pattern matchers:
+//   - findVolumeProfilePeaks: boxes sharing a left edge (specific to
+//     JacobMagleby's Volume Profile layout)
+//   - findLineFillZones: dwglinefills between two horizontal rails
 //
-//   - Volume Profile Bar-Magnified Order Blocks [JacobMagleby]:
-//     each order block is N uniformly-spaced rectangular grid boxes sharing a
-//     common left edge (x1), stacked vertically, where a box's X-extent
-//     (width) is proportional to its traded volume. The widest box is the POC
-//     bin; the stack's top/bottom bound the value area. Each OB is also
-//     framed by a dwglinefill between two horizontal rails.
+// These have been replaced by the generic, topology-based approach in
+// graphics_generic.go, which handles any script's graphics without
+// per-script matchers. postProcessGraphics now routes to
+// postProcessGraphicsGeneric. The old functions are preserved here as
+// documentation of the patterns they handled, and may be useful as reference
+// when adding new topology rules.
 //
-//   - SMC Visuals: FVG/OB boxes (narrow, no text), vertical session lines
-//     (x1 == x2), and dashed liquidity-level lines.
+// Architecture: two-layer generic design
+//   Layer 1 (pkg/pipeline/extract.go): flat signal extraction from all draw types
+//   Layer 2 (graphics_generic.go):     topology-based structural analysis
 package agent
 
 import (

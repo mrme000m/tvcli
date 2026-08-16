@@ -135,9 +135,20 @@ analysis tool without a hand-written parser:
 
 It downloads the source, introspects inputs, runs with custom inputs, runs the
 universal analyzer (`tv analyze`), and emits agent-ready JSON plus a registrable
-`skill.yaml` / `SKILL.md` stub. Deep-graphics recovery (`internal/agent/graphics_ext.go`)
-auto-extracts volume-profile **POC/VAH/VAL**, **order-block zones**, **FVG/OB/liquidity**
-and **session markers** purely from the drawing layer.
+`skill.yaml` / `SKILL.md` stub. The universal analyzer uses a **two-layer design**
+that works across any script without per-script matchers:
+
+- **Layer 1** (`pkg/pipeline/extract.go`): flat signal extraction from every TV
+  draw type (boxes, lines, labels, tables, histograms) — zero script-specific code.
+- **Layer 2** (`internal/agent/graphics_generic.go`): **generic topology-based**
+  graphics analysis that groups elements by geometric topology (shared edges,
+  width, extension) and infers semantics from group properties — not from
+  script-specific layouts. Auto-extracts volume-profile **POC/VAH/VAL**,
+  **order-block zones**, **FVG/gap boxes**, **breaker blocks**, **liquidity
+  levels** and **session markers** purely from the drawing layer.
+
+Per-script parsers in `internal/skill/parsers/` remain only for **registered
+skills** where exact Pine field names and plot semantics are known.
 
 ### Passing Pine inputs (all spellings work)
 ```

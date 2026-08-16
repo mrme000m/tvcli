@@ -260,6 +260,31 @@ tvcli agent
     ├── SkillResult (per-skill output)
     ├── AgentResult (aggregated + summary)
     └── Report Generator (markdown/html/marketing/text)
+
+tvcli analyze / tvcli eval --agent  (any unknown Pine script)
+    ├── UniversalAnalyzer
+    │   ├── Layer 1: pipeline.Extract (flat signal extraction from all draw types)
+    │   ├── Layer 2: graphics_generic.go (topology-based structural analysis)
+    │   └── Agent-ready v2 envelope
+    └── No per-script matchers needed — topology rules are geometric universals
 ```
 
-The agent leverages the existing skill system, so every skill's parser, presets, and agent-ready output format are automatically available.
+### Two-Layer Generic Graphics Design
+
+The universal analyzer (`tv analyze`, `tv eval --agent`) uses a **two-layer
+generic design** that handles any Pine script's graphics without per-script
+matchers:
+
+| Layer | Location | Role |
+|-------|----------|------|
+| **Layer 1: Flat signal extraction** | `pkg/pipeline/extract.go` | Universal handlers for every TV draw type (boxes→S/R, lines→levels, labels→events, tables→grids, hhists→volume bins). Zero script-specific code. |
+| **Layer 2: Structural topology analysis** | `internal/agent/graphics_generic.go` | Groups elements by geometric topology (shared edges, width, extension, style) and infers semantics from group properties. Detects POC/VAH/VAL, order blocks, FVGs, breaker blocks, liquidity levels, session markers. |
+
+**Per-script parsers** in `internal/skill/parsers/` remain only for **registered
+skills** where exact Pine field names and plot semantics are known (e.g., SMC's
+`Bullish_BOS` field, VP's `POC`/`VAH`/`VAL` plot values). For unknown/arbitrary
+scripts, the generic topology approach handles any arrangement without
+per-script code.
+
+The agent leverages the existing skill system, so every skill's parser,
+presets, and agent-ready output format are automatically available.

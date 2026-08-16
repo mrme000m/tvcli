@@ -46,6 +46,32 @@ The **agent `bias`** is derived from the *count of buy vs sell events*.
 **⇒ Craft scripts to emit both**: (a) price-valued plot lines for level detection,
 and (b) a +1/-1 signal line (or two 0/1 lines) for buy/sell event detection.
 
+### Graphics-only scripts and the generic topology analyzer
+
+Many powerful indicators (order blocks, FVG, volume profile, SMC visuals) emit
+**no plot columns** — everything lives in the drawing layer (`dwgboxes`,
+`dwglines`, `dwglinefills`, `dwglabels`). The universal analyzer handles these
+with a **two-layer generic design** (no per-script matchers needed):
+
+- **Layer 1** (`pkg/pipeline/extract.go`): flat signal extraction — reads
+  every draw type (boxes→S/R levels, lines→horizontal levels, labels→events,
+  tables→grids, hhists→volume bins). Universal, zero script-specific code.
+- **Layer 2** (`internal/agent/graphics_generic.go`): **topology-based**
+  structural analysis — groups graphic elements by geometric topology:
+  - Boxes sharing a left edge → volume-profile stacks (POC = widest, VAH/VAL
+    = stack bounds)
+  - Narrow boxes (1-3 bars) → FVG/gap zones
+  - Wide boxes extending right → order-block zones
+  - Boxes with dashed extended bounding lines → breaker blocks
+  - Vertical lines → session/sweep markers
+  - Horizontal dashed lines → liquidity levels
+  - Labels grouped by text → buy/sell/BOS/CHOCH/etc.
+
+This means **any** Pine script's graphics are analyzed by the same universal
+topology rules, regardless of how they arrange boxes, lines, and labels. When
+a new arrangement is observed, add a **topology rule** in
+`buildBoxTopology`/`buildLineTopology` — not a per-script matcher.
+
 ## Indicator vs strategy separation
 
 `tvcli` explicitly distinguishes the two script kinds in its output, so an agent

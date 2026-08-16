@@ -103,21 +103,66 @@ tvcli search "volume profile order blocks" --limit 10 --json
 tvcli top --limit 50 --output top.json
 ```
 
-## Extending the extractor after a run
+## How the universal analyzer handles ANY script's graphics
 
-Inspect `<slug>.raw.json` — it contains the real `graphic` map (`dwgboxes`,
-`dwglines`, `dwglinefills`, `dwglabels`) and `periods`. The universal analyzer's
-deep-graphics recovery lives in `internal/agent/graphics_ext.go` and currently
-recovers, from the drawing layer alone:
+The universal analyzer uses a **generic, topology-based approach** (in
+`internal/agent/graphics_generic.go`) that requires **no per-script matchers**.
+Instead of hand-coding patterns for each indicator, it:
 
-- **Volume-profile POC/VAH/VAL** — boxes sharing a left edge, stacked, X-extent ∝ volume.
-- **Order-block zones** — `dwglinefills` bounded by two horizontal rails.
-- **Session markers** — vertical lines (`x1 == x2`).
-- **FVG / OB / liquidity / buy-sell** from boxes, lines and label text.
+1. **Normalizes color encoding** — detects whether `bc`/`ci` are small indices
+   (5,6,7) or full RGBA integers (4278190085) by analyzing the value
+   distribution, so downstream logic works regardless of how a script encodes
+   colors.
 
-If a new script layout isn't captured, add a matcher in `graphics_ext.go`
-(`findVolumeProfilePeaks` / `findLineFillZones`) with the observed raw keys,
-then re-run and compare `<slug>.json`.
+2. **Groups boxes by geometric topology** — clusters boxes by:
+   - **Shared left edge** → volume-profile stacks (POC = widest, VAH/VAL =
+     stack top/bottom). This works for any script that draws volume bars.
+   - **Narrow width (1-3 bars)** → FVG/gap boxes. Confidence boosted if text
+     contains `%` signs.
+   - **Wide extension (x2 >> x1, x2 = last bar)** → active order-block zones.
+   - **Remaining** → generic price zones.
+
+3. **Groups lines by geometry** — classifies as:
+   - **Vertical (x1 ≈ x2)** → session/sweep markers.
+   - **Horizontal dashed + extend right** → liquidity/breaker levels.
+   - **Horizontal solid** → support/resistance.
+   - **Sloped** → trendlines (up/down).
+
+4. **Associates boxes with their bounding lines** — matches box top/bottom
+   Y-coordinates to line Y-coordinates with X-overlap, so a box flanked by
+   dashed extended lines is correctly classified as a **breaker block**.
+
+5. **Groups labels by text content** — normalizes text and maps to semantic
+   types (buy/sell/BOS/CHOCH/liquidity_sweep/POC/VAH/VAL/etc.).
+
+6. **Prevents double-classification** — boxes claimed by a higher-priority
+   group (e.g., volume_profile) are excluded from lower-priority groups
+   (FVG, order_block, zone).
+
+### Architecture: two-layer design
+
+| Layer | Location | Role |
+|-------|----------|------|
+| **Layer 1: flat signal extraction** | `pkg/pipeline/extract.go` | Universal handlers for every TV draw type (dwglabels→events, dwglines→levels, dwgboxes→S/R levels, hhists→volume bins, dwgtables→grids). Zero script-specific code. |
+| **Layer 2: structural topology analysis** | `internal/agent/graphics_generic.go` | Groups graphic elements by geometric topology and infers semantics from group properties — not from script-specific layouts. |
+
+Both layers run automatically for every `tv analyze` and `tv eval --agent` call.
+Per-script parsers in `internal/skill/parsers/` remain only for **registered
+skills** where exact Pine field names and plot semantics are known.
+
+### Inspecting and extending
+
+Inspect `<slug>.raw.json` for the raw `graphic` map and `periods`. The
+generic analyzer's topology logic lives in `internal/agent/graphics_generic.go`.
+The old per-script matchers in `graphics_ext.go` are preserved as documentation
+but no longer called — `postProcessGraphics` routes to
+`postProcessGraphicsGeneric`.
+
+If a new script's layout produces incorrect classifications, the right fix is
+to add a **topology rule** in `buildBoxTopology` / `buildLineTopology` (e.g., a
+new geometric grouping criterion), not a per-script matcher. This keeps the
+approach generic: any script's graphics are analyzed by the same universal
+topology rules, regardless of how they arrange boxes, lines, and labels.
 
 ## Registering the script as a reusable tvcli skill
 

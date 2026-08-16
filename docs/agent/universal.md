@@ -63,28 +63,56 @@ inputs <pineId> --raw --json` to discover the canonical IDs.
 
 ## Supported Graphic Types (Auto-Detected)
 
-The analyzer examines TradingView's graphic draw types and classifies them
-(deep-graphics recovery lives in `internal/agent/graphics_ext.go`):
+The analyzer uses a **two-layer generic design** that works across any Pine
+script without per-script matchers:
 
-| Graphic Type | Detected As | Confidence |
+### Layer 1: Flat Signal Extraction (`pkg/pipeline/extract.go`)
+
+Universal handlers for every TradingView draw type. Zero script-specific code —
+every script emits the same draw types; only the arrangement differs.
+
+| Draw Type | Extracted Signal |
+|-----------|-----------------|
+| `dwglabels` | BUY/SELL/BOS/CHOCH/SUPPORT/RESISTANCE/POC text → events + levels |
+| `dwglines` | Horizontal lines (slope < 0.001) → support/resistance levels |
+| `dwgboxes` | Box top/bottom → resistance/support levels |
+| `hhists` | Volume profile bins → high/low levels + rate arrays |
+| `dwgtable`/`dwgtablecells` | Reconstructed into row/col grids → labeled values |
+
+### Layer 2: Structural Topology Analysis (`internal/agent/graphics_generic.go`)
+
+Groups graphic elements by **geometric topology** and infers semantics from
+group properties — not from script-specific layouts. This replaces the old
+per-script pattern matchers (`findVolumeProfilePeaks`, `findLineFillZones`)
+with a universal approach:
+
+| Topology Rule | Detected As | Confidence |
 |--------------|-------------|------------|
-| `dwgboxes` with FVG text | **Fair Value Gap (FVG)** | 90% |
-| `dwgboxes` narrow (1-6 bars), gap-like | **FVG (heuristic)** | 70% |
-| `dwgboxes` with OB/Order Block text | **Order Block** | 90% |
-| `dwgboxes` with Liquidity/Buyside/Sellside text | **Liquidity** | 90% |
-| `dwgboxes` small, stacked, no text | **Volume Profile** | 80% |
-| `dwgboxes` wide, tall | **Session** | 70% |
-| `dwglines` horizontal | **Support/Resistance/Band** | 70-90% |
-| `dwglines` sloped | **Trendline** | 70% |
-| `dwglines` vertical (`x1==x2`) | **Session / market open-close** | 80% |
-| `dwglinefills` (two horizontal rails) | **Order-block zone** | 75% |
-| `dwgboxes` stacked sharing a left edge | **Volume-profile POC/VAH/VAL** | 80-95% |
-| `dwglabels` with BUY/LONG/BULL | **Buy Signal** | 90% |
-| `dwglabels` with SELL/SHORT/BEAR | **Sell Signal** | 90% |
-| `dwglabels` with BOS/CHOCH | **Structure Break** | 90% |
-| `dwglabels` with POC/VAH/VAL | **Volume Profile Levels** | 90% |
-| `dwgtables` with Timeframe/Trend | **Dashboard** | - |
+| Boxes sharing a left edge, stacked, width varies | **Volume Profile POC/VAH/VAL** | 80-95% |
+| Boxes with narrow width (1-3 bars) | **FVG (Fair Value Gap)** | 70-85% |
+| Boxes extending wide to right edge | **Order Block zone** | 75% |
+| Boxes with dashed extended bounding lines | **Breaker Block** | 80% |
+| Remaining unclassified boxes | **Generic Price Zone** | 40% |
+| Lines vertical (`x1 ≈ x2`) | **Session / sweep marker** | 70-80% |
+| Lines horizontal + dashed + extend right | **Liquidity / breaker level** | 70% |
+| Lines horizontal + solid | **Support / Resistance** | 60% |
+| Lines sloped | **Trendline** | 50% |
+| Labels with BUY/LONG/BULL text | **Buy Signal** | 80-90% |
+| Labels with SELL/SHORT/BEAR text | **Sell Signal** | 80-90% |
+| Labels with BOS/CHOCH text | **Structure Break** | 80-90% |
+| Labels with LS/HS/LIQUIDITY text | **Liquidity Sweep** | 80% |
+| Labels with POC/VAH/VAL text | **Volume Profile Levels** | 80-90% |
+| `dwglinefills` (two horizontal rails) | **Bounded Zone** | 75% |
+| `dwgtables` | **Dashboard** | - |
 | `hhists` | **Volume Profile Histogram** | - |
+
+**Key design principle**: new scripts are handled by the same topology rules —
+no per-script matchers needed. If a new arrangement is observed, add a topology
+rule in `buildBoxTopology` / `buildLineTopology` (a geometric grouping criterion),
+not a script-specific matcher.
+
+Per-script parsers in `internal/skill/parsers/` remain only for **registered
+skills** where exact Pine field names and plot semantics are known.
 
 ## Output Formats
 

@@ -61,6 +61,35 @@ tvcli sync [options]
 
 ---
 
+## analyze / universal
+
+Universal script analyzer — auto-analyze any Pine script using the two-layer
+generic graphics design. No per-script matchers needed.
+
+```
+tvcli analyze "PUB;<id>" [options]
+tvcli analyze "PUB;<id>" --input in_0=20,in_1=5  # custom inputs
+```
+
+**Two-layer design:**
+- Layer 1 (`pipeline/extract.go`): flat signal extraction from all draw types
+- Layer 2 (`graphics_generic.go`): topology-based structural analysis (groups by shared edges, width, extension → POC/VAH/VAL, order blocks, FVGs, breaker blocks, liquidity levels)
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--symbol <SYM>` | `OANDA:XAUUSD` | Market symbol |
+| `--tf <TF>` | `5m` | Timeframe |
+| `--bars <N>` | `500` | Number of bars |
+| `--input k=v` | — | Pine input override (comma list form) |
+| `--input.k=v` | — | Dotted Pine input override |
+| `--json` | false | JSON output |
+| `--report` | false | Generate analysis report |
+| `--list-inputs` | false | List script inputs and exit |
+| `--validate-inputs` | false | Validate inputs against schema |
+| `--force-schema` | false | Force re-fetch schema |
+| `--out <file>` | — | Save output to file |
+| `--verbose` | false | Verbose output |
+
 ## eval
 
 Run arbitrary Pine Script source without a pre-published Pine ID. Compiles via Pine Facade, saves as a temporary script, runs on WebSocket, then deletes the temp script.
