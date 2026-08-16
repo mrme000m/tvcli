@@ -46,6 +46,7 @@ func RegisterAll(root *cli.Root, app *App) {
 	root.Add(&cleanCmd{app: app})
 	root.Add(&serveCmd{app: app})
 	root.Add(&agentCmd{app: app})
+	root.Add(&universalCmd{app: app})
 	RegisterSkills(root, app)
 }
 

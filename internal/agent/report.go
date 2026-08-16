@@ -447,3 +447,407 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// FormatUniversal renders a universal analysis result as human-readable text.
+func FormatUniversal(result *UniversalResult) string {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	sb.WriteString(strings.Repeat("=", 70) + "\n")
+	sb.WriteString("  UNIVERSAL PINE SCRIPT ANALYSIS\n")
+	sb.WriteString(strings.Repeat("=", 70) + "\n\n")
+
+	sb.WriteString(fmt.Sprintf("  Script:       %s (%s)\n", result.ScriptInfo.Name, result.ScriptInfo.PineID))
+	sb.WriteString(fmt.Sprintf("  Version:      %s\n", result.ScriptInfo.Version))
+	sb.WriteString(fmt.Sprintf("  Type:         %s | %s\n", boolStr(result.ScriptInfo.IsStrategy, "Strategy", "Indicator"), boolStr(result.ScriptInfo.IsOverlay, "Overlay", "Pane")))
+	sb.WriteString(fmt.Sprintf("  Schema:       %s\n", boolStr(result.ScriptInfo.HasSchema, "Available", "Not Available")))
+	sb.WriteString(fmt.Sprintf("  Plots:        %d\n", result.ScriptInfo.PlotCount))
+	sb.WriteString(fmt.Sprintf("  Inputs:       %d\n", result.ScriptInfo.InputCount))
+	sb.WriteString(fmt.Sprintf("  Graphic Types: %v\n", result.ScriptInfo.GraphicTypes))
+	sb.WriteString("\n")
+
+	sb.WriteString(fmt.Sprintf("  Symbol:       %s\n", result.MarketData.Symbol))
+	sb.WriteString(fmt.Sprintf("  Timeframe:    %s\n", result.MarketData.Timeframe))
+	sb.WriteString(fmt.Sprintf("  Bars:         %d\n", result.MarketData.BarCount))
+	sb.WriteString(fmt.Sprintf("  Last Price:   %.4f (%s)\n", result.MarketData.LastPrice, result.MarketData.PriceSource))
+	sb.WriteString(fmt.Sprintf("  Time Range:   %s\n", result.MarketData.TimeRange))
+	sb.WriteString("\n")
+
+	// Signal summary
+	sb.WriteString("  ─── SIGNAL SUMMARY ───\n")
+	sb.WriteString(fmt.Sprintf("  Bias:         %s (%.0f%%)\n", strings.Title(result.Signals.Bias), result.Signals.Confidence*100))
+	sb.WriteString(fmt.Sprintf("  Events:       %d\n", len(result.Signals.Events)))
+	sb.WriteString(fmt.Sprintf("  Levels:       %d\n", len(result.Signals.Levels)))
+	if len(result.Signals.Warnings) > 0 {
+		sb.WriteString("  Warnings:     \n")
+		for _, w := range result.Signals.Warnings {
+			sb.WriteString(fmt.Sprintf("    ⚠ %s\n", w))
+		}
+	}
+	sb.WriteString("\n")
+
+	// Graphic summary
+	sb.WriteString("  ─── GRAPHIC ANALYSIS ───\n")
+	sb.WriteString(fmt.Sprintf("  Boxes:        %d\n", result.GraphicData.Summary.TotalBoxes))
+	sb.WriteString(fmt.Sprintf("  Lines:        %d\n", result.GraphicData.Summary.TotalLines))
+	sb.WriteString(fmt.Sprintf("  Labels:       %d\n", result.GraphicData.Summary.TotalLabels))
+	sb.WriteString(fmt.Sprintf("  Tables:       %d\n", result.GraphicData.Summary.TotalTables))
+	sb.WriteString(fmt.Sprintf("  Histograms:   %d\n", result.GraphicData.Summary.TotalHistograms))
+	sb.WriteString("  Inferred Types:\n")
+	for typ, count := range result.GraphicData.Summary.InferredTypes {
+		sb.WriteString(fmt.Sprintf("    %s: %d\n", typ, count))
+	}
+	sb.WriteString("\n")
+
+	// Key Levels
+	if len(result.Summary.KeyLevels) > 0 {
+		sb.WriteString("  ─── KEY LEVELS ───\n")
+		for _, lvl := range result.Summary.KeyLevels {
+			active := ""
+			if lvl.IsActive {
+				active = " 🟢 ACTIVE"
+			}
+			sb.WriteString(fmt.Sprintf("  %.2f %s (%.0f%%) %s%s\n",
+				lvl.Price, lvl.Kind, lvl.Strength*100, lvl.Source, active))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Signals
+	if len(result.Summary.Signals) > 0 {
+		sb.WriteString("  ─── RECENT SIGNALS ───\n")
+		for _, sig := range result.Summary.Signals[:min(5, len(result.Summary.Signals))] {
+			sb.WriteString(fmt.Sprintf("  %s @ %.2f (%.0f%%) %s: %s\n",
+				strings.ToUpper(sig.Kind), sig.Price, sig.Confidence*100, sig.Source, sig.Text))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Patterns
+	if len(result.Summary.Patterns) > 0 {
+		sb.WriteString("  ─── PATTERNS ───\n")
+		for _, p := range result.Summary.Patterns {
+			sb.WriteString(fmt.Sprintf("  %s [%s] (%.0f%%): %s\n",
+				p.Name, p.Type, p.Confidence*100, p.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Risk Metrics
+	if result.Summary.RiskMetrics.ATR > 0 {
+		sb.WriteString("  ─── RISK METRICS ───\n")
+		sb.WriteString(fmt.Sprintf("  ATR:              %.4f\n", result.Summary.RiskMetrics.ATR))
+		if result.Summary.RiskMetrics.DistanceToSupport > 0 {
+			sb.WriteString(fmt.Sprintf("  Dist to Support:  %.2f%%\n", result.Summary.RiskMetrics.DistanceToSupport))
+		}
+		if result.Summary.RiskMetrics.DistanceToResistance > 0 {
+			sb.WriteString(fmt.Sprintf("  Dist to Resistance: %.2f%%\n", result.Summary.RiskMetrics.DistanceToResistance))
+		}
+		if result.Summary.RiskMetrics.RiskRewardLong > 0 {
+			sb.WriteString(fmt.Sprintf("  R:R Long:         %.2f\n", result.Summary.RiskMetrics.RiskRewardLong))
+		}
+		if result.Summary.RiskMetrics.RiskRewardShort > 0 {
+			sb.WriteString(fmt.Sprintf("  R:R Short:        %.2f\n", result.Summary.RiskMetrics.RiskRewardShort))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Recommendations
+	if len(result.Summary.Recommendations) > 0 {
+		sb.WriteString("  ─── RECOMMENDATIONS ───\n")
+		for _, r := range result.Summary.Recommendations {
+			sb.WriteString(fmt.Sprintf("  → %s\n", r))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Agent Envelope Summary
+	if result.AgentEnvelope != nil {
+		sb.WriteString("  ─── AGENT ENVELOPE ───\n")
+		sb.WriteString(fmt.Sprintf("  Status:       %s\n", result.AgentEnvelope.Status))
+		sb.WriteString(fmt.Sprintf("  Opportunities: %d\n", len(result.AgentEnvelope.Opportunities)))
+		for _, opp := range result.AgentEnvelope.Opportunities[:min(3, len(result.AgentEnvelope.Opportunities))] {
+			sb.WriteString(fmt.Sprintf("    #%d %s %s [%.0f%%] Entry: %.2f\n",
+				opp.Rank, opp.Direction, opp.Setup, opp.ConfluenceScore*100, opp.Entry))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString(strings.Repeat("=", 70) + "\n")
+	return sb.String()
+}
+
+func boolStr(b bool, t, f string) string {
+	if b {
+		return t
+	}
+	return f
+}
+
+// GenerateUniversalReport creates a comprehensive report for universal analysis.
+func GenerateUniversalReport(result *UniversalResult, cfg ReportConfig) string {
+	if cfg.Title == "" {
+		cfg.Title = "Universal Pine Script Analysis"
+	}
+	if cfg.Format == "" {
+		cfg.Format = "markdown"
+	}
+
+	switch strings.ToLower(cfg.Format) {
+	case "markdown", "md":
+		return generateUniversalMarkdown(result, cfg)
+	case "html":
+		return generateUniversalHTML(result, cfg)
+	case "marketing", "social", "tweet", "thread":
+		return generateUniversalMarketing(result, cfg)
+	default:
+		return FormatUniversal(result)
+	}
+}
+
+func generateUniversalMarkdown(result *UniversalResult, cfg ReportConfig) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("# %s\n\n", cfg.Title))
+	sb.WriteString(fmt.Sprintf("**Script:** %s (`%s`)  |  **Version:** %s  |  **Type:** %s\n\n",
+		result.ScriptInfo.Name, result.ScriptInfo.PineID, result.ScriptInfo.Version,
+		boolStr(result.ScriptInfo.IsStrategy, "Strategy", "Indicator")))
+
+	// Executive Summary
+	sb.WriteString("## Executive Summary\n\n")
+	sb.WriteString(fmt.Sprintf("Analysis of **%s** on **%s** timeframe using **%s**.\n\n",
+		result.MarketData.Symbol, result.MarketData.Timeframe, result.ScriptInfo.Name))
+
+	sb.WriteString(fmt.Sprintf("**Market Bias:** %s (Confidence: %.0f%%)  \n", strings.Title(result.Signals.Bias), result.Signals.Confidence*100))
+	sb.WriteString(fmt.Sprintf("**Last Price:** %.4f (%s)  \n", result.MarketData.LastPrice, result.MarketData.PriceSource))
+	sb.WriteString(fmt.Sprintf("**Bars Analyzed:** %d  \n", result.MarketData.BarCount))
+	sb.WriteString(fmt.Sprintf("**Graphic Elements:** %d boxes, %d lines, %d labels, %d tables, %d histograms  \n\n",
+		result.GraphicData.Summary.TotalBoxes, result.GraphicData.Summary.TotalLines,
+		result.GraphicData.Summary.TotalLabels, result.GraphicData.Summary.TotalTables,
+		result.GraphicData.Summary.TotalHistograms))
+
+	// Inferred Graphic Types
+	if len(result.GraphicData.Summary.InferredTypes) > 0 {
+		sb.WriteString("### Detected Graphic Types\n\n")
+		sb.WriteString("| Type | Count |\n|------|-------|\n")
+		for typ, count := range result.GraphicData.Summary.InferredTypes {
+			sb.WriteString(fmt.Sprintf("| %s | %d |\n", typ, count))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Key Levels
+	if len(result.Summary.KeyLevels) > 0 {
+		sb.WriteString("## Key Levels\n\n")
+		sb.WriteString("| Price | Kind | Strength | Source | Active |\n")
+		sb.WriteString("|-------|------|----------|--------|--------|\n")
+		for _, lvl := range result.Summary.KeyLevels {
+			active := "No"
+			if lvl.IsActive {
+				active = "✅ Yes"
+			}
+			sb.WriteString(fmt.Sprintf("| %.2f | %s | %.0f%% | %s | %s |\n",
+				lvl.Price, lvl.Kind, lvl.Strength*100, lvl.Source, active))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Signals
+	if len(result.Summary.Signals) > 0 {
+		sb.WriteString("## Recent Signals\n\n")
+		sb.WriteString("| Time | Kind | Price | Confidence | Source | Text |\n")
+		sb.WriteString("|------|------|-------|------------|--------|------|\n")
+		for _, sig := range result.Summary.Signals[:min(10, len(result.Summary.Signals))] {
+			sb.WriteString(fmt.Sprintf("| %d | %s | %.2f | %.0f%% | %s | %s |\n",
+				sig.Time, sig.Kind, sig.Price, sig.Confidence*100, sig.Source, sig.Text))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Patterns
+	if len(result.Summary.Patterns) > 0 {
+		sb.WriteString("## Detected Patterns\n\n")
+		for _, p := range result.Summary.Patterns {
+			sb.WriteString(fmt.Sprintf("### %s [%s]\n\n", p.Name, p.Type))
+			sb.WriteString(fmt.Sprintf("- **Bias:** %s\n", strings.Title(p.Bias)))
+			sb.WriteString(fmt.Sprintf("- **Confidence:** %.0f%%\n", p.Confidence*100))
+			sb.WriteString(fmt.Sprintf("- **Description:** %s\n", p.Description))
+			if len(p.KeyPrices) > 0 {
+				sb.WriteString(fmt.Sprintf("- **Key Prices:** %v\n", p.KeyPrices))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Risk Metrics
+	if result.Summary.RiskMetrics.ATR > 0 {
+		sb.WriteString("## Risk Metrics\n\n")
+		sb.WriteString(fmt.Sprintf("- **ATR:** %.4f\n", result.Summary.RiskMetrics.ATR))
+		if result.Summary.RiskMetrics.DistanceToSupport > 0 {
+			sb.WriteString(fmt.Sprintf("- **Distance to Support:** %.2f%%\n", result.Summary.RiskMetrics.DistanceToSupport))
+		}
+		if result.Summary.RiskMetrics.DistanceToResistance > 0 {
+			sb.WriteString(fmt.Sprintf("- **Distance to Resistance:** %.2f%%\n", result.Summary.RiskMetrics.DistanceToResistance))
+		}
+		if result.Summary.RiskMetrics.RiskRewardLong > 0 {
+			sb.WriteString(fmt.Sprintf("- **Risk/Reward (Long):** %.2f\n", result.Summary.RiskMetrics.RiskRewardLong))
+		}
+		if result.Summary.RiskMetrics.RiskRewardShort > 0 {
+			sb.WriteString(fmt.Sprintf("- **Risk/Reward (Short):** %.2f\n", result.Summary.RiskMetrics.RiskRewardShort))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Recommendations
+	if len(result.Summary.Recommendations) > 0 {
+		sb.WriteString("## Recommendations\n\n")
+		for _, r := range result.Summary.Recommendations {
+			sb.WriteString(fmt.Sprintf("- %s\n", r))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Agent Envelope
+	if result.AgentEnvelope != nil && len(result.AgentEnvelope.Opportunities) > 0 {
+		sb.WriteString("## Top Opportunities (Agent-Ready)\n\n")
+		sb.WriteString("| # | Setup | Direction | Confidence | Confluence | Entry | SL | TP1 | R:R |\n")
+		sb.WriteString("|---|-------|-----------|------------|------------|-------|----|-----|-----|\n")
+		for _, opp := range result.AgentEnvelope.Opportunities[:min(5, len(result.AgentEnvelope.Opportunities))] {
+			entry := "-"
+			sl := "-"
+			tp1 := "-"
+			rr := "-"
+			if opp.Entry > 0 {
+				entry = fmt.Sprintf("%.2f", opp.Entry)
+			}
+			if opp.StopLoss > 0 {
+				sl = fmt.Sprintf("%.2f", opp.StopLoss)
+			}
+			if opp.TP1 > 0 {
+				tp1 = fmt.Sprintf("%.2f", opp.TP1)
+			}
+			if opp.RiskReward > 0 {
+				rr = fmt.Sprintf("%.1f", opp.RiskReward)
+			}
+			sb.WriteString(fmt.Sprintf("| %d | %s | %s | %s | %.2f | %s | %s | %s | %s |\n",
+				opp.Rank, opp.Setup, strings.Title(opp.Direction), opp.Confidence, opp.ConfluenceScore, entry, sl, tp1, rr))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Warnings
+	if len(result.Signals.Warnings) > 0 {
+		sb.WriteString("## Warnings\n\n")
+		for _, w := range result.Signals.Warnings {
+			sb.WriteString(fmt.Sprintf("- ⚠ %s\n", w))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("*Report generated by tvcli universal analyzer at %s*\n",
+		time.Now().Format("2006-01-02 15:04:05 UTC")))
+
+	return sb.String()
+}
+
+func generateUniversalHTML(result *UniversalResult, cfg ReportConfig) string {
+	md := generateUniversalMarkdown(result, cfg)
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>%s</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 900px; margin: 0 auto; padding: 20px; line-height: 1.6; }
+        h1 { color: #1a1a2e; border-bottom: 2px solid #16213e; padding-bottom: 10px; }
+        h2 { color: #16213e; margin-top: 30px; }
+        h3 { color: #0f3460; }
+        table { border-collapse: collapse; width: 100%%; margin: 15px 0; }
+        th, td { border: 1px solid #e0e0e0; padding: 8px 12px; text-align: left; }
+        th { background-color: #1a1a2e; color: white; }
+        tr:nth-child(even) { background-color: #f5f5f5; }
+        code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+%s
+</body>
+</html>`, cfg.Title, markdownToHTML(md))
+}
+
+func generateUniversalMarketing(result *UniversalResult, cfg ReportConfig) string {
+	var sb strings.Builder
+
+	symbol := result.MarketData.Symbol
+	tf := result.MarketData.Timeframe
+	bias := result.Signals.Bias
+	score := result.Signals.Confidence
+	scriptName := result.ScriptInfo.Name
+
+	sb.WriteString("🧵 UNIVERSAL ANALYSIS THREAD\n\n")
+	sb.WriteString(fmt.Sprintf("📊 %s | %s via %s\n", symbol, tf, scriptName))
+	sb.WriteString(fmt.Sprintf("🎯 Bias: %s | Confidence: %.0f%%\n\n", strings.Title(bias), score*100))
+
+	// Graphic types
+	if len(result.GraphicData.Summary.InferredTypes) > 0 {
+		sb.WriteString("🎨 Graphic Elements:\n")
+		for typ, count := range result.GraphicData.Summary.InferredTypes {
+			sb.WriteString(fmt.Sprintf("  • %s: %d\n", typ, count))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Key levels (active only)
+	activeLevels := []KeyLevel{}
+	for _, lvl := range result.Summary.KeyLevels {
+		if lvl.IsActive {
+			activeLevels = append(activeLevels, lvl)
+		}
+	}
+	if len(activeLevels) > 0 {
+		sb.WriteString("🎯 Active Levels:\n")
+		for _, lvl := range activeLevels[:3] {
+			emoji := "🟢"
+			if strings.Contains(lvl.Kind, "resistance") || strings.Contains(lvl.Kind, "vah") {
+				emoji = "🔴"
+			}
+			sb.WriteString(fmt.Sprintf("%s %s: %.2f\n", emoji, lvl.Kind, lvl.Price))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Signals
+	if len(result.Summary.Signals) > 0 {
+		sb.WriteString("📡 Recent Signals:\n")
+		for _, sig := range result.Summary.Signals[:3] {
+			emoji := "⚪"
+			if sig.Kind == "buy" || sig.Kind == "bullish" || sig.Kind == "long" {
+				emoji = "🟢"
+			} else if sig.Kind == "sell" || sig.Kind == "bearish" || sig.Kind == "short" {
+				emoji = "🔴"
+			}
+			sb.WriteString(fmt.Sprintf("%s %s @ %.2f (%s)\n", emoji, strings.Title(sig.Kind), sig.Price, sig.Source))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Risk
+	if result.Summary.RiskMetrics.RiskRewardLong > 0 {
+		sb.WriteString(fmt.Sprintf("📊 R:R Long: %.2f | Short: %.2f\n\n", result.Summary.RiskMetrics.RiskRewardLong, result.Summary.RiskMetrics.RiskRewardShort))
+	}
+
+	// Recommendations
+	if len(result.Summary.Recommendations) > 0 {
+		sb.WriteString("💡 Recommendations:\n")
+		for _, r := range result.Summary.Recommendations[:2] {
+			sb.WriteString(fmt.Sprintf("• %s\n", r))
+		}
+		sb.WriteString("\n")
+	}
+
+	sb.WriteString("---\n")
+	sb.WriteString(fmt.Sprintf("Generated: %s | tvcli universal\n", time.Now().Format("2006-01-02 15:04")))
+	sb.WriteString("#Trading #TechnicalAnalysis #" + strings.ReplaceAll(symbol, ":", ""))
+
+	return sb.String()
+}
