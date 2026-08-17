@@ -4,6 +4,8 @@ import (
 	"math"
 	"strconv"
 	"strings"
+
+	"github.com/ch99q/tvcli/internal/skill"
 )
 
 // latestClosed returns the most recent CLOSED bar from periods.
@@ -63,6 +65,59 @@ func toFloat(v any) float64 {
 	default:
 		return 0
 	}
+}
+
+func toInt(v any) int {
+	if v == nil {
+		return 0
+	}
+	switch n := v.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	case bool:
+		if n {
+			return 1
+		}
+		return 0
+	default:
+		return 0
+	}
+}
+
+func abs(f float64) float64 {
+	return math.Abs(f)
+}
+
+func min(a, b float64) float64 {
+	return math.Min(a, b)
+}
+
+func max(a, b float64) float64 {
+	return math.Max(a, b)
+}
+
+func firstOppText(opp []skill.Opportunity) string {
+	if len(opp) == 0 {
+		return ""
+	}
+	return opp[0].Setup
+}
+
+// getValidFloat returns the first field value that is a real number (not 1e+100
+// sentinel, not nil, not zero when all candidates are sentinel). Useful for
+// TradingView's above/below plot variants where inactive variants use 1e+100.
+func getValidFloat(obj map[string]any, names ...string) float64 {
+	for _, n := range names {
+		if v, ok := obj[n]; ok && v != nil {
+			f := toFloat(v)
+			if f != 0 && f < 1e50 {
+				return f
+			}
+		}
+	}
+	return 0
 }
 
 func biasFromDominance(r float64) string {
