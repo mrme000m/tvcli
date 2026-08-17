@@ -54,3 +54,4 @@ BINANCE_*.json
 
 # working artifacts from agent runs
 skill_work/
+*.json
