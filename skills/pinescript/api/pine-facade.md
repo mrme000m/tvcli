@@ -168,6 +168,22 @@ Cookie: <cookies>
 - `run` — extract inputs, plots for WebSocket study creation
 - `inputs` command — side-by-side diff
 
+> ⚠ **The `source` field returned by `/translate` is the compiled IL blob**,
+> not the human-readable Pine source. This IL blob is what gets sent as the
+> `text` field in the WebSocket `create_study` call. Passing raw Pine source
+> as `text` causes a server-side compilation error:
+> `line 1:12 no viable alternative at character '\n'`.
+> Always use `LoadIndicator` (which calls `/translate` internally) to fetch
+> the IL blob — never bypass it to pass raw Pine source.
+
+> ⚠ **Private scripts (USER;…):** Pine Facade returns **incomplete metaInfo**
+> for private scripts — only ~6 generic inputs with no plot/style definitions.
+> Despite this, the study still runs correctly because `LoadIndicator` fetches
+> the compiled IL blob. Custom scripts must be pushed via `tvcli push` before
+> the `run`/skill path works (TradingView needs the compiled version stored
+> under the Pine ID). The `eval` command works without a prior push because
+> it does `SaveNew` (creating a fresh temp script) each time.
+
 ---
 
 ## Get Raw Source Only — `/get/<pineId>/<version>`

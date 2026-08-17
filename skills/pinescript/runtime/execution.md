@@ -49,6 +49,14 @@ intrabarVolume := nz(intrabarVolume, volume) + volume
 - Fair value gap (FVG) tracking
 - Most indicator logic
 
+> ⚠ **Headless execution gotcha:** Scripts using `var` variables combined with
+> `ta.pivothigh()` / `ta.pivotlow()` functions may return **0 periods** when run
+> via the WebSocket API (`tvcli run` / `tvcli eval`), despite compiling cleanly
+> and receiving `study_completed` events. This is a runtime issue in the headless
+> WS path, not a compilation error. If you get 0 periods with a valid compile,
+> try removing `var` variables and pivot functions, then re-test. Simplified
+> scripts without these constructs work fine (280 periods on 1H with 180 bars).
+
 **Critical pattern:** Initialize `varip` on the first realtime bar only:
 
 ```pine
@@ -267,6 +275,11 @@ mySma = array.sum(window) / 20.0  // Or use ta.sma
 var float runningSum = 0.0
 // On each bar: runningSum := runningSum + close - oldValue
 ```
+
+> **Consolidation tip:** For agent workflows, combining multiple indicators
+> into one Pine script yields ~15× speedup (4s vs 60s for 17 separate skills)
+> and avoids the free-tier 2-indicator limit. Output every signal component as
+> a named `plot()` — the skill parser reads these plot values from period data.
 
 ### Anti-Patterns & Fixes (Expanded Table)
 

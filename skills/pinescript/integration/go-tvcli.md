@@ -70,8 +70,8 @@ tvcli eval --script 'indicator("x"); plot(close)'  # Inline source
 
 ### Data Fetching (No Indicator Needed)
 ```bash
-tvcli fetch --symbol OANDA:XAUUSD --tf 5m --bars 180 --csv-out data.csv
-tvcli sync --symbol OANDA:XAUUSD --tf 5m --bars 5000 --loop 5m   # Gap-fill loop
+tvcli fetch --symbol OANDA:XAUUSD --tf 5m --bars 180 --csv-out data.csv  # free tier max
+tvcli sync --symbol OANDA:XAUUSD --tf 5m --bars 5000 --loop 5m   # Gap-fill (auto-capped per run)
 ```
 
 ### Utilities
@@ -86,10 +86,14 @@ tvcli serve --addr :8765                       # HTTP server for agents
 
 ### Indicator Skills (Built-in)
 ```bash
-tv sniper --symbol OANDA:XAUUSD --tf 15m --bars 500 --signals
-tv smc --symbol BINANCE:BTCUSDT --tf 1h --json
-tv bsv --help                                  # Skill-specific help
+tv sniper --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals
+tv smc --symbol BINANCE:BTCUSDT --tf 1h --json --agent
+tv xau-scalp --symbol OANDA:XAUUSD --tf 1H --bars 180 --json --agent --allow-private
+tv smc --help                                  # Skill-specific help
 ```
+
+> **Private scripts** (USER;…): add `--allow-private` to bypass the private-script guard.
+> Use `--agent` for the agent-ready v2 envelope (market, structure, opportunities, narrative).
 
 ---
 
@@ -129,7 +133,7 @@ jobs:
 ```bash
 # crontab: every 15 min during market hours
 */15 9-16 * * 1-5 cd /path/to/project && ./tvcli run USER;abc123 \
-    --symbol OANDA:XAUUSD --tf 15m --bars 200 --signals --json \
+    --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals --json \
     --out signals_$(date +\%Y\%m\%d_\%H\%M).json
 ```
 
@@ -248,7 +252,13 @@ DEBUG=true tvcli run USER;abc123 --symbol X --tf 5m
 
 # Check auth status
 tvcli check-auth --json
-# {"valid": true, "tier": "free", "studies_limit": 2, "error": null}
+# {"configured": true, "authenticated": true, "pro": false,
+#  "username": "vb_mrme00", "canRunStudies": true, "serverRunning": false}
+
+# Background server management
+tvcli serve --daemon         # Start in background
+tvcli serve --status         # Check status + health
+tvcli serve --stop            # Stop background server
 
 # Clean stale sessions
 tvcli clean --iterations 10 --delay 1000

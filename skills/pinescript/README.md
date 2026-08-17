@@ -14,10 +14,10 @@ tvcli compile my-indicator.pine
 # 3. Create & push to TradingView
 tvcli create my-indicator.pine --name "My Indicator"
 # ...edit locally...
-tvcli push my-indicator.pine
+tvcli push 1                      # Push by local ID (from tvcli list)
 
 # 4. Run on live data
-tvcli run USER;abc123 --symbol OANDA:XAUUSD --tf 15m --bars 500 --signals
+tvcli run USER;abc123 --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals  # free tier max
 ```
 
 ---
@@ -108,7 +108,7 @@ TV_TIER=free|essential|plus|premium|ultimate  # affects bars/connections/indicat
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| "study limit" on run | Free tier: max 2 indicators; stale sessions | `tvcli clean --iterations 5` or wait 2 min |
+| "study limit" on run | Free tier: max 2 indicators, 180 bars; stale sessions | `tvcli clean --iterations 5` or wait 2 min |
 | Compile succeeds but run fails | `translate_light` ≠ full runtime validation | Check runtime errors in `run --raw` output |
 | PineID not found | Script never saved, or wrong format | Use `tvcli create` first; PineID format: `USER;xxxxxx` |
 | WebSocket disconnects | No auth token (anonymous) | Set SESSION+SIGNATURE; free tier = 0 studies anon |
