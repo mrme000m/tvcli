@@ -93,5 +93,5 @@ func printSkillsList(w io.Writer) {
 	}
 
 	fmt.Fprintf(w, "\nUsage: tv <skill> [options]  --help for details\n")
-	fmt.Fprintf(w, "Example: tv bsv --symbol OANDA:XAUUSD --tf 15m --json --agent\n")
+	fmt.Fprintf(w, "Example: tv smc --symbol OANDA:XAUUSD --tf 15m --json --agent\n")
 }

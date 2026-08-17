@@ -159,4 +159,5 @@ func formatMTF(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(MTFSkill) }
+// REMOVED: graphics-only table, no period data
+// func init() { skill.Register(MTFSkill) }

@@ -73,4 +73,5 @@ func formatICT(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(ICTSkill) }
+// REMOVED: requires paid TradingView tier
+// func init() { skill.Register(ICTSkill) }

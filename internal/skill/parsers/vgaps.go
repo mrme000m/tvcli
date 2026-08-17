@@ -99,4 +99,5 @@ func formatVGaps(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(VGapsSkill) }
+// REMOVED: graphics-only, returns empty on free tier
+// func init() { skill.Register(VGapsSkill) }

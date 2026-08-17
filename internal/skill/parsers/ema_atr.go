@@ -103,4 +103,5 @@ func formatEMAATR(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(EMAATRSkill) }
+// REMOVED: low signal quality (score 0.55), overlaps with swingarm
+// func init() { skill.Register(EMAATRSkill) }

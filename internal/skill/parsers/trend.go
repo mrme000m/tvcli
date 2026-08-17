@@ -101,4 +101,5 @@ func formatTrend(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(TrendSkill) }
+// REMOVED: requires paid TradingView tier
+// func init() { skill.Register(TrendSkill) }

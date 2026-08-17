@@ -89,4 +89,5 @@ func formatShemar(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(ShemarSkill) }
+// REMOVED: low signal quality (score 0.4)
+// func init() { skill.Register(ShemarSkill) }

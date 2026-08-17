@@ -206,4 +206,5 @@ func formatBSV(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(BSVSkill) }
+// REMOVED: low signal quality (score 0.4)
+// func init() { skill.Register(BSVSkill) }

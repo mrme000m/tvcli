@@ -93,4 +93,5 @@ func formatAnchoredVP(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(AnchoredVPSkill) }
+// REMOVED: graphics-only, returns empty on free tier
+// func init() { skill.Register(AnchoredVPSkill) }

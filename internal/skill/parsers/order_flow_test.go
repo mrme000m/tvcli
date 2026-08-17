@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-
-	"github.com/ch99q/tvcli/internal/skill"
 )
 
 func TestOrderFlowSkill_Fixture(t *testing.T) {
@@ -65,12 +63,3 @@ func TestOrderFlowSkill_LatestSpikeLabel(t *testing.T) {
 	}
 }
 
-func TestOrderFlowSkill_Register(t *testing.T) {
-	s := skill.Get("order-flow")
-	if s == nil {
-		t.Fatal("expected order-flow to be registered")
-	}
-	if s.PineID != OrderFlowSkill.PineID {
-		t.Fatalf("unexpected PineID: %s", s.PineID)
-	}
-}

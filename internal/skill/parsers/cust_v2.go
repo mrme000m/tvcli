@@ -893,4 +893,5 @@ func formatCust(result skill.SkillResult) string {
 	return sb.String()
 }
 
-func init() { skill.Register(CustSkill) }
+// REMOVED: requires private script access
+// func init() { skill.Register(CustSkill) }
