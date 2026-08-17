@@ -6,6 +6,7 @@ import (
 
 	"github.com/ch99q/tvcli/internal/cli"
 	"github.com/ch99q/tvcli/pkg/tradingview"
+	"github.com/ch99q/tvcli/pkg/tradingview/auth"
 )
 
 type cleanCmd struct{ app *App }
@@ -24,6 +25,19 @@ func (c *cleanCmd) Run(env *cli.Env) error {
 
 	iterations := flags.GetInt("iterations", 3)
 	delayMs := flags.GetInt("delay", 500)
+
+	// Pre-check auth before attempting cleanup.
+	if cfg.HasAuth() {
+		info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken)
+		if !info.Authenticated {
+			fmt.Fprintf(env.Stderr, "⚠ Authentication check: cookies are EXPIRED.\n")
+			fmt.Fprintf(env.Stderr, "  %v\n", info.Error)
+			fmt.Fprintf(env.Stderr, "  Running 'clean' won't help — re-extract cookies first.\n")
+			fmt.Fprintf(env.Stderr, "  Run: ./tvcli check-auth\n")
+			return nil
+		}
+		fmt.Fprintf(env.Stderr, "✓ Auth verified: authenticated (plan=%s)\n", info.Plan)
+	}
 
 	fmt.Fprintf(env.Stderr, "Connecting to TradingView WS...\n")
 

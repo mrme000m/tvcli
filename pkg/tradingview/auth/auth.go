@@ -34,19 +34,45 @@ func GenCookies(session, signature, deviceT string) string {
 
 var authTokenRe = regexp.MustCompile(`"auth_token":"([^"]+)"`)
 
+// AuthInfo holds the authentication and subscription state scraped from a
+// TradingView page. It lets callers distinguish "cookies expired" from
+// "study limit reached" — the two most common failure modes for agent
+// workflows.
+type AuthInfo struct {
+	Token         string // The auth_token (empty if not authenticated)
+	Authenticated bool   // True if cookies are valid
+	Pro           bool   // True if the account is a Pro subscriber
+	Plan          string // Detected plan name (e.g. "essential", "pro", "")
+	Username      string // Detected username (if available)
+	StatusCode    int    // HTTP status code of the page fetch
+	Error         error  // Non-nil if the fetch failed entirely
+}
+
 // FetchToken scrapes the auth_token from a TradingView page using the session
 // cookies. location defaults to https://www.tradingview.com/ if empty.
 // The deviceT parameter is the device_t cookie value, required for proper
 // authentication on free accounts.
 // Returns an error if the page has no auth_token (e.g. cookies expired).
 func FetchToken(session, signature, location, deviceT string) (string, error) {
+	info := FetchAuthInfo(session, signature, location, deviceT)
+	return info.Token, info.Error
+}
+
+// FetchAuthInfo scrapes the TradingView chart page to determine the full
+// authentication and subscription state. It returns an AuthInfo struct with
+// the auth_token (if authenticated), subscription plan, and any error.
+//
+// The HTML page embeds class flags like "is-not-authenticated" or "is-pro"
+// and sometimes a JSON block with the user's plan. This function parses those
+// to give callers a complete picture without running a study.
+func FetchAuthInfo(session, signature, location, deviceT string) AuthInfo {
 	if location == "" {
 		location = "https://www.tradingview.com/chart/"
 	}
 
 	cookie := GenCookies(session, signature, deviceT)
 	if cookie == "" {
-		return "", fmt.Errorf("no session cookies")
+		return AuthInfo{Error: fmt.Errorf("no session cookies")}
 	}
 
 	req, _ := http.NewRequest("GET", location, nil)
@@ -56,21 +82,60 @@ func FetchToken(session, signature, location, deviceT string) (string, error) {
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetch page: %w", err)
+		return AuthInfo{Error: fmt.Errorf("fetch page: %w", err)}
 	}
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
 	page := string(body)
 
-	if !strings.Contains(page, "auth_token") {
-		return "", fmt.Errorf("no auth_token in page (status=%d)", resp.StatusCode)
+	info := AuthInfo{StatusCode: resp.StatusCode}
+
+	// Detect authentication state from HTML class flags.
+	// The <html> tag includes classes like "is-not-authenticated" or
+	// "is-authenticated" and "is-pro" / "is-not-pro".
+	if strings.Contains(page, "is-not-authenticated") {
+		info.Authenticated = false
+	} else if strings.Contains(page, "is-authenticated") {
+		info.Authenticated = true
+	}
+	info.Pro = strings.Contains(page, "is-pro") && !strings.Contains(page, "is-not-pro")
+
+	// Extract auth_token via regex (only present when authenticated).
+	if strings.Contains(page, "auth_token") {
+		matches := authTokenRe.FindStringSubmatch(page)
+		if len(matches) > 1 {
+			info.Token = matches[1]
+		}
 	}
 
-	matches := authTokenRe.FindStringSubmatch(page)
-	if len(matches) > 1 {
-		return matches[1], nil
+	// Try to extract the plan from embedded JSON.
+	// TradingView pages sometimes include "plan":"<name>" or
+	// "pro_plan":"<name>" in initData or user data blocks.
+	planRe := regexp.MustCompile(`"plan"\s*:\s*"([^"]+)"`)
+	if m := planRe.FindStringSubmatch(page); len(m) > 1 {
+		info.Plan = m[1]
+	} else {
+		proPlanRe := regexp.MustCompile(`"pro_plan"\s*:\s*"([^"]+)"`)
+		if m := proPlanRe.FindStringSubmatch(page); len(m) > 1 {
+			info.Plan = m[1]
+		}
 	}
 
-	return "", fmt.Errorf("auth_token regex match failed")
+	// Extract username if present.
+	userRe := regexp.MustCompile(`"username"\s*:\s*"([^"]+)"`)
+	if m := userRe.FindStringSubmatch(page); len(m) > 1 {
+		info.Username = m[1]
+	}
+
+	// Determine error: if not authenticated, the cookies are expired.
+	if !info.Authenticated {
+		if info.Token == "" {
+			info.Error = fmt.Errorf("cookies expired or invalid — not authenticated (status=%d)", resp.StatusCode)
+		} else {
+			info.Error = fmt.Errorf("auth_token present but page reports not authenticated (status=%d)", resp.StatusCode)
+		}
+	}
+
+	return info
 }

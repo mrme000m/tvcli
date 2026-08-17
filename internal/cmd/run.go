@@ -68,6 +68,11 @@ func (c *runCmd) Run(env *cli.Env) error {
 	limits := config.GetTierLimits()
 	forceCleanup := flags.Has("force-cleanup") || flags.Has("cleanup")
 
+	// Pre-check auth before wasting time on a study that will fail.
+	if err := PreCheckAuth(cfg); err != nil {
+		return err
+	}
+
 	fmt.Fprintf(env.Stderr, "Tier: %s (max %d charts, %d indicators/chart, %ds calc)\n",
 		os.Getenv("TV_TIER"), limits.MaxCharts, limits.MaxIndicators, limits.CalcTimeoutSecs)
 	if forceCleanup {

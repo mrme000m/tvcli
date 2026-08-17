@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ch99q/tvcli/internal/config"
@@ -18,6 +19,7 @@ import (
 	"github.com/ch99q/tvcli/pkg/runner"
 	"github.com/ch99q/tvcli/pkg/schema"
 	"github.com/ch99q/tvcli/pkg/tradingview"
+	"github.com/ch99q/tvcli/pkg/tradingview/auth"
 )
 
 // Server wraps the tvcli core functions behind an HTTP API.
@@ -47,6 +49,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("/fetch", s.handleFetch)
 	s.mux.HandleFunc("/clean", s.handleClean)
 	s.mux.HandleFunc("/run", s.handleRun)
+	s.mux.HandleFunc("/check-auth", s.handleCheckAuth)
 }
 
 // --- Types ------------------------------------------------------------------
@@ -86,11 +89,25 @@ type runRequest struct {
 // --- Handlers ---------------------------------------------------------------
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// Include auth status for agent health checks.
+	authed := false
+	plan := ""
+	if s.cfg.HasAuth() {
+		info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken)
+		authed = info.Authenticated
+		plan = info.Plan
+	}
+	limits := config.GetTierLimits()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":   "ok",
-		"tier":     os.Getenv("TV_TIER"),
-		"user":     s.cfg.UserName,
-		"endpoint": s.cfg.PineFacadeURL,
+		"status":         "ok",
+		"tier":           os.Getenv("TV_TIER"),
+		"authenticated":  authed,
+		"plan":           plan,
+		"user":           s.cfg.UserName,
+		"endpoint":       s.cfg.PineFacadeURL,
+		"maxIndicators":  limits.MaxIndicators,
+		"maxBars":        limits.MaxBars,
+		"calcTimeoutSecs": limits.CalcTimeoutSecs,
 	})
 }
 
@@ -159,6 +176,12 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Apply tier bar capping.
+	limits := config.GetTierLimits()
+	if limits.MaxBars > 0 && req.Bars > limits.MaxBars {
+		req.Bars = limits.MaxBars
+	}
+
 	client := tradingview.NewClient(
 		tradingview.WithToken(s.cfg.SessionID),
 		tradingview.WithSignature(s.cfg.Signature),
@@ -176,6 +199,16 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	chart := tradingview.NewChartSession(client)
+
+	// Wait for the first data update before reading periods, matching
+	// the service.FetchOHLCVBarsWithClient pattern. Without this, the
+	// server's /fetch endpoint races the data arrival and returns 0 bars.
+	done := make(chan struct{})
+	once := sync.Once{}
+	chart.OnUpdate(func() {
+		once.Do(func() { close(done) })
+	})
+
 	chart.SetMarket(symbol, map[string]any{
 		"timeframe": pinefacade.NormalizeTimeframe(req.Timeframe),
 		"range":     req.Bars,
@@ -184,6 +217,15 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "symbol load: " + err.Error()})
 		return
 	}
+
+	select {
+	case <-done:
+	case <-time.After(30 * time.Second):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "timeout waiting for OHLCV data"})
+		return
+	}
+	// Brief settle to allow follow-up data to arrive.
+	time.Sleep(500 * time.Millisecond)
 
 	periods := chart.Periods()
 	chart.RemoveAllStudies()
@@ -329,6 +371,16 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		bars = limits.MaxBars
 	}
 
+	// Pre-check auth before running (fail fast on expired cookies).
+	if authInfo := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken); !authInfo.Authenticated {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{
+			"error":          "auth: cookies expired — re-extract SESSION/SIGNATURE/DEVICE_T",
+			"authenticated":  false,
+			"canRunStudies":  false,
+		})
+		return
+	}
+
 	// 5. Run via service.RunScript (fetches compiled IL from Pine Facade).
 	res, err := service.RunScript(context.Background(), s.cfg, service.RunRequest{
 		PineID:       pineID,
@@ -428,4 +480,41 @@ func ParseAddr(flags map[string]string) string {
 		addr = ":" + addr
 	}
 	return addr
+}
+
+
+// handleCheckAuth verifies TradingView auth cookies and subscription tier.
+// GET /check-auth → { "configured", "authenticated", "pro", "plan", "canRunStudies", "error" }
+func (s *Server) handleCheckAuth(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.HasAuth() {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"configured":    false,
+			"authenticated": false,
+			"canRunStudies": false,
+			"error":         "no SESSION cookie configured",
+		})
+		return
+	}
+
+	info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken)
+
+	result := map[string]any{
+		"configured":    true,
+		"authenticated": info.Authenticated,
+		"pro":           info.Pro,
+		"plan":          info.Plan,
+		"canRunStudies":  info.Authenticated,
+	}
+	if info.Error != nil {
+		result["error"] = info.Error.Error()
+	}
+	if info.Username != "" {
+		result["username"] = info.Username
+	}
+
+	status := http.StatusOK
+	if !info.Authenticated {
+		status = http.StatusUnauthorized
+	}
+	writeJSON(w, status, result)
 }

@@ -6,6 +6,7 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"os"
 	"sync"
 	"time"
 
@@ -26,6 +27,11 @@ type Client interface {
 
 	RegisterSession(id, typ string, onData func(map[string]any))
 	UnregisterSession(id string)
+
+	// AuthStatus returns the authentication info from the last Connect() call.
+	// Returns nil if Connect() hasn't been called or no session cookies were
+	// configured (anonymous connections).
+	AuthStatus() *auth.AuthInfo
 }
 
 type sessionEntry struct {
@@ -49,6 +55,7 @@ type WSClient struct {
 	onConnected    []func()
 	onDisconnected []func()
 	onError        []func(error)
+	authInfo       *auth.AuthInfo // auth status from last FetchAuthInfo call
 }
 
 func NewClient(opts ...ClientOption) Client {
@@ -78,6 +85,11 @@ func (c *WSClient) OnError(fn func(error))   { c.onError = append(c.onError, fn)
 
 // Debug reports whether the client is in debug logging mode.
 func (c *WSClient) Debug() bool { return c.debug }
+
+// AuthStatus returns the authentication info from the last Connect() call.
+// Returns nil if Connect() hasn't been called or no session cookies were
+// configured (anonymous connections).
+func (c *WSClient) AuthStatus() *auth.AuthInfo { return c.authInfo }
 
 func (c *WSClient) RegisterSession(id, typ string, onData func(map[string]any)) {
 	c.mu.Lock()
@@ -123,16 +135,29 @@ func (c *WSClient) Connect() error {
 	c.conn = conn
 	c.connected = true
 
-	// Fetch auth token from TradingView page when cookies are present
+	// Fetch auth token from TradingView page when cookies are present.
+	// Always report auth failures to stderr (not just in debug mode) so
+	// agents and users can immediately see when cookies are expired — the
+	// most common cause of silent "study limit" errors.
 	authToken := "unauthorized_user_token"
 	if c.token != "" {
-		if token, err := auth.FetchToken(c.token, c.signature, c.location, c.deviceToken); err == nil && token != "" {
-			authToken = token
+		info := auth.FetchAuthInfo(c.token, c.signature, c.location, c.deviceToken)
+		c.authInfo = &info
+		if info.Error == nil && info.Token != "" {
+			authToken = info.Token
 			if c.debug {
-				log.Printf("[DEBUG] fetched auth_token: %s...", token[:min(20, len(token))])
+				log.Printf("[DEBUG] fetched auth_token: %s...", truncateStr(info.Token, 20))
 			}
-		} else if c.debug {
-			log.Printf("[DEBUG] auth_token fetch failed: %v, using unauthorized", err)
+		} else {
+			// Auth failed — always warn, not just in debug mode.
+			if info.Error != nil {
+				fmt.Fprintf(os.Stderr, "⚠ Authentication failed: %v\n", info.Error)
+				fmt.Fprintf(os.Stderr, "  The WS connection will use an unauthorized token.\n")
+				fmt.Fprintf(os.Stderr, "  TradingView limits unauthorized sessions to 0 studies —\n")
+				fmt.Fprintf(os.Stderr, "  every indicator/skill command will fail with 'study limit'.\n")
+				fmt.Fprintf(os.Stderr, "  Fix: re-extract SESSION/SIGNATURE/DEVICE_T cookies from your\n")
+				fmt.Fprintf(os.Stderr, "  browser (DevTools → Application → Cookies → tradingview.com).\n")
+			}
 		}
 	}
 

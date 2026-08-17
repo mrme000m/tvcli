@@ -308,6 +308,24 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		time.Sleep(200 * time.Millisecond)
 
 		if isStudyLimitError(studyErr) && attempt < maxAttempts {
+			// Check if the root cause is expired/unauthenticated cookies.
+			// When the auth token is "unauthorized_user_token", TradingView
+			// allows 0 studies — every create_study fails with a "maximum
+			// number of studies" error regardless of the actual tier.
+			if authInfo := client.AuthStatus(); authInfo != nil && !authInfo.Authenticated {
+				fmt.Fprintf(os.Stderr, "❌ Study limit hit, but the root cause is EXPIRED COOKIES.\n")
+				fmt.Fprintf(os.Stderr, "  The auth token fetch failed: %v\n", authInfo.Error)
+				fmt.Fprintf(os.Stderr, "  TradingView limits unauthorized sessions to 0 studies.\n")
+				fmt.Fprintf(os.Stderr, "  Retrying will NOT help. Fix:\n")
+				fmt.Fprintf(os.Stderr, "    1. Open https://www.tradingview.com/chart/ in your browser\n")
+				fmt.Fprintf(os.Stderr, "    2. DevTools → Application → Cookies → https://www.tradingview.com\n")
+				fmt.Fprintf(os.Stderr, "    3. Copy sessionid, sessionid_sign, device_t into .env\n")
+				fmt.Fprintf(os.Stderr, "    4. Run: ./tvcli check-auth  (to verify before retrying)\n")
+				chart.RemoveAllStudies()
+				chart.Delete()
+				return nil, fmt.Errorf("auth: cookies expired — re-extract SESSION/SIGNATURE/DEVICE_T (run 'tvcli check-auth' to diagnose)")
+			}
+
 			// Exponential backoff: 5s, 10s, 20s, 40s, 60s (capped).
 			retryDelay := time.Duration(attempt*5) * time.Second
 			if retryDelay > 60*time.Second {
@@ -316,6 +334,9 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 			fmt.Fprintf(os.Stderr, "⚠ Study limit hit (attempt %d/%d). Reconnecting in %v...\n", attempt, maxAttempts, retryDelay)
 			fmt.Fprintf(os.Stderr, "  (This is an account-level limit. Close TradingView charts in\n")
 			fmt.Fprintf(os.Stderr, "   your browser or wait for stale sessions to expire.)\n")
+			if authInfo := client.AuthStatus(); authInfo != nil {
+				fmt.Fprintf(os.Stderr, "  Auth: authenticated=%v plan=%s pro=%v\n", authInfo.Authenticated, authInfo.Plan, authInfo.Pro)
+			}
 			chart.RemoveAllStudies()
 			chart.Delete()
 
@@ -352,6 +373,10 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		}
 
 		if studyErr != nil {
+			// Include auth status in the error for better diagnostics.
+			if authInfo := client.AuthStatus(); authInfo != nil && !authInfo.Authenticated {
+				return nil, fmt.Errorf("study error: %w (root cause: cookies expired — run 'tvcli check-auth')", studyErr)
+			}
 			return nil, fmt.Errorf("study error: %w", studyErr)
 		}
 		break

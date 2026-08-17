@@ -78,7 +78,12 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	if tf == "" {
 		tf = "5m"
 	}
+	limits := config.GetTierLimits()
 	bars := flags.GetInt("bars", 500)
+	if limits.MaxBars > 0 && bars > limits.MaxBars {
+		fmt.Fprintf(env.Stderr, "⚠ Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
+		bars = limits.MaxBars
+	}
 	inputs := c.resolveInputs(flags)
 
 	if flags.Has("schema") {
@@ -95,6 +100,11 @@ func (c *skillCmd) Run(env *cli.Env) error {
 			fmt.Fprintf(env.Stderr, "No schema available for %s (metaInfo had no plots/styles)\n", c.skill.PineID)
 		}
 		return nil
+	}
+
+	// Pre-check auth before running (fail fast on expired cookies).
+	if err := PreCheckAuth(cfg); err != nil {
+		return err
 	}
 
 	start := time.Now()
@@ -299,7 +309,7 @@ func (c *skillCmd) printHelp(env *cli.Env) {
 	fmt.Fprintln(w, "Common Options:")
 	fmt.Fprintln(w, "  --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)")
 	fmt.Fprintln(w, "  --tf 5m                      Timeframe (default: 5m)")
-	fmt.Fprintln(w, "  --bars 500                   Number of bars")
+	fmt.Fprintln(w, "  --bars 500                   Number of bars (auto-capped to tier limit: free=180)")
 	fmt.Fprintln(w, "  --json                       JSON output")
 	fmt.Fprintln(w, "  --agent                      Agent-ready JSON (implies --json)")
 	fmt.Fprintln(w, "  --signals                    Use generic schema-guided signal extractor")

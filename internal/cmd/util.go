@@ -8,7 +8,28 @@ import (
 	"strings"
 
 	"github.com/ch99q/tvcli/internal/config"
+	"github.com/ch99q/tvcli/pkg/tradingview/auth"
 )
+
+// PreCheckAuth verifies TradingView auth cookies before attempting to run a
+// study. Returns an error if cookies are expired, nil if authenticated or no
+// cookies are configured (anonymous mode — fetch works without auth).
+// All study-requiring commands (run, eval, skills) should call this to fail
+// fast with an actionable message instead of silently hitting "study limit".
+func PreCheckAuth(cfg *config.Config) error {
+	if !cfg.HasAuth() {
+		return nil // anonymous mode — some commands work without auth
+	}
+	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken)
+	if !info.Authenticated {
+		fmt.Fprintf(os.Stderr, "❌ Authentication failed: %v\n", info.Error)
+		fmt.Fprintf(os.Stderr, "  TradingView will reject all studies with a 'study limit' error.\n")
+		fmt.Fprintf(os.Stderr, "  Fix: re-extract SESSION/SIGNATURE/DEVICE_T cookies from your browser.\n")
+		fmt.Fprintf(os.Stderr, "  Run 'tvcli check-auth' to diagnose.\n")
+		return fmt.Errorf("auth: cookies expired")
+	}
+	return nil
+}
 
 // Fatal prints a formatted error to stderr and exits 1. Kept as a thin
 // wrapper around os.Exit so command implementations have a familiar name.

@@ -85,6 +85,7 @@ tvcli/
 | `list` | List tracked scripts (local or remote) | Optional |
 | `inputs` | Inspect Pine inputs vs Go-declared inputs | SESSION+SIGNATURE |
 | `skills` | List registered indicator skills | None |
+| `check-auth` | Verify auth cookies & subscription tier (diagnose study-limit errors) | SESSION+SIGNATURE |
 | `clean` | Clean chart sessions to free indicator slots | SESSION+SIGNATURE |
 | `serve` | Start HTTP server for AI agent integration | SESSION+SIGNATURE |
 
@@ -212,6 +213,7 @@ for the full, current subscription feature/price matrix (scraped from
 | `/compile` | POST | Compile Pine Script source |
 | `/fetch` | POST | Fetch OHLCV data |
 | `/clean` | POST | Clean chart sessions |
+| `/check-auth` | GET | Verify auth cookies & subscription tier |
 | `/run` | POST | Compile + run Pine Script |
 
 ## Development

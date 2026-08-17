@@ -10,6 +10,7 @@ import (
 
 	"github.com/ch99q/tvcli/internal/agent"
 	"github.com/ch99q/tvcli/internal/cli"
+	"github.com/ch99q/tvcli/internal/config"
 	"github.com/ch99q/tvcli/pkg/pinefacade"
 )
 
@@ -64,7 +65,12 @@ func (c *universalCmd) Run(env *cli.Env) error {
 		tf = "5m"
 	}
 
+	limits := config.GetTierLimits()
 	bars := flags.GetInt("bars", 500)
+	if limits.MaxBars > 0 && bars > limits.MaxBars {
+		fmt.Fprintf(env.Stderr, "⚠ Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
+		bars = limits.MaxBars
+	}
 	settle := flags.GetInt("settle", 1500)
 	timeout := flags.GetInt("timeout", 120)
 	debug := flags.Has("verbose") || cfg.Debug

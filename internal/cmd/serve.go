@@ -26,11 +26,12 @@ func (c *serveCmd) Run(env *cli.Env) error {
 
 	srv := server.New(c.app.Config)
 	fmt.Fprintf(env.Stderr, "tvcli server endpoints:\n")
-	fmt.Fprintf(env.Stderr, "  GET  /health  — status check\n")
-	fmt.Fprintf(env.Stderr, "  POST /compile — compile Pine script source\n")
-	fmt.Fprintf(env.Stderr, "  POST /fetch   — fetch OHLCV data\n")
-	fmt.Fprintf(env.Stderr, "  POST /clean   — clean chart sessions\n")
-	fmt.Fprintf(env.Stderr, "  POST /run     — compile + run Pine script\n")
+	fmt.Fprintf(env.Stderr, "  GET  /health      — status check (includes auth + tier info)\n")
+	fmt.Fprintf(env.Stderr, "  GET  /check-auth  — verify auth cookies & subscription tier\n")
+	fmt.Fprintf(env.Stderr, "  POST /compile     — compile Pine script source\n")
+	fmt.Fprintf(env.Stderr, "  POST /fetch       — fetch OHLCV data\n")
+	fmt.Fprintf(env.Stderr, "  POST /clean       — clean chart sessions\n")
+	fmt.Fprintf(env.Stderr, "  POST /run         — compile + run Pine script\n")
 	fmt.Fprintf(env.Stderr, "\n")
 	return srv.Serve(addr)
 }

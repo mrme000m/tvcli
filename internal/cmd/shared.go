@@ -44,6 +44,7 @@ func RegisterAll(root *cli.Root, app *App) {
 	root.Add(&inputsCmd{app: app})
 	root.Add(&evalCmd{app: app})
 	root.Add(&cleanCmd{app: app})
+	root.Add(&checkAuthCmd{app: app})
 	root.Add(&serveCmd{app: app})
 	root.Add(&agentCmd{app: app})
 	root.Add(&universalCmd{app: app})

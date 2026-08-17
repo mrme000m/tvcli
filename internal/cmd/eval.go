@@ -283,6 +283,11 @@ func (c *evalCmd) Run(env *cli.Env) error {
 		sch = schema.FromMetaInfo(pineID, metaInfo)
 	}
 
+	// Pre-check auth before running (fail fast on expired cookies).
+	if err := PreCheckAuth(cfg); err != nil {
+		return err
+	}
+
 	// Run via WS.
 	res, err := service.RunScript(context.Background(), cfg, service.RunRequest{
 		PineID:       pineID,

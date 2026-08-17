@@ -84,6 +84,9 @@ Commands:
     --iterations N              Number of cleanup cycles (default 3)
     --delay Ms                  Delay between cycles in ms (default 500)
     --symbol S                  Symbol to use for chart sessions (default BINANCE:BTCUSDT)
+  check-auth                    Verify TradingView auth cookies and subscription tier
+    --json                      JSON output (for agent consumption)
+    Diagnoses expired cookies — the #1 cause of silent "study limit" errors.
   serve [--addr :8765]          Start HTTP server for AI agent integration
     Endpoints: /health /compile /fetch /clean /run
   inputs <pineId|skillName>     Inspect Pine inputs (Pine-actual vs Go-declared)
