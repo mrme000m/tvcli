@@ -19,7 +19,8 @@ __pycache__/
 .crush/
 
 # Editor / agent tool integration (not part of the Go project)
-.agents/
+.agents/*
+!.agents/skills/
 .claude/
 .codex/
 .opencode/
