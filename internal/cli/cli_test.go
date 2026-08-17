@@ -81,6 +81,30 @@ func TestAllCopiesMap(t *testing.T) {
 	}
 }
 
+func TestParseFlagsRepeated(t *testing.T) {
+	// Last-wins for Get, but every occurrence is preserved via GetAll.
+	fs := ParseFlags([]string{"--input", "a=1", "--input", "b=2", "--input=c=3"})
+	if fs.Get("input") != "c=3" {
+		t.Errorf("Get(input) = %q, want last occurrence c=3", fs.Get("input"))
+	}
+	all := fs.GetAll("input")
+	if len(all) != 3 || all[0] != "a=1" || all[1] != "b=2" || all[2] != "c=3" {
+		t.Errorf("GetAll(input) = %v, want [a=1 b=2 c=3]", all)
+	}
+	// Mutating the returned slice must not affect the Flags.
+	all[0] = "X"
+	if fs.GetAll("input")[0] != "a=1" {
+		t.Error("GetAll returned slice is not a copy")
+	}
+	if fs.GetAll("missing") != nil && len(fs.GetAll("missing")) != 0 {
+		t.Error("GetAll(missing) should be empty")
+	}
+	m := fs.AllMulti()
+	if len(m["input"]) != 3 {
+		t.Errorf("AllMulti()[input] = %v, want 3 occurrences", m["input"])
+	}
+}
+
 // stubCmd is a minimal Command for dispatch tests.
 type stubCmd struct {
 	name    string

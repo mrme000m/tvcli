@@ -33,8 +33,10 @@ import (
 // "--input" (unlikely, but safe).
 //
 // Sources, all merged into the returned map (later wins):
-//  1. "--input k=v"  and  "--input k1=v1,k2=v2"   (single flag, comma or = split)
-//  2. "--input.k=v"  dotted form (used by `tv analyze` / `tv agent`)
+//  1. "--input k=v"  and  "--input k1=v1,k2=v2"   (REPEATABLE: every
+//     occurrence is merged, each may itself be a comma-separated list)
+//  2. "--input.k=v"  dotted form (used by `tv analyze` / `tv agent`; also
+//     repeatable — every occurrence of the same dotted key is applied in order)
 //  3. positional "k=v" args after spinePos
 //  4. any other non-reserved "--k=v" flag  (e.g. "--in_1=4", "--length=20")
 func collectInputs(flags cli.Flags, spinePos int, reserved []string) map[string]string {
@@ -54,8 +56,8 @@ func collectInputs(flags cli.Flags, spinePos int, reserved []string) map[string]
 		flagsOut[k] = v
 	}
 
-	// 1. --input key=value (and comma-separated lists)
-	if v := flags.Get("input"); v != "" {
+	// 1. --input key=value (repeatable; each occurrence may be a comma list)
+	for _, v := range flags.GetAll("input") {
 		for _, kv := range strings.Split(v, ",") {
 			if i := strings.Index(kv, "="); i >= 0 {
 				one(strings.TrimSpace(kv[:i]), strings.TrimSpace(kv[i+1:]))
@@ -63,10 +65,12 @@ func collectInputs(flags cli.Flags, spinePos int, reserved []string) map[string]
 		}
 	}
 
-	// 2. --input.k=v dotted form
-	for k, v := range flags.All() {
+	// 2. --input.k=v dotted form (repeatable: apply every occurrence in order)
+	for k, vs := range flags.AllMulti() {
 		if strings.HasPrefix(k, "input.") {
-			one(strings.TrimPrefix(k, "input."), v)
+			for _, v := range vs {
+				one(strings.TrimPrefix(k, "input."), v)
+			}
 		}
 	}
 

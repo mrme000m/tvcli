@@ -14,32 +14,39 @@ import (
 type Flags struct {
 	Positional []string
 	flags      map[string]string
+	multi      map[string][]string // every occurrence, in order (repeatable flags)
 }
 
 // ParseFlags parses args into a Flags. Flags beginning with -- set key/value
 // (either --k=v or --k v); single-char -x is treated the same way. Anything
-// else is positional.
+// else is positional. A repeated flag keeps last-wins semantics for Get but
+// every occurrence is recorded and readable via GetAll, so repeatable flags
+// like --input are never silently dropped.
 func ParseFlags(args []string) Flags {
-	fs := Flags{flags: make(map[string]string)}
+	fs := Flags{flags: make(map[string]string), multi: make(map[string][]string)}
+	set := func(key, val string) {
+		fs.flags[key] = val
+		fs.multi[key] = append(fs.multi[key], val)
+	}
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		if strings.HasPrefix(a, "--") {
 			key := strings.TrimPrefix(a, "--")
 			if idx := strings.Index(key, "="); idx >= 0 {
-				fs.flags[key[:idx]] = key[idx+1:]
+				set(key[:idx], key[idx+1:])
 			} else if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				fs.flags[key] = args[i+1]
+				set(key, args[i+1])
 				i++
 			} else {
-				fs.flags[key] = "true"
+				set(key, "true")
 			}
 		} else if strings.HasPrefix(a, "-") && len(a) == 2 {
 			key := string(a[1])
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				fs.flags[key] = args[i+1]
+				set(key, args[i+1])
 				i++
 			} else {
-				fs.flags[key] = "true"
+				set(key, "true")
 			}
 		} else {
 			fs.Positional = append(fs.Positional, a)
@@ -55,6 +62,29 @@ func (fs Flags) Has(key string) bool {
 
 func (fs Flags) Get(key string) string {
 	return fs.flags[key]
+}
+
+// GetAll returns every occurrence of a repeated flag in argument order
+// (nil when absent). Get returns only the last occurrence; use GetAll for
+// flags that are documented as repeatable (e.g. --input k=v --input k2=v2).
+func (fs Flags) GetAll(key string) []string {
+	vs := fs.multi[key]
+	out := make([]string, len(vs))
+	copy(out, vs)
+	return out
+}
+
+// AllMulti returns a copy of the full occurrence map (key → values in
+// argument order). Use it when consuming repeatable dotted flags such as
+// --input.k=v passed more than once.
+func (fs Flags) AllMulti() map[string][]string {
+	out := make(map[string][]string, len(fs.multi))
+	for k, vs := range fs.multi {
+		cp := make([]string, len(vs))
+		copy(cp, vs)
+		out[k] = cp
+	}
+	return out
 }
 
 func (fs Flags) GetInt(key string, def int) int {

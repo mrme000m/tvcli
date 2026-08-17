@@ -119,4 +119,5 @@ var ReservedRunKeys = []string{
 	"force-cleanup", "cleanup", "raw", "raw-out", "signals", "agent",
 	"settle", "schema", "multi-run", "sweep",
 	"persistent", "loop",
+	"allow-private", "verify-access",
 }

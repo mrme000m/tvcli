@@ -57,4 +57,26 @@ func TestCollectInputs(t *testing.T) {
 	if len(got) != 0 {
 		t.Errorf("pineId should not be an input: %v", got)
 	}
+
+	// 7. repeated --input flags ALL apply (regression: the flag parser used
+	// to keep only the last occurrence, silently dropping earlier ones)
+	fs = cli.ParseFlags([]string{"PUB;x", "--input", "in_1=4", "--input", "in_2=8"})
+	got = collectInputs(fs, 1, reserved)
+	if got["in_1"] != "4" || got["in_2"] != "8" {
+		t.Errorf("repeated --input: got %v", got)
+	}
+
+	// 8. repeated --input mixed with comma lists, later key wins on conflict
+	fs = cli.ParseFlags([]string{"PUB;x", "--input=in_0=3,in_2=A", "--input", "in_2=B"})
+	got = collectInputs(fs, 1, reserved)
+	if got["in_0"] != "3" || got["in_2"] != "B" {
+		t.Errorf("repeated+comma --input: got %v", got)
+	}
+
+	// 9. repeated dotted form applies every occurrence in order
+	fs = cli.ParseFlags([]string{"PUB;x", "--input.lookback=50", "--input.lookback=99"})
+	got = collectInputs(fs, 1, reserved)
+	if got["lookback"] != "99" {
+		t.Errorf("repeated dotted input: got %v", got)
+	}
 }
