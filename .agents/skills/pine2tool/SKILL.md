@@ -31,6 +31,7 @@ skill stub.
 
 - `.env` with `SESSION`, `SIGNATURE`, `DEVICE_T` (and `TV_USER` for writes).
 - A built binary: `go build -o tvcli ./cmd/tvcli` (run from the repo/package root).
+- `python3` installed (used by the orchestrator to sanitize raw JSON output).
 - `TV_TIER` matching the account to cap bars/studies appropriately.
 
 ## Quick workflow (the correct order)
@@ -62,7 +63,7 @@ Each run writes, under `--out` (or `skill_work/pine2tool_<slug>`):
 | `<slug>.json` | Agent-ready v2 envelope (market, signals, levels, graphics, summary) |
 | `<slug>.inputs.json` | The script's canonical Pine input IDs/types/defaults from metaInfo |
 | `<slug>.source.pine` | The downloaded Pine source (if a Pine ID was given) |
-| `<slug>.raw.json` | Raw uncompressed periods + graphic map + strategy report |
+| `<slug>.raw.json` | Raw uncompressed periods + graphic map + strategy report *(emitted only for local `.pine` sources; Pine-ID runs rely on the `.json` analysis envelope for graphic/summary data)* |
 | `<slug>.SKILL.md` | A reusable skill doc describing this script as an analysis tool |
 | `<slug>.skill.yaml` | A registrable skill definition (name, pineId, inputs, presets) |
 
@@ -73,8 +74,10 @@ Each run writes, under `--out` (or `skill_work/pine2tool_<slug>`):
 > `tv eval --signals --agent --json`, which emits the same envelope at the **top
 > level** (`Status / AgentContext / Market / Structure / Opportunities /
 > Narrative / Conformance / SchemaVersion`) — identical to the skill command
-> output. Raw `periods`+`graphic` and canonical schema inputs are always in
-> `<slug>.raw.json` / `<slug>.inputs.json` regardless of source.
+> output. Raw `periods`+`graphic` are captured in `<slug>.raw.json` for local
+> `.pine` sources; Pine-ID runs do not write a separate raw file because `tv
+> analyze` already emits the `graphic` section in `<slug>.json`. Canonical
+> schema inputs are always written to `<slug>.inputs.json`.
 
 ## Custom inputs — spellings that all work now
 
@@ -97,7 +100,7 @@ To discover the canonical IDs first:
 
 ```bash
 tvcli inputs "PUB;3b3ebba156574e058cc8ae73dc5c7fa2" --raw --json
-tvcli analyze --list-inputs "PUB;3b3ebba156574e058cc8ae73dc5c7fa2" --json
+tvcli analyze "PUB;3b3ebba156574e058cc8ae73dc5c7fa2" --list-inputs --json
 ```
 
 ## Searching for a script
@@ -181,6 +184,22 @@ becomes `tvcli <name> --symbol … --tf …`.
 > path fetches the compiled IL blob from Pine Facade — the script must exist on
 > TradingView's servers under that Pine ID.
 
+## Validation
+
+Healthy checks that don't require live TradingView data:
+
+| Command | Exit code | Notes |
+|--------|----------|----------|
+| `./tvcli --help` | 0 | Main CLI help; lists `analyze`, `eval`, `inputs`, `skills`, etc. |
+| `./tvcli skills --json` | 0 | Returns 18 registered skills; `pine2tool` is a shell-wrapper skill, not in this list. |
+| `./tvcli smc --help` | 0 | Skill-specific help works for built-in skills. |
+| `./tvcli xau-scalp --help` | 0 | Private skill requires `--allow-private` at runtime, but help works. |
+| `./tvcli analyze --help` | 0 | Confirms `analyze` exists and documents `--input.key`, `--out`, etc. |
+| `./tvcli eval test_simple.pine --compile-only` | 0 | Compile-only syntax check; note the file must come *before* the flag. (Not executed in this audit because eval reaches TV.) |
+| `./tvcli eval --compile-only test_simple.pine` | 1 | **Fails**: eval requires the file path before options. (Not executed in this audit.) |
+| `./tvcli eval test_simple.pine --input.lookback=50` | 0 | Dotted input override is accepted. (Not executed in this audit.) |
+| `go build -o /tmp/tvcli ./cmd/tvcli` | 0 | Project builds cleanly from the repo root. |
+
 ## Gotchas
 
 - **Free tier** caps bars at **180** (not 365 — that's the Essential tier), limits
@@ -235,7 +254,7 @@ variables and pivot functions, then re-test.
 Pine Script v5 requires the `ta.` namespace prefix for all technical analysis
 functions: `ta.sma()`, `ta.atr()`, `ta.rsi()`, `ta.ema()`, `ta.cross()`, etc.
 The compiler will reject bare `atr()` or `sma()` calls. Always use
-`tvcli eval --compile-only <file.pine>` to check syntax before running.
+`tvcli eval <file.pine> --compile-only` to check syntax before running.
 
 ### Consolidating multiple indicators into one script
 

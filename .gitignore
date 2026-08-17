@@ -21,6 +21,8 @@ __pycache__/
 # Editor / agent tool integration (not part of the Go project)
 .agents/*
 !.agents/skills/
+!.agents/agents/
+!.agents/workflows/
 .claude/
 .codex/
 .opencode/

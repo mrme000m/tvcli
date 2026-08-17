@@ -22,6 +22,7 @@ Each file documents one registered `tvcli <skill>` command: its Pine Script, inp
 | [swingarm](swingarm.md) | Trend + Risk | `ATRPeriod`, `ATRFactor` |
 | [ust](ust.md) | Trend | `atrPeriod1/2`, `multiplier1/2` |
 | [vp](vp.md) | Volume Profile | `lookback`, `percentile` |
+| [vp-pro](vp-pro.md) | Volume Profile | `mode`, `numBars`/`anchorOffset`, `rows`, `valueAreaPct` |
 | [xau-trend](xau-trend.md) | Trend + Volatility | `emaShort/Long`, `bollingerMult` |
 
 ## Limited Skills (5)

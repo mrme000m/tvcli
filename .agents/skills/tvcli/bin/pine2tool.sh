@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
     --out) OUT_DIR="$2"; shift 2 ;;
     --input) INPUTS+=("$2"); shift 2 ;;
     --input=*) INPUTS+=("${1#--input=}"); shift ;;
+    -h|--help) echo "usage: pine2tool.sh <pineId|local.pine> [--input k=v[,k2=v2]] [--symbol X] [--tf T] [--out DIR]"; exit 0 ;;
     *) POS+=("$1"); shift ;;
   esac
 done
@@ -95,7 +96,7 @@ fi
 # (internal/cmd/inputs_util.go), so pass each user-specified list as ONE flag.
 # Multiple "--input" flags would collapse in the flag map (only the last wins).
 INPUT_FLAGS=()
-for kv in "${INPUTS[@]}"; do
+for kv in ${INPUTS[@]+"${INPUTS[@]}"}; do
   [ -n "$kv" ] && INPUT_FLAGS+=("--input" "$kv")
 done
 

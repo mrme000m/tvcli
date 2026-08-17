@@ -81,7 +81,7 @@ tvcli run USER;abc123 --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals  # fre
 │   ├── study.go             # Study creation, data processing, graphics, strategy reports
 │   ├── indicator.go         # PineIndicator, BuiltinIndicator, input handling
 │   └── protocol.go          # ~m~ framing parser/formatter
-└── skills/pinescript/       # THIS SKILL (progressive reference)
+└── .agents/skills/tvcli/  # THIS SKILL (tvcli + progressive Pine reference)
 ```
 
 ---

@@ -86,10 +86,10 @@ tvcli serve --addr :8765                       # HTTP server for agents
 
 ### Indicator Skills (Built-in)
 ```bash
-tv sniper --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals
-tv smc --symbol BINANCE:BTCUSDT --tf 1h --json --agent
-tv xau-scalp --symbol OANDA:XAUUSD --tf 1H --bars 180 --json --agent --allow-private
-tv smc --help                                  # Skill-specific help
+tvcli sniper --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals
+tvcli smc --symbol BINANCE:BTCUSDT --tf 1h --json --agent
+tvcli xau-scalp --symbol OANDA:XAUUSD --tf 1H --bars 180 --json --agent --allow-private
+tvcli smc --help                             # Skill-specific help
 ```
 
 > **Private scripts** (USER;…): add `--allow-private` to bypass the private-script guard.

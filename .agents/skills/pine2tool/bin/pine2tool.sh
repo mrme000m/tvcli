@@ -19,6 +19,7 @@ SELF_DIR="$(cd "$(dirname "$0")" && pwd)"
 WS="$(cd "$SELF_DIR/../../../.." && pwd)"       # repo root: /Volumes/ExMac/code/tradingview/go
 TVCLI="${TVCLI:-$WS/tvcli}"
 [ -x "$TVCLI" ] || { echo "❌ tvcli not built. run:  go build -o tvcli ./cmd/tvcli  (in $WS)"; exit 1; }
+command -v python3 >/dev/null 2>&1 || { echo "❌ python3 is required by pine2tool.sh"; exit 1; }
 
 # ---- parse args ----------------------------------------------------------
 TARGET=""
@@ -34,6 +35,7 @@ while [ $# -gt 0 ]; do
     --out) OUT_DIR="$2"; shift 2 ;;
     --input) INPUTS+=("$2"); shift 2 ;;
     --input=*) INPUTS+=("${1#--input=}"); shift ;;
+    -h|--help) echo "usage: pine2tool.sh <pineId|local.pine> [--input k=v[,k2=v2]] [--symbol X] [--tf T] [--out DIR]"; exit 0 ;;
     *) POS+=("$1"); shift ;;
   esac
 done
@@ -80,9 +82,7 @@ echo "▶ slug: $SLUG"
 # once the source is run (the eval flow saves+deletes a temp script).
 INPUT_JSON="$OUT_DIR/$SLUG.inputs.json"
 if [ "$IS_LOCAL" -eq 1 ]; then
-  cat > "$INPUT_JSON" <<'IZ'
-{"note": "local .pine source: introspect inputs by running the script via `tvcli eval <file> --raw` (the temp script carries metaInfo), or register it and use `tvcli inputs <skillName>`.", "source": "'"$SRC_FILE"'" }
-IZ
+  python3 -c 'import json,sys; json.dump({"note":"local .pine source: introspect inputs by running the script via `tvcli eval <file> --raw` (the temp script carries metaInfo), or register it and use `tvcli inputs <skillName>`.","source":sys.argv[1]}, open(sys.argv[2],"w"))' "$SRC_FILE" "$INPUT_JSON"
   echo "▶ inputs (local placeholder): $INPUT_JSON"
 else
   "$TVCLI" inputs "$PINE_ID" --raw --json > "$INPUT_JSON" 2>/dev/null \
@@ -95,7 +95,7 @@ fi
 # (internal/cmd/inputs_util.go), so pass each user-specified list as ONE flag.
 # Multiple "--input" flags would collapse in the flag map (only the last wins).
 INPUT_FLAGS=()
-for kv in "${INPUTS[@]}"; do
+for kv in ${INPUTS[@]+"${INPUTS[@]}"}; do
   [ -n "$kv" ] && INPUT_FLAGS+=("--input" "$kv")
 done
 
@@ -108,13 +108,13 @@ if [ "$IS_LOCAL" -eq 1 ]; then
   # Pre-compile check to catch syntax errors early (Pine v5 needs ta. prefix)
   "$TVCLI" eval "$SRC_FILE" --compile-only 2>&1 | head -5
   "$TVCLI" eval "$SRC_FILE" --raw --symbol "$SYMBOL" --tf "$TF" \
-    "${INPUT_FLAGS[@]}" > /tmp/p2t_raw_$$.out 2>/tmp/p2t_raw_$$.err
+    "${INPUT_FLAGS[@]+"${INPUT_FLAGS[@]}"}" > /tmp/p2t_raw_$$.out 2>/tmp/p2t_raw_$$.err
   # strip the leading informational line(s) before the JSON document
   python3 -c "import sys,re;d=sys.stdin.read();i=d.find('{');print(d[i:] if i>=0 else '{}')" \
     < /tmp/p2t_raw_$$.out > "$RAW_JSON" || echo '{}' > "$RAW_JSON"
   echo "▶ raw: $RAW_JSON"
   "$TVCLI" eval "$SRC_FILE" --signals --agent --json --symbol "$SYMBOL" --tf "$TF" \
-    "${INPUT_FLAGS[@]}" 2>/dev/null > /tmp/p2t_agent_$$.out \
+    "${INPUT_FLAGS[@]+"${INPUT_FLAGS[@]}"}" 2>/dev/null > /tmp/p2t_agent_$$.out \
     && python3 -c "import sys;d=sys.stdin.read();i=d.find('{');print(d[i:] if i>=0 else '{}')" \
        < /tmp/p2t_agent_$$.out > "$ANALYSIS_JSON" \
     && echo "▶ analysis: $ANALYSIS_JSON" \
@@ -122,11 +122,12 @@ if [ "$IS_LOCAL" -eq 1 ]; then
 else
   echo "▶ analyzing $PINE_ID with inputs: ${INPUTS[*]:-<defaults>}"
   "$TVCLI" analyze "$PINE_ID" --json --symbol "$SYMBOL" --tf "$TF" \
-    "${INPUT_FLAGS[@]}" --out "$ANALYSIS_JSON" 2>/dev/null \
+    "${INPUT_FLAGS[@]+"${INPUT_FLAGS[@]}"}" --out "$ANALYSIS_JSON" 2>/dev/null \
     && echo "▶ analysis: $ANALYSIS_JSON"
 fi
 
 # ---- 5. emit reusable skill stub ----------------------------------------
+SKILL_NAME="${SLUG//-/_}"
 SKILL_MD="$OUT_DIR/$SLUG.SKILL.md"
 SKILL_YAML="$OUT_DIR/$SLUG.skill.yaml"
 cat > "$SKILL_MD" <<EOF
@@ -136,10 +137,11 @@ $([ "$IS_LOCAL" -eq 1 ] && echo "Source: local \`$SRC_FILE\`" || echo "Pine ID: 
 Symbol: \`$SYMBOL\` · Timeframe: \`$TF\`
 
 Reusable analysis artifacts in this directory. To make this a first-class
-\`tvcli\` skill, register a \`skill.Skill\` in \`internal/skill/registry.go\`
-using \`$SLUG.skill.yaml\` and add a doc under \`docs/skills/\`.
+\`tvcli\` skill, create \`internal/skill/parsers/$SLUG.go\` with
+\`func init() { skill.Register(${SKILL_NAME}Skill) }\` (using \`$SLUG.skill.yaml\`
+as a skeleton), add a human doc under \`docs/skills/$SLUG.md\`, and add the
+skill to the built-in list if desired.
 EOF
-SKILL_NAME="${SLUG//-/_}"
 printf 'name: %s\npineId: %s\nsource: %s\nsymbol: %s\ntimeframe: %s\ninputs:\n' \
   "$SKILL_NAME" "$PINE_ID" "$([ "$IS_LOCAL" -eq 1 ] && echo "$SRC_FILE" || echo "PUB")" \
   "$SYMBOL" "$TF" > "$SKILL_YAML"
@@ -166,7 +168,7 @@ echo ""
 echo "============================================================"
 echo "✅ Done. Analysis tool artifacts in: $OUT_DIR"
 echo "   agent-ready JSON : $ANALYSIS_JSON"
-echo "   raw             : $RAW_JSON"
+[ "$IS_LOCAL" -eq 1 ] && echo "   raw             : $RAW_JSON"
 echo "   inputs          : $INPUT_JSON"
 echo "   reusable skill  : $SKILL_MD  +  $SKILL_YAML"
 echo "============================================================"

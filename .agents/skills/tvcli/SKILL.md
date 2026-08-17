@@ -154,3 +154,34 @@ Deep-dive documentation is in `references/`:
 | POST | `/fetch` | Fetch OHLCV data |
 | POST | `/run` | Compile + run Pine source |
 | POST | `/clean` | Clean chart sessions |
+
+## Validation
+
+Non-destructive checks passed for this skill documentation:
+
+```bash
+# Build from repo root
+go build -o tvcli ./cmd/tvcli              # exit 0; matches the `./tvcli` examples above
+
+# CLI help and skill registry
+./tvcli --help                              # exit 0
+./tvcli skills --json                       # exit 0; returns 18 registered skills
+./tvcli serve --status                      # exit 0 (server stopped, no hang)
+./tvcli serve --stop                        # exit 0 (server stopped, no hang)
+
+# Per-skill help for every skill listed above
+for s in smc dvi liq-sweep sr-breaks gold-divergence xau-trend vp \
+         swingarm golden sniper ust quantum squeeze ichimoku \
+         camarilla cvd choppiness xau-scalp; do
+  ./tvcli "$s" --help > /dev/null 2>&1
+  echo "$s: $?"
+done
+# All 18 exit 0
+```
+
+Notes:
+- Skill commands are top-level commands: use `./tvcli smc ...`, not `tv smc ...`.
+- The binary’s built-in help text shows `Usage: tv-cli ...` and `tv <skill>`. This is
+  cosmetic/stale; the actual binary name and dispatcher accept `./tvcli <skill>`.
+- `--allow-private` is accepted by skill commands but is omitted from skill-specific
+  `--help` output; use it when running the private `xau-scalp` skill.

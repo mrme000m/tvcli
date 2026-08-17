@@ -8,7 +8,7 @@ around the `tvcli` Go CLI. It is packaged for agent consumption two ways:
 
    | Skill | Use it for |
    |-------|-----------|
-   | `tvcli` | Running any of the 18 built-in indicator skills, `eval`/`run` of arbitrary Pine source, the async HTTP server (`serve --daemon`, `:8765`), free-tier limits, and progressive Pine Script v5 reference docs under `references/pinescript/`. |
+   | `tvcli` | Running any of the 19 built-in indicator skills (incl. `vp-pro`), `eval`/`run` of arbitrary Pine source, the async HTTP server (`serve --daemon`, `:8765`), free-tier limits, and progressive Pine Script v5 reference docs under `references/pinescript/`. |
    | `pine2tool` | Turning any `PUB;…`/`USER;…` ID or local `.pine` file into a reusable structured analysis tool + registrable skill stub. |
    | `openknowledge` | Reading/writing the `Wiki/` knowledge base via the `openknowledge` CLI. |
 

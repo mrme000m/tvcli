@@ -1,0 +1,160 @@
+//@version=5
+// VP Pro — Fixed-Range + Anchored Volume Profile
+// Consolidates fixed-range and anchored volume profile in one script.
+// Algorithm adapted from LonesomeTheBlue "Volume Profile / Fixed Range" (MPL-2.0)
+// Anchored semantics (anchor distance) inspired by DGT "Anchored Volume Profile".
+indicator('VP Pro — Fixed + Anchored Volume Profile', 'VPPRO', overlay=true, max_boxes_count=500, max_bars_back=501)
+
+// ---- Inputs -------------------------------------------------------------
+mode        = input.string('Fixed Range', 'Mode', options=['Fixed Range', 'Anchored'], group='Profile')
+num_bars    = input.int(150, 'Fixed Range Bars', minval=5, maxval=500, group='Profile')
+anchor_off  = input.int(60, 'Anchor Offset (bars back)', minval=5, maxval=500, group='Profile')
+rows        = input.int(24, 'Rows', minval=5, maxval=100, group='Profile')
+va_pct      = input.float(70.0, 'Value Area %', minval=0, maxval=100, group='Profile')
+
+show_profile = input.bool(true, 'Show Volume Profile', group='Display')
+show_poc    = input.bool(true, 'Show POC', group='Display')
+show_va     = input.bool(true, 'Show Value Area (VAH/VAL)', group='Display')
+show_lbl    = input.bool(true, 'Show POC/VAH/VAL Labels', group='Display')
+
+up_col     = input.color(color.new(color.blue, 70),   'Up Volume Color', group='Colors')
+dn_col     = input.color(color.new(color.orange, 70), 'Down Volume Color', group='Colors')
+va_up_col  = input.color(color.new(color.blue, 20),   'VA Up Color', group='Colors')
+va_dn_col  = input.color(color.new(color.orange, 20), 'VA Down Color', group='Colors')
+poc_col    = input.color(color.red, 'POC Color', group='Colors')
+
+// ---- Range / bins -------------------------------------------------------
+// Clamp the lookback to available history: beyond bar_index the history
+// references (close[bars], volume[bars], ...) are na and would silently
+// contribute 0 volume, skewing the profile toward recent rows.
+bbars = math.min(mode == 'Fixed Range' ? num_bars : anchor_off, bar_index + 1)
+top   = ta.highest(bbars)
+bot   = ta.lowest(bbars)
+dist  = (top - bot) / 500
+step  = (top - bot) / rows
+
+levels = array.new_float(rows + 1)
+for x = 0 to rows
+    array.set(levels, x, bot + step * x)
+
+get_vol(y11, y12, y21, y22, height, vol) =>
+    nz(math.max(math.min(math.max(y11, y12), math.max(y21, y22)) - math.max(math.min(y11, y12), math.min(y21, y22)), 0) * vol / height)
+
+var poc_level = 0.0
+var vah_level = 0.0
+var val_level = 0.0
+
+if barstate.islast
+    // allocate each candle's volume into rows (body / upper wick / lower wick), split up vs down
+    volumes = array.new_float(rows * 2, 0.0)
+    for bars = 0 to bbars - 1
+        body_top   = math.max(close[bars], open[bars])
+        body_bot   = math.min(close[bars], open[bars])
+        itsgreen   = close[bars] >= open[bars]
+        topwick    = high[bars] - body_top
+        bottomwick = body_bot - low[bars]
+        body       = body_top - body_bot
+        denom      = 2 * topwick + 2 * bottomwick + body
+        bodyvol     = body       * nz(volume[bars]) / denom
+        topwickvol  = 2 * topwick * nz(volume[bars]) / denom
+        bottomwickvol = 2 * bottomwick * nz(volume[bars]) / denom
+        for x = 0 to rows - 1
+            array.set(volumes, x, array.get(volumes, x) + (itsgreen ? get_vol(array.get(levels, x), array.get(levels, x + 1), body_bot, body_top, body, bodyvol) : 0.0) + get_vol(array.get(levels, x), array.get(levels, x + 1), body_top, high[bars], topwick, topwickvol) / 2 + get_vol(array.get(levels, x), array.get(levels, x + 1), body_bot, low[bars], bottomwick, bottomwickvol) / 2)
+            array.set(volumes, x + rows, array.get(volumes, x + rows) + (itsgreen ? 0.0 : get_vol(array.get(levels, x), array.get(levels, x + 1), body_bot, body_top, body, bodyvol)) + get_vol(array.get(levels, x), array.get(levels, x + 1), body_top, high[bars], topwick, topwickvol) / 2 + get_vol(array.get(levels, x), array.get(levels, x + 1), body_bot, low[bars], bottomwick, bottomwickvol) / 2)
+
+    totalvols = array.new_float(rows, 0.0)
+    for x = 0 to rows - 1
+        array.set(totalvols, x, array.get(volumes, x) + array.get(volumes, x + rows))
+
+    int poc = array.indexof(totalvols, array.max(totalvols))
+
+    // value area: expand from POC until va_pct% of total volume is captured
+    totalmax = array.sum(totalvols) * va_pct / 100.0
+    va_total = array.get(totalvols, poc)
+    int up   = poc
+    int down = poc
+    for x = 0 to rows - 1
+        if va_total >= totalmax
+            break
+        uppervol = up < rows - 1 ? array.get(totalvols, up + 1) : 0.0
+        lowervol = down > 0 ? array.get(totalvols, down - 1) : 0.0
+        if uppervol == 0.0 and lowervol == 0.0
+            break
+        if uppervol >= lowervol
+            va_total += uppervol
+            up += 1
+        else
+            va_total += lowervol
+            down -= 1
+
+    maxvol = math.max(array.max(totalvols), 0.000001)
+    for x = 0 to rows * 2 - 1
+        array.set(volumes, x, array.get(volumes, x) * bbars / (3 * maxvol))
+
+    anchor_bar = bar_index - bbars + 1
+
+    // draw profile rows (up on the left, down stacked right)
+    var vol_bars = array.new_box(rows * 2, na)
+    if show_profile
+        for x = 0 to rows - 1
+            box.delete(array.get(vol_bars, x))
+            box.delete(array.get(vol_bars, x + rows))
+            array.set(vol_bars, x, box.new(anchor_bar, array.get(levels, x + 1) - dist, anchor_bar + math.round(array.get(volumes, x)), array.get(levels, x) + dist, border_width=0, bgcolor=x >= down and x <= up ? va_up_col : up_col))
+            array.set(vol_bars, x + rows, box.new(anchor_bar + math.round(array.get(volumes, x)), array.get(levels, x + 1) - dist, anchor_bar + math.round(array.get(volumes, x)) + math.round(array.get(volumes, x + rows)), array.get(levels, x) + dist, border_width=0, bgcolor=x >= down and x <= up ? va_dn_col : dn_col))
+    else
+        for x = 0 to rows - 1
+            box.delete(array.get(vol_bars, x))
+            box.delete(array.get(vol_bars, x + rows))
+            array.set(vol_bars, x, na)
+            array.set(vol_bars, x + rows, na)
+
+    poc_level := (array.get(levels, poc) + array.get(levels, poc + 1)) / 2
+    vah_level := array.get(levels, up + 1)
+    val_level := array.get(levels, down)
+
+    var line poc_line = na
+    if show_poc
+        line.delete(poc_line)
+        poc_line := line.new(anchor_bar, poc_level, anchor_bar + 1, poc_level, extend=extend.right, color=poc_col, width=2)
+    else
+        line.delete(poc_line)
+        poc_line := na
+
+    var line vah_line = na
+    var line val_line = na
+    if show_va
+        line.delete(vah_line)
+        line.delete(val_line)
+        vah_line := line.new(anchor_bar, vah_level, anchor_bar + 1, vah_level, extend=extend.right, color=color.gray, width=1, style=line.style_dashed)
+        val_line := line.new(anchor_bar, val_level, anchor_bar + 1, val_level, extend=extend.right, color=color.gray, width=1, style=line.style_dashed)
+    else
+        line.delete(vah_line)
+        line.delete(val_line)
+        vah_line := na
+        val_line := na
+
+    var label poc_lbl = na
+    var label vah_lbl = na
+    var label val_lbl = na
+    if show_lbl
+        label.delete(poc_lbl)
+        label.delete(vah_lbl)
+        label.delete(val_lbl)
+        poc_lbl := label.new(bar_index + 12, poc_level, text='POC ' + str.tostring(math.round_to_mintick(poc_level)), style=label.style_label_left, color=color.new(poc_col, 10), textcolor=color.white, size=size.small)
+        vah_lbl := label.new(bar_index + 12, vah_level, text='VAH ' + str.tostring(math.round_to_mintick(vah_level)), style=label.style_label_left, color=color.new(color.gray, 10), textcolor=color.white, size=size.small)
+        val_lbl := label.new(bar_index + 12, val_level, text='VAL ' + str.tostring(math.round_to_mintick(val_level)), style=label.style_label_left, color=color.new(color.gray, 10), textcolor=color.white, size=size.small)
+    else
+        label.delete(poc_lbl)
+        label.delete(vah_lbl)
+        label.delete(val_lbl)
+        poc_lbl := na
+        vah_lbl := na
+        val_lbl := na
+
+// ---- numeric signal plots (last bar only) ------------------------------
+plot(barstate.islast ? poc_level : na, 'POC', color=poc_col, linewidth=2)
+plot(barstate.islast ? vah_level : na, 'VAH', color=color.gray, linewidth=1)
+plot(barstate.islast ? val_level : na, 'VAL', color=color.gray, linewidth=1)
+// Ungated, non-displayed Close plot so parsers can compute price-relative
+// signals (distances to POC/VAH/VAL, bias) without a separate OHLCV fetch.
+plot(close, 'Close', display=display.none)

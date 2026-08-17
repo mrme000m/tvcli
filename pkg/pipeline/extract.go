@@ -834,6 +834,9 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 
 		case "dwgboxes":
 			counts["box"] += len(items)
+			// Stacked boxes (e.g. volume-profile up/down rows) share exact price
+			// edges; dedupe by value so levels isn't flooded with duplicates.
+			seenBoxEdge := make(map[float64]bool)
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
@@ -849,16 +852,22 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 				if y1 > 0 || y2 > 0 {
 					high := math.Max(y1, y2)
 					low := math.Min(y1, y2)
-					levels = append(levels, Level{
-						Field: "dwgboxes_top",
-						Kind:  "resistance",
-						Value: high,
-					})
-					levels = append(levels, Level{
-						Field: "dwgboxes_bottom",
-						Kind:  "support",
-						Value: low,
-					})
+					if !seenBoxEdge[high] {
+						seenBoxEdge[high] = true
+						levels = append(levels, Level{
+							Field: "dwgboxes_top",
+							Kind:  "resistance",
+							Value: high,
+						})
+					}
+					if !seenBoxEdge[low] {
+						seenBoxEdge[low] = true
+						levels = append(levels, Level{
+							Field: "dwgboxes_bottom",
+							Kind:  "support",
+							Value: low,
+						})
+					}
 				}
 			}
 

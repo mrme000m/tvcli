@@ -94,20 +94,20 @@ func signalsToAgent(signals *pipeline.Signals, workflow, symbol, tf string, dura
 	return generic.ToAgent(result, symbol, tf, durationMs)
 }
 
-// pickLastPrice heuristically chooses a price-like value from the extracted
-// signals payload for the agent-ready envelope.
+// pickLastPrice chooses the market price from the extracted signals payload
+// for the agent-ready envelope.
+//
+// Only a field literally named Close/close is trustworthy: every other
+// price-classified plot is a study output (VAH, bands, SuperTrend lines,
+// ...), and reporting it as market.lastPrice fabricates a price. When no
+// Close plot exists we leave lastPrice nil instead of guessing — callers that
+// need a price for such scripts back-fill it from OHLCV (see skillcmd.go).
 func pickLastPrice(signals *pipeline.Signals) any {
-	for f, class := range signals.Classifications {
-		if class == pipeline.ClassPrice {
-			if v, ok := signals.Last[f]; ok {
+	for f, v := range signals.Last {
+		if strings.EqualFold(f, "close") {
+			if fv, ok := v.(float64); ok && fv > 0 && fv < 1e50 {
 				return v
 			}
-		}
-	}
-	for f, v := range signals.Last {
-		lower := strings.ToLower(f)
-		if strings.Contains(lower, "close") || strings.Contains(lower, "price") || strings.Contains(lower, "last") {
-			return v
 		}
 	}
 	return nil

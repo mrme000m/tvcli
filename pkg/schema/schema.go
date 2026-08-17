@@ -537,6 +537,17 @@ func buildPlotDefFromMap(index int, pMap map[string]any, schema *ScriptSchema) P
 			pd.Name = pd.ID
 		}
 	}
+	// Colorer plots share their parent plot's style title, which collides with
+	// the data plot's name in field maps and PlotByName lookups (the colorer's
+	// palette index then overwrites the real value). Suffix the name like the
+	// service-layer buildPlotsMap does (parent + "_" + type) and mark the plot
+	// as a colorer so classification treats it as style, not data.
+	if pd.PlotType == "colorer" || pd.PlotType == "bg_colorer" {
+		pd.IsColorer = true
+		if pd.Name != "" {
+			pd.Name = pd.Name + "_" + pd.PlotType
+		}
+	}
 	applyPlotProperties(&pd, pMap, schema)
 	return pd
 }
