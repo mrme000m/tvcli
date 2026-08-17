@@ -7,9 +7,9 @@
 ## Binary Location
 
 ```bash
-/Volumes/ExMac/code/tradingview/go/tvcli      # Pre-compiled
-# Or build:
-cd /Volumes/ExMac/code/tradingview/go && go build -o tvcli ./cmd/tvcli
+./tvcli                              # Pre-compiled, at the repo/package root
+# Or build (from the repo/package root):
+go build -o tvcli ./cmd/tvcli
 ```
 
 ---

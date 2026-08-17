@@ -252,6 +252,5 @@ skills/pinescript/       # THIS SKILL
 ## Resources
 
 - **Pine Script Reference (v6 is current; v5 still supported):** https://www.tradingview.com/pine-script-docs
-- **tvcli Source:** `/Volumes/ExMac/code/tradingview/go/`
-- **Index.md:** `/Volumes/ExMac/code/tradingview/Index.md` (project inventory)
+- **tvcli Source:** the repo/package root containing this skill (`cmd/`, `internal/`, `pkg/`)
 - **Go Docs:** `go doc github.com/ch99q/tvcli/...`

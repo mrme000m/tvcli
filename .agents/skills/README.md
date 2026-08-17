@@ -27,6 +27,13 @@ pi install git:github.com/ch99q/tvcli-skills
 
 ### Use with any Agent Skills-compatible harness
 
-Skills in `.agents/skills/` are auto-discovered by any harness that supports
-the Agent Skills standard (Pi, Claude Code, OpenAI Codex, etc.). Point your
-harness to the `.agents/skills/` directory.
+Skills in `.agents/skills/` are auto-discovered by harnesses that support
+the Agent Skills standard (Pi, OpenCode, DSH, etc.). Point your harness to
+the `.agents/skills/` directory.
+
+Harnesses without native `.agents/skills/` support are covered by symlinks:
+
+- **Claude Code** (reads `.claude/skills/`): run `scripts/link-skills.sh`
+  to create/update `.claude/skills/*` symlinks and prune stale ones.
+- **Codex / Gemini CLI** (read global `~/.agents/skills/` only):
+  `ln -s "$(pwd)/.agents/skills/"* ~/.agents/skills/`

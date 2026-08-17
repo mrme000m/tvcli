@@ -30,7 +30,7 @@ skill stub.
 ## Prerequisites
 
 - `.env` with `SESSION`, `SIGNATURE`, `DEVICE_T` (and `TV_USER` for writes).
-- A built binary: `go build -o tvcli ./cmd/tvcli` (from `/Volumes/ExMac/code/tradingview/go`).
+- A built binary: `go build -o tvcli ./cmd/tvcli` (run from the repo/package root).
 - `TV_TIER` matching the account to cap bars/studies appropriately.
 
 ## Quick workflow (the correct order)

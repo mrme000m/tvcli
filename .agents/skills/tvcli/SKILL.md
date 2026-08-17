@@ -28,8 +28,8 @@ analysis with JSON output, agent-ready envelopes, and an async HTTP server.
 ## Prerequisites
 
 ```bash
-# Build the binary
-cd /Volumes/ExMac/code/tradingview/go && go build -o tvcli ./cmd/tvcli
+# Build the binary (from the repo/package root, wherever it is installed)
+go build -o tvcli ./cmd/tvcli
 
 # Configure auth (.env file)
 SESSION=<sessionid cookie>
@@ -100,7 +100,7 @@ data, structure, opportunities, narrative, and conformance scoring.
 ./tvcli eval script.pine --signals --agent --symbol OANDA:XAUUSD --tf 1H
 
 # Turn any Pine script into a skill
-./.agents/skills/pvcli/bin/pine2tool.sh "PUB;abc123" --symbol OANDA:XAUUSD --tf 1H
+./.agents/skills/pine2tool/bin/pine2tool.sh "PUB;abc123" --symbol OANDA:XAUUSD --tf 1H
 ```
 
 ## Free Tier Limits

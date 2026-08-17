@@ -61,7 +61,7 @@ tvcli run USER;abc123 --symbol OANDA:XAUUSD --tf 15m --bars 180 --signals  # fre
 ## Key Files in This Workspace
 
 ```
-/Volumes/ExMac/code/tradingview/go/
+<repo root>/               # wherever the tvcli repo/package is installed
 ├── tvcli                    # Compiled Go binary (run `./tvcli`)
 ├── cmd/tvcli/main.go        # CLI entry point
 ├── internal/cmd/            # All CLI commands
