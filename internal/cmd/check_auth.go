@@ -114,21 +114,29 @@ func (c *checkAuthCmd) Run(env *cli.Env) error {
 		result.CanRunStudies = false
 	}
 
+	// Include background server state.
+	result.ServerRunning = ServerRunning()
+	if result.ServerRunning {
+		result.ServerHealth = ServerHealth()
+	}
+
 	return reportAuthResult(jsonOut, result)
 }
 
 type authResult struct {
-	Configured     bool   `json:"configured"`
-	Authenticated  bool   `json:"authenticated"`
-	Pro            bool   `json:"pro"`
-	Plan           string `json:"plan,omitempty"`
-	Username       string `json:"username,omitempty"`
-	StatusCode     int    `json:"statusCode,omitempty"`
-	Error          string `json:"error,omitempty"`
-	WSAuthenticated bool  `json:"wsAuthenticated,omitempty"`
-	CanRunStudies  bool   `json:"canRunStudies"`
-	WSError        string `json:"wsError,omitempty"`
-	Message        string `json:"message,omitempty"`
+	Configured      bool            `json:"configured"`
+	Authenticated   bool            `json:"authenticated"`
+	Pro             bool            `json:"pro"`
+	Plan            string          `json:"plan,omitempty"`
+	Username        string          `json:"username,omitempty"`
+	StatusCode      int             `json:"statusCode,omitempty"`
+	Error           string          `json:"error,omitempty"`
+	WSAuthenticated bool            `json:"wsAuthenticated,omitempty"`
+	CanRunStudies   bool            `json:"canRunStudies"`
+	WSError         string          `json:"wsError,omitempty"`
+	Message         string          `json:"message,omitempty"`
+	ServerRunning   bool            `json:"serverRunning"`
+	ServerHealth    map[string]any  `json:"serverHealth,omitempty"`
 }
 
 func reportAuthResult(jsonOut bool, r *authResult) error {

@@ -94,4 +94,16 @@ func printSkillsList(w io.Writer) {
 
 	fmt.Fprintf(w, "\nUsage: tv <skill> [options]  --help for details\n")
 	fmt.Fprintf(w, "Example: tv smc --symbol OANDA:XAUUSD --tf 15m --json --agent\n")
+
+	// Show server state if running.
+	if ServerRunning() {
+		fmt.Fprintf(w, "\n─── HTTP Server ───\n")
+		if h := ServerHealth(); h != nil {
+			fmt.Fprintf(w, "  ✓ Running | Tier: %v | Auth: %v | User: %v\n",
+				h["tier"], h["authenticated"], h["user"])
+			fmt.Fprintf(w, "  Stop: tvcli serve --stop | Status: tvcli serve --status\n")
+		} else {
+			fmt.Fprintf(w, "  ✓ Running (health check failed)\n")
+		}
+	}
 }

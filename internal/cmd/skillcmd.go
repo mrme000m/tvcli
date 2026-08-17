@@ -107,6 +107,11 @@ func (c *skillCmd) Run(env *cli.Env) error {
 		return err
 	}
 
+	// Show server hint if running (agents can use HTTP API instead).
+	if ServerRunning() && !flags.Has("json") {
+		fmt.Fprintf(env.Stderr, "  i  HTTP server running -- also available via POST http://localhost:8765/run\n")
+	}
+
 	start := time.Now()
 	res, err := service.RunScript(context.Background(), cfg, service.RunRequest{
 		PineID:       c.skill.PineID,

@@ -88,6 +88,9 @@ Commands:
     --json                      JSON output (for agent consumption)
     Diagnoses expired cookies — the #1 cause of silent "study limit" errors.
   serve [--addr :8765]          Start HTTP server for AI agent integration
+    --daemon / -d    Start in background (non-blocking)
+    --stop           Stop background server
+    --status         Check server status + health
     Endpoints: /health /compile /fetch /clean /run
   inputs <pineId|skillName>     Inspect Pine inputs (Pine-actual vs Go-declared)
     --json                      Structured JSON output

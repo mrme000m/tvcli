@@ -51,6 +51,10 @@ Use the bundled orchestrator so resumable, raw artifacts land on disk:
      --symbol BINANCE:BTCUSDT --tf 1H --out skill_work/p2t_smc
 ```
 
+> **Private scripts** (`USER;…`): the skill/run path needs `--allow-private`
+> to bypass the private-script guard. The `eval` and `analyze` paths work
+> without it. See **Lessons learned** below for private-script gotchas.
+
 Each run writes, under `--out` (or `skill_work/pine2tool_<slug>`):
 
 | Artifact | Contents |
@@ -167,16 +171,78 @@ topology rules, regardless of how they arrange boxes, lines, and labels.
 ## Registering the script as a reusable tvcli skill
 
 Matrix: `docs/skills/<name>.md` (human doc) + a `skill.Skill` registration in
-`internal/skill/registry.go` (name, PineID, InputDef slice keyed by TVInputID,
-optional presets). The emitted `<slug>.skill.yaml` has the skeleton to fill in.
-After registering, the script becomes `tvcli <name> --symbol … --tf …`.
+`internal/skill/parsers/<name>.go` via `func init() { skill.Register(XxxSkill) }`
+(name, PineID, InputDef slice keyed by TVInputID, optional presets). The emitted
+`<slug>.skill.yaml` has the skeleton to fill in. After registering, the script
+becomes `tvcli <name> --symbol … --tf …`.
+
+> **Important for custom/private scripts**: push the source to TradingView first
+> (`tvcli push <pineId> <file.pine>`), then register the skill. The skill/run
+> path fetches the compiled IL blob from Pine Facade — the script must exist on
+> TradingView's servers under that Pine ID.
 
 ## Gotchas
 
-- Free/essential tiers cap bars (e.g. 365) and study count; the CLI auto-caps
-  but expect `study limit` warnings on busy accounts — pass `--force-cleanup`.
+- **Free tier** caps bars at **180** (not 365 — that's the Essential tier), limits
+  to **2 indicators per chart**, and has a **20-second** calc timeout. The CLI
+  auto-caps bars via `config.GetTierLimits()` but expect `study limit` warnings
+  on busy accounts — pass `--force-cleanup`.
 - Some scripts (volume profile, order blocks) emit **no plot columns**; all the
   value is in the graphics. Use `analyze` (not just `--signals`) so the graphic
   layer is inspected. `analyze` also falls back to OHLCV/graphics for last price.
 - Boolean/show toggles can be *declared but unused* in the Pine source; changing
   them is a no-op. Verify by toggling and comparing graphic counts.
+
+## Lessons learned — custom & private Pine scripts
+
+### Private scripts (USER;…): incomplete metaInfo
+
+Pine Facade returns **incomplete metaInfo** for private `USER;` scripts — only
+~6 generic inputs (`pineFeatures`, `text`, `pineId`, `pineVersion`,
+`__fast_calc`, and one placeholder), with **no plot or style definitions**. This
+means `LoadIndicator` produces an indicator with 0 real inputs. Despite this,
+the study still runs correctly because `LoadIndicator` fetches the **compiled IL
+blob** (not the raw Pine source) from Pine Facade's `Get` endpoint and sends it
+as the `text` field in `create_study`. TradingView uses the IL blob directly.
+
+**Key implication**: never bypass `LoadIndicator` to pass raw Pine source as the
+`text` field — TradingView will reject it with:
+`line 1:12 no viable alternative at character '\n'`.
+The `text` field must be the compiled IL blob from Pine Facade, not the
+human-readable Pine source.
+
+### Custom scripts must be pushed before skill registration
+
+Custom Pine scripts **must be pushed to TradingView** via
+`tvcli push <id> <file.pine>` (which calls `pinefacade.Client.SaveNext`) before
+the skill/run path works. Without pushing, TradingView has no compiled version
+stored under the `USER;` Pine ID and cannot run the study. The `eval` command
+works without a prior push because it does `SaveNew` (creating a fresh temp
+script) each time, but the `skill` command path relies on the already-pushed
+version.
+
+### `var` keyword and pivot functions can cause 0 period data
+
+Scripts using the Pine `var` keyword for persistent variables or
+`ta.pivothigh()` / `ta.pivowlow()` functions may return **0 periods** despite
+compiling cleanly and receiving `study_completed` events. This is a runtime
+issue, not a compilation issue. Simplified scripts without these constructs
+work fine. If you get 0 periods with a valid compile, try removing `var`
+variables and pivot functions, then re-test.
+
+### Pine v5 requires `ta.` prefix for all built-in functions
+
+Pine Script v5 requires the `ta.` namespace prefix for all technical analysis
+functions: `ta.sma()`, `ta.atr()`, `ta.rsi()`, `ta.ema()`, `ta.cross()`, etc.
+The compiler will reject bare `atr()` or `sma()` calls. Always use
+`tvcli eval --compile-only <file.pine>` to check syntax before running.
+
+### Consolidating multiple indicators into one script
+
+For agent workflows, consolidating multiple indicators into a single Pine
+script yields **~15× speedup** (4s vs 60s for 17 separate skills) and avoids the
+free-tier 2-indicator limit. The consolidated `xau-scalp` skill combines EMA
+stack, SuperTrend, RSI, Squeeze Momentum, Bollinger Bands, Volume Delta, and a
+weighted composite signal into one script with 14 named plots. When building a
+consolidated script, output every signal component as a named `plot()` — the
+skill parser reads these plot values from the period data.

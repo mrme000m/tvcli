@@ -105,6 +105,8 @@ ANALYSIS_JSON="$OUT_DIR/$SLUG.json"
 
 if [ "$IS_LOCAL" -eq 1 ]; then
   echo "▶ running local source with inputs: ${INPUTS[*]:-<defaults>}"
+  # Pre-compile check to catch syntax errors early (Pine v5 needs ta. prefix)
+  "$TVCLI" eval "$SRC_FILE" --compile-only 2>&1 | head -5
   "$TVCLI" eval "$SRC_FILE" --raw --symbol "$SYMBOL" --tf "$TF" \
     "${INPUT_FLAGS[@]}" > /tmp/p2t_raw_$$.out 2>/tmp/p2t_raw_$$.err
   # strip the leading informational line(s) before the JSON document
