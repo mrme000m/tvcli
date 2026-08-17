@@ -1,0 +1,94 @@
+//@version=5
+indicator("XAU Scalp v2", shorttitle="SCALP2", overlay=false)
+
+// EMA Stack
+ema1 = ta.ema(close, 3)
+ema2 = ta.ema(close, 8)
+ema3 = ta.ema(close, 21)
+ema4 = ta.ema(close, 55)
+
+emaStack = 0
+if ema1 > ema2 and ema2 > ema3 and ema3 > ema4
+    emaStack := 100
+else if ema1 > ema2 and ema2 > ema3
+    emaStack := 67
+else if ema1 > ema2
+    emaStack := 33
+else if ema1 < ema2 and ema2 < ema3 and ema3 < ema4
+    emaStack := -100
+else if ema1 < ema2 and ema2 < ema3
+    emaStack := -67
+else if ema1 < ema2
+    emaStack := -33
+
+// SuperTrend
+atr = ta.atr(10)
+stUpper = hl2 + 3.0 * atr
+stLower = hl2 - 3.0 * atr
+float stLine = na
+int stDir = 1
+if na(stLine[1])
+    stLine := hl2
+else
+    if close > stUpper[1]
+        stDir := 1
+        stLine := stLower
+    else if close < stLower[1]
+        stDir := -1
+        stLine := stUpper
+    else
+        stLine := stDir == 1 ? math.max(stLower, nz(stLine[1])) : math.min(stUpper, nz(stLine[1]))
+
+// RSI
+rsi = ta.rsi(close, 14)
+
+// Squeeze
+bbBasis = ta.sma(close, 20)
+bbDev = 2.0 * ta.stdev(close, 20)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+kcMa = ta.sma(close, 20)
+kcRange = ta.sma(ta.tr, 20)
+kcUpper = kcMa + 1.5 * kcRange
+kcLower = kcMa - 1.5 * kcRange
+squeezeOn = bbLower > kcLower and bbUpper < kcUpper
+
+midpoint = (ta.highest(high, 20) + ta.lowest(low, 20)) / 2
+sqzMom = ta.linreg(close - (midpoint + ta.sma(close, 20)) / 2, 20, 0)
+
+// Bollinger position
+bbPct = bbDev > 0 ? (close - bbBasis) / bbDev * 100 : 0
+
+// Volume Delta
+upVol = close > open ? volume : 0
+dnVol = close < open ? volume : 0
+upSum = math.sum(upVol, 5)
+dnSum = math.sum(dnVol, 5)
+volDelta = (upSum + dnSum) > 0 ? (upSum - dnSum) / (upSum + dnSum) * 100 : 0
+
+// Composite score
+rsiScore = (rsi - 50) * 2
+sqzScore = math.max(-100, math.min(100, sqzMom))
+composite = emaStack * 0.25 + stDir * 100 * 0.20 + rsiScore * 0.15 + sqzScore * 0.15 + volDelta * 0.10 + math.max(-100, math.min(100, bbPct)) * 0.10
+
+// Signal
+signal = 0
+if composite > 25 and stDir == 1 and emaStack > 0
+    signal := 2
+else if composite < -25 and stDir == -1 and emaStack < 0
+    signal := -2
+else if composite > 15 and stDir == 1 and emaStack > 0
+    signal := 1
+else if composite < -15 and stDir == -1 and emaStack < 0
+    signal := -1
+
+// Plots
+plot(composite, "Composite", color=color.blue, linewidth=2)
+plot(emaStack, "EMA_Stack", color=color.green)
+plot(stDir * 100, "ST_Dir", color=color.orange)
+plot(rsi, "RSI", color=color.purple)
+plot(sqzMom, "Sqz_Mom", color=color.red)
+plot(squeezeOn ? 100 : 0, "Squeeze", color=color.yellow)
+plot(volDelta, "Vol_Delta", color=color.aqua)
+plot(bbPct, "BB_Pct", color=color.gray)
+plot(signal * 50, "Signal", color=color.lime, style=plot.style_histogram, linewidth=3)

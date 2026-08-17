@@ -25,6 +25,7 @@ type RunRequest struct {
 	ForceCleanup bool
 	CalcTimeout  time.Duration // 0 → 120s
 	Debug        bool
+	Source       string            // raw Pine source; when set, bypasses Pine Facade LoadIndicator
 }
 
 // RunResult is the raw output of one indicator run.
@@ -122,11 +123,37 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		calcTimeout = 120 * time.Second
 	}
 
-	indicator, err := LoadIndicator(cfg, req.PineID, req.Inputs, req.ReservedKeys)
-	if err != nil {
-		return nil, err
+	// When Source is provided (private scripts with raw Pine source),
+	// build the indicator directly without Pine Facade — the Pine Facade
+	// returns incomplete metaInfo for private scripts, causing 0 periods.
+	var indicator *tradingview.PineIndicator
+	var err error
+	if req.Source != "" {
+		indicatorOpts := map[string]any{
+			"pineId":      req.PineID,
+			"script":     req.Source,
+			"metaInfo":   map[string]any{"inputs": []any{}},
+			"pineVersion": "1.0",
+		}
+		indicator = tradingview.NewPineIndicator(indicatorOpts)
+		for k, v := range req.Inputs {
+			skip := false
+			for _, r := range req.ReservedKeys {
+				if k == r { skip = true; break }
+			}
+			if skip { continue }
+			if sErr := indicator.SetOption(k, v); sErr != nil {
+				fmt.Fprintf(os.Stderr, "⚠ Input '%s': %v\n", k, sErr)
+			}
+		}
+		fmt.Fprintf(os.Stderr, "Indicator built from source: %d inputs defined\n", len(indicator.Inputs))
+	} else {
+		indicator, err = LoadIndicator(cfg, req.PineID, req.Inputs, req.ReservedKeys)
+		if err != nil {
+			return nil, err
+		}
+		fmt.Fprintf(os.Stderr, "Indicator loaded: %d inputs defined\n", len(indicator.Inputs))
 	}
-	fmt.Fprintf(os.Stderr, "Indicator loaded: %d inputs defined\n", len(indicator.Inputs))
 
 	// Connect fresh — helper that reconnects a client.
 	var client tradingview.Client

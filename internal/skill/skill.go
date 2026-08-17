@@ -140,6 +140,11 @@ type Skill struct {
 	// symbols, paid-tier requirement). Skills are still registered but flagged
 	// so agents can avoid or handle them explicitly.
 	KnownBroken string
+	// Source is the raw Pine Script source code for private (USER;) scripts
+	// where the Pine Facade returns incomplete metaInfo. When set, the skill
+	// command bypasses Pine Facade's LoadIndicator and uses this source
+	// directly (like the eval command does).
+	Source string
 
 	// ParseOutput processes raw indicator data into a SkillResult.
 	ParseOutput func(periods []map[string]any, graphic map[string]map[string]any, tf string, symbol string, args map[string]string) SkillResult

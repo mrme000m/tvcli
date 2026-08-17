@@ -1,0 +1,4 @@
+//@version=5
+indicator("Simple Test", shorttitle="TEST", overlay=false)
+plot(ta.rsi(close, 14), "RSI", color=color.purple)
+plot(ta.ema(close, 21), "EMA21", color=color.blue)

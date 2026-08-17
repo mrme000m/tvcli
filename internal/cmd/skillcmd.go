@@ -119,6 +119,7 @@ func (c *skillCmd) Run(env *cli.Env) error {
 		ForceCleanup: flags.Has("force-cleanup"),
 		CalcTimeout:  time.Duration(config.GetTierLimits().CalcTimeoutSecs) * time.Second,
 		Debug:        cfg.Debug,
+		Source:       c.skill.Source,
 	})
 	if err != nil {
 		return fmt.Errorf("%s: %w", c.skill.Name, err)
