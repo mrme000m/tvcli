@@ -33,26 +33,47 @@ func parseUST(periods []map[string]any, graphic map[string]map[string]any, tf st
 	last := latestClosed(periods)
 	// The script exposes line plots as plot_0/plot_2 and colorers as plot_1/plot_3.
 	// Read the line plots directly; the "ST1"/"ST2" style keys map to the colorers.
-	st1 := toFloat(getField(last, []string{"plot_0"}))
-	st2 := toFloat(getField(last, []string{"plot_2"}))
+	st1 := toFloat(getField(last, []string{"plot_0", "ST1"}))
+	st2 := toFloat(getField(last, []string{"plot_2", "ST2"}))
+	st1Color := toFloat(getField(last, []string{"plot_1", "ST1_colorer"}))
 	st2Color := toFloat(getField(last, []string{"plot_3", "ST2_colorer"}))
 	bgColor := toFloat(getField(last, []string{"Background_Color", "plot_4"}))
 
-	// ST2_colorer: 2 = bearish (price below ST), 4 = bullish (price above ST)
-	st2Bullish := st2Color == 4
-	// ST1 is bullish when price > ST1 (ST1 is below price)
-	// We don't have ST1_colorer directly, but can infer from price vs ST1
-	st1Bullish := st1 > 0 && st2 > st1 // Simplified: if ST2 > ST1, likely bullish
+	// Pine colorer values: 2 = bearish (red), 3 = bullish-transition, 4 = bullish (green).
+	// Treat 3 and 4 as bullish; 2 as bearish; 0 as unknown (infer from ST relationship).
+	st2Bullish := st2Color == 3 || st2Color == 4
+	if st2Color == 0 && st2 > 0 {
+		// No colorer info — infer from ST2 position relative to ST1.
+		st2Bullish = st2 >= st1
+	}
+	st2Bearish := st2Color == 2
+	if st2Color == 0 && st2 > 0 {
+		st2Bearish = st2 < st1
+	}
 
-	aligned := st1Bullish == st2Bullish
+	// ST1 colorer: same mapping. When colorer is 0, infer from ST relationship.
+	st1Bullish := st1Color == 3 || st1Color == 4
+	if st1Color == 0 && st1 > 0 && st2 > 0 {
+		st1Bullish = st2 >= st1
+	}
+	st1Bearish := st1Color == 2
+	if st1Color == 0 && st1 > 0 && st2 > 0 {
+		st1Bearish = st2 < st1
+	}
 
+	// Background color: 4 = bullish, 5 = bearish (from Pine color indices).
+	bgTrend := "NEUTRAL"
+	if bgColor == 3 || bgColor == 4 { bgTrend = "BULLISH" }
+	if bgColor == 5 || bgColor == 2 { bgTrend = "BEARISH" }
+
+	// Combined trend: require both STs to agree.
 	combinedTrend := "MIXED"
 	if st1Bullish && st2Bullish { combinedTrend = "BULLISH" }
-	if !st1Bullish && !st2Bullish { combinedTrend = "BEARISH" }
+	if st1Bearish && st2Bearish { combinedTrend = "BEARISH" }
 
-	bgTrend := "NEUTRAL"
-	if bgColor == 4 { bgTrend = "BULLISH" }
-	if bgColor == 5 { bgTrend = "BEARISH" }
+	// Alignment: both STs agree OR background confirms.
+	aligned := (st1Bullish == st2Bullish) || (bgTrend != "NEUTRAL" &&
+		((bgTrend == "BULLISH" && st1Bullish) || (bgTrend == "BEARISH" && st1Bearish)))
 
 	buySignal := toFloat(getField(last, []string{"BUY"})) == 1
 	sellSignal := toFloat(getField(last, []string{"SELL"})) == 1
@@ -67,17 +88,17 @@ func parseUST(periods []map[string]any, graphic map[string]map[string]any, tf st
 		if toFloat(getField(p, []string{"ULTRA_SELL"})) == 1 { ultraSellCount++ }
 	}
 
-	agenticScore := 0.2
-	if aligned { agenticScore += 0.25 }
+	agenticScore := 0.3
+	if aligned { agenticScore += 0.2 }
 	if combinedTrend != "MIXED" { agenticScore += 0.15 }
-	if ultraBuy || ultraSell { agenticScore += 0.2 }
+	if bgTrend != "NEUTRAL" { agenticScore += 0.1 }
+	if ultraBuy || ultraSell { agenticScore += 0.15 }
+	if buySignal || sellSignal { agenticScore += 0.1 }
 	agenticScore = math.Min(agenticScore, 0.99)
 
 	direction := "neutral"
-	if aligned {
-		if combinedTrend == "BULLISH" { direction = "long" }
-		if combinedTrend == "BEARISH" { direction = "short" }
-	}
+	if combinedTrend == "BULLISH" { direction = "long" }
+	if combinedTrend == "BEARISH" { direction = "short" }
 
 	var opps []skill.Opportunity
 	if direction != "neutral" {
@@ -95,7 +116,7 @@ func parseUST(periods []map[string]any, graphic map[string]map[string]any, tf st
 
 	return skill.SkillResult{
 		Status: "ok", Workflow: "ultra-sensitive-supertrend",
-		Market: skill.MarketData{LastPrice: st1, Bias: strings.ToLower(combinedTrend)},
+		Market: skill.MarketData{LastPrice: nil, Bias: strings.ToLower(combinedTrend)},
 		Structure: map[string]any{"combined": combinedTrend, "aligned": aligned, "st1": round2(st1), "st2": round2(st2), "background": bgTrend, "buySignals": buyCount, "sellSignals": sellCount, "ultraBuy": ultraBuyCount, "ultraSell": ultraSellCount, "currentBuy": buySignal, "currentSell": sellSignal, "currentUltraBuy": ultraBuy, "currentUltraSell": ultraSell},
 		Opportunities: opps,
 		Narrative: skill.Narrative{MarketStructure: fmt.Sprintf("Dual SuperTrend: %s. Aligned: %v. ST1=%.0f ST2=%.0f", combinedTrend, aligned, st1, st2), PrimaryOpp: primaryOppFromOpps(opps), Warnings: warnings},

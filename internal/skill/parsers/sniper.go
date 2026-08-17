@@ -63,23 +63,31 @@ func parseSniper(periods []map[string]any, graphic map[string]map[string]any, tf
 		score = math.Min(diff, 5.0)
 	}
 
+	// Continuous agentic score: base for data, scaled by EMA separation,
+	// bias clarity, and active signals.
 	agenticScore := 0.2
 	if len(periods) > 0 {
 		agenticScore += 0.2
 	}
-	if score > 3 {
-		agenticScore += 0.2
-	}
+	// Scale score contribution continuously (0-5 range → 0-0.2 contribution).
+	agenticScore += math.Min(score/5.0, 1.0) * 0.2
 	if bias != "neutral" {
 		agenticScore += 0.15
 	}
 	if buySignal || sellSignal {
 		agenticScore += 0.15
 	}
+	// Bonus for strong EMA alignment (all EMAs stacked bullishly or bearishly).
+	if ema1 > ema2 && ema2 > ema3 && ema3 > ema4 && ema4 > ema5 {
+		agenticScore += 0.1
+	}
+	if ema1 < ema2 && ema2 < ema3 && ema3 < ema4 && ema4 < ema5 {
+		agenticScore += 0.1
+	}
 	agenticScore = math.Min(agenticScore, 0.99)
 
 	var opps []skill.Opportunity
-	if (buySignal || sellSignal || score >= 3) && bias != "neutral" {
+	if bias != "neutral" && (buySignal || sellSignal || score >= 1.5) {
 		dir := "long"
 		if bias == "bearish" || sellSignal {
 			dir = "short"
