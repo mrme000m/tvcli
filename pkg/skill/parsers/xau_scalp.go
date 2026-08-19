@@ -236,6 +236,34 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 			Rationale:  fmt.Sprintf("Composite %.0f, EMA stack %+d, ST bearish, RSI %.0f, confluence %+d", composite, emaStack, rsi, confluence),
 		})
 	}
+	// Mild-signal entries: the strong gate requires a fresh catalyst (squeeze
+	// release or a trend-EMA pullback), which can stay dormant for hours during
+	// a clean trend. A mild signal (trend continuation, no fresh catalyst) is
+	// still tradable when confluence is strongly one-sided and the composite
+	// magnitude confirms the move — otherwise the executor watches an entire
+	// trend without a single entry.
+	if signal == 1 && hasLevels && confluence >= 4 && composite >= 30 {
+		opp = append(opp, skill.Opportunity{
+			Rank: 1, Setup: "Scalp " + signalLabel + " (no catalyst)",
+			Direction: "long", Confidence: confidenceLabel(score),
+			ConfluenceScore:   round2(score),
+			DistanceFromPrice: 0.0,
+			Entry:             price, StopLoss: slLevel, TP1: tpLevel,
+			RiskReward: 3.0 / 2.0,
+			Rationale:  fmt.Sprintf("Mild long, no catalyst: composite %.0f, confluence %+d/6, RSI %.0f", composite, confluence, rsi),
+		})
+	}
+	if signal == -1 && hasLevels && confluence <= -4 && composite <= -30 {
+		opp = append(opp, skill.Opportunity{
+			Rank: 1, Setup: "Scalp " + signalLabel + " (no catalyst)",
+			Direction: "short", Confidence: confidenceLabel(score),
+			ConfluenceScore:   round2(score),
+			DistanceFromPrice: 0.0,
+			Entry:             price, StopLoss: slLevel, TP1: tpLevel,
+			RiskReward: 3.0 / 2.0,
+			Rationale:  fmt.Sprintf("Mild short, no catalyst: composite %.0f, confluence %+d/6, RSI %.0f", composite, confluence, rsi),
+		})
+	}
 	if sqzRelease && signal == 0 {
 		dir := "watch"
 		if sqzMom > 0 {
