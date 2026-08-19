@@ -10,7 +10,7 @@ import (
 var XauScalpSkill = &skill.Skill{
 	Name:     "xau-scalp",
 	Synopsis: "XAUUSD Scalping Confluence Engine — all-in-one EMA+ST+RSI+Squeeze+Volume+BB",
-	PineID:   "USER;a2b64849e693497d9b975abe0cab2889",
+	PineID:   "USER;ed4cf60ef3fb43f6b91565afe52a3a4b",
 	Inputs: []skill.InputDef{
 		{Name: "ema1Len", TVInputID: "in_0", Type: "int", Default: 3},
 		{Name: "ema2Len", TVInputID: "in_1", Type: "int", Default: 8},
@@ -57,6 +57,8 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 	tpLevel := getValidFloat(last, "TP", "plot_11")
 	emaSlope := toFloat(getField(last, []string{"EMA_Slope", "plot_12"}))
 	volRatio := toFloat(getField(last, []string{"Vol_Ratio", "plot_13"})) / 100
+	freshLong := toFloat(getField(last, []string{"FreshLong", "plot_14"})) > 0
+	freshShort := toFloat(getField(last, []string{"FreshShort", "plot_15"})) > 0
 
 	// Normalize signal: 100=strong long, 50=mild long, 0=neutral, -50=mild short, -100=strong short
 	signal := 0
@@ -71,29 +73,45 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 	}
 
 	// Price
+	warnings := []string{}
 	price := toFloat(getField(last, []string{"Close", "close", "plotcandle_0_ohlc_close"}))
-	if price == 0 {
-		price = slLevel + 2 * (tpLevel - slLevel) / 5 // reverse from SL/TP
+	if price == 0 && slLevel > 0 && tpLevel > 0 {
+		price = slLevel + 2*(tpLevel-slLevel)/5 // reverse from SL/TP
+		warnings = append(warnings, "price recovered from SL/TP plots; no Close plot emitted")
 	}
 
 	// Determine bias from composite score
 	bias := "neutral"
-	if composite > 20 { bias = "bullish" }
-	if composite < -20 { bias = "bearish" }
+	if composite > 20 {
+		bias = "bullish"
+	}
+	if composite < -20 {
+		bias = "bearish"
+	}
 
 	// Count recent signal bars for context
 	bullBars := 0
 	bearBars := 0
 	limit := 20
-	if len(bars) < limit { limit = len(bars) }
+	if len(bars) < limit {
+		limit = len(bars)
+	}
 	for _, p := range bars[:limit] {
 		c := toFloat(getField(p, []string{"Composite", "plot_0"}))
-		if c > 0 { bullBars++ } else { bearBars++ }
+		if c > 0 {
+			bullBars++
+		} else {
+			bearBars++
+		}
 	}
 
 	// Check for squeeze release (high-probability breakout signal)
+	releaseLimit := 50
+	if len(bars) < releaseLimit {
+		releaseLimit = len(bars)
+	}
 	squeezeReleases := 0
-	for _, p := range bars[:50] {
+	for _, p := range bars[:releaseLimit] {
 		if toFloat(getField(p, []string{"Sqz_Release", "plot_6"})) > 0 {
 			squeezeReleases++
 		}
@@ -101,21 +119,57 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 
 	// Confluence breakdown: how many signals agree?
 	confluence := 0
-	if emaStack > 0 { confluence++ } else if emaStack < 0 { confluence-- }
-	if stDir > 0 { confluence++ } else if stDir < 0 { confluence-- }
-	if rsi > 55 { confluence++ } else if rsi < 45 { confluence-- }
-	if sqzMom > 0 { confluence++ } else if sqzMom < 0 { confluence-- }
-	if volDelta > 10 { confluence++ } else if volDelta < -10 { confluence-- }
-	if bbPct > 0 { confluence++ } else if bbPct < 0 { confluence-- }
+	if emaStack > 0 {
+		confluence++
+	} else if emaStack < 0 {
+		confluence--
+	}
+	if stDir > 0 {
+		confluence++
+	} else if stDir < 0 {
+		confluence--
+	}
+	if rsi > 55 {
+		confluence++
+	} else if rsi < 45 {
+		confluence--
+	}
+	if sqzMom > 0 {
+		confluence++
+	} else if sqzMom < 0 {
+		confluence--
+	}
+	if volDelta > 10 {
+		confluence++
+	} else if volDelta < -10 {
+		confluence--
+	}
+	if bbPct > 0 {
+		confluence++
+	} else if bbPct < 0 {
+		confluence--
+	}
 
 	// Agentic score
 	score := 0.5
-	if abs(composite) > 25 { score += 0.15 }
-	if signal >= 2 || signal <= -2 { score += 0.15 }
-	if confluence >= 4 || confluence <= -4 { score += 0.1 }
-	if sqzRelease { score += 0.1 }
-	if abs(emaSlope) > 20 { score += 0.05 }
-	if score > 1.0 { score = 1.0 }
+	if abs(composite) > 25 {
+		score += 0.15
+	}
+	if signal >= 2 || signal <= -2 {
+		score += 0.15
+	}
+	if confluence >= 4 || confluence <= -4 {
+		score += 0.1
+	}
+	if sqzRelease {
+		score += 0.1
+	}
+	if abs(emaSlope) > 20 {
+		score += 0.05
+	}
+	if score > 1.0 {
+		score = 1.0
+	}
 
 	// Structure
 	structure := map[string]any{
@@ -133,6 +187,8 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 		"tpLevel":         tpLevel,
 		"emaSlope":        emaSlope,
 		"volRatio":        volRatio,
+		"freshLong":       freshLong,
+		"freshShort":      freshShort,
 		"confluence":      confluence,
 		"bullBars":        bullBars,
 		"bearBars":        bearBars,
@@ -142,35 +198,52 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 
 	// Signal label
 	signalLabel := "neutral"
-	if signal == 2 { signalLabel = "STRONG LONG" }
-	if signal == 1 { signalLabel = "mild long" }
-	if signal == -1 { signalLabel = "mild short" }
-	if signal == -2 { signalLabel = "STRONG SHORT" }
+	if signal == 2 {
+		signalLabel = "STRONG LONG"
+	}
+	if signal == 1 {
+		signalLabel = "mild long"
+	}
+	if signal == -1 {
+		signalLabel = "mild short"
+	}
+	if signal == -2 {
+		signalLabel = "STRONG SHORT"
+	}
 
-	// Opportunities
+	// Opportunities (only emit actionable trades when the levels are real)
+	hasLevels := price > 0 && slLevel > 0 && tpLevel > 0
 	opp := []skill.Opportunity{}
-	if signal > 0 {
+	if signal == 2 && hasLevels {
 		opp = append(opp, skill.Opportunity{
 			Rank: 1, Setup: "Scalp " + signalLabel,
 			Direction: "long", Confidence: confidenceLabel(score),
-			Entry: price, StopLoss: slLevel, TP1: tpLevel,
+			ConfluenceScore:   round2(score),
+			DistanceFromPrice: 0.0,
+			Entry:             price, StopLoss: slLevel, TP1: tpLevel,
 			RiskReward: 3.0 / 2.0,
-			Rationale: fmt.Sprintf("Composite %.0f, EMA stack %+d, ST bullish, RSI %.0f, confluence %+d", composite, emaStack, rsi, confluence),
+			Rationale:  fmt.Sprintf("Composite %.0f, EMA stack %+d, ST bullish, RSI %.0f, confluence %+d", composite, emaStack, rsi, confluence),
 		})
 	}
-	if signal < 0 {
+	if signal == -2 && hasLevels {
 		opp = append(opp, skill.Opportunity{
 			Rank: 1, Setup: "Scalp " + signalLabel,
 			Direction: "short", Confidence: confidenceLabel(score),
-			Entry: price, StopLoss: slLevel, TP1: tpLevel,
+			ConfluenceScore:   round2(score),
+			DistanceFromPrice: 0.0,
+			Entry:             price, StopLoss: slLevel, TP1: tpLevel,
 			RiskReward: 3.0 / 2.0,
-			Rationale: fmt.Sprintf("Composite %.0f, EMA stack %+d, ST bearish, RSI %.0f, confluence %+d", composite, emaStack, rsi, confluence),
+			Rationale:  fmt.Sprintf("Composite %.0f, EMA stack %+d, ST bearish, RSI %.0f, confluence %+d", composite, emaStack, rsi, confluence),
 		})
 	}
 	if sqzRelease && signal == 0 {
 		dir := "watch"
-		if sqzMom > 0 { dir = "long_watch" }
-		if sqzMom < 0 { dir = "short_watch" }
+		if sqzMom > 0 {
+			dir = "long_watch"
+		}
+		if sqzMom < 0 {
+			dir = "short_watch"
+		}
 		opp = append(opp, skill.Opportunity{
 			Rank: 1, Setup: "Squeeze Release Breakout Watch",
 			Direction: dir, Confidence: "low",
@@ -178,9 +251,18 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 		})
 	}
 
-	narrative := fmt.Sprintf("Signal: %s | Composite: %.0f | Confluence: %+d/7 | RSI: %.0f | Squeeze: %s",
+	freshLabel := "none"
+	if freshLong {
+		freshLabel = "fresh long"
+	} else if freshShort {
+		freshLabel = "fresh short"
+	}
+	narrative := fmt.Sprintf("Signal: %s | Composite: %.0f | Confluence: %+d/6 | RSI: %.0f | Squeeze: %s | Catalyst: %s",
 		signalLabel, composite, confluence, rsi,
-		map[bool]string{true: "ON", false: "off"}[squeezeOn])
+		map[bool]string{true: "ON", false: "off"}[squeezeOn], freshLabel)
+
+	// Validity: only real data should report ok / valid
+	hasValidData := composite != 0 || price > 0 || signalRaw != 0
 
 	return skill.SkillResult{
 		Status:        "ok",
@@ -191,34 +273,47 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 		Narrative: skill.Narrative{
 			MarketStructure: narrative,
 			PrimaryOpp:      firstOppText(opp),
-			Warnings:        []string{},
+			Warnings:        warnings,
 		},
 		Validation:  skill.Validation{Passed: true},
-		Conformance: skill.Conformance{HasValidData: true, AgenticScore: score},
+		Conformance: skill.Conformance{HasValidData: hasValidData, AgenticScore: round2(score)},
 	}
 }
 
 func formatXauScalp(result skill.SkillResult) string {
+	// A no_data result has a nil Structure map — do not touch it.
+	if result.Status != "ok" {
+		return "  " + result.Narrative.MarketStructure + "\n"
+	}
 	s := result.Structure
 	var sb strings.Builder
 	signalLabel := "neutral"
 	sig := toInt(s["signal"])
-	if sig == 2 { signalLabel = "STRONG LONG" }
-	if sig == 1 { signalLabel = "mild long" }
-	if sig == -1 { signalLabel = "mild short" }
-	if sig == -2 { signalLabel = "STRONG SHORT" }
+	if sig == 2 {
+		signalLabel = "STRONG LONG"
+	}
+	if sig == 1 {
+		signalLabel = "mild long"
+	}
+	if sig == -1 {
+		signalLabel = "mild short"
+	}
+	if sig == -2 {
+		signalLabel = "STRONG SHORT"
+	}
 
-	sb.WriteString(fmt.Sprintf("  Signal: %s (composite: %.0f, confluence: %+d/7)\\n", signalLabel, toFloat(s["composite"]), toInt(s["confluence"])))
-	sb.WriteString(fmt.Sprintf("  EMA Stack: %+d | ST: %+d | RSI: %.0f | Sqz Mom: %.1f\\n",
+	sb.WriteString(fmt.Sprintf("  Signal: %s (composite: %.0f, confluence: %+d/6)\n", signalLabel, toFloat(s["composite"]), toInt(s["confluence"])))
+	sb.WriteString(fmt.Sprintf("  EMA Stack: %+d | ST: %+d | RSI: %.0f | Sqz Mom: %.1f\n",
 		toInt(s["emaStack"]), toInt(s["stDir"]), toFloat(s["rsi"]), toFloat(s["sqzMom"])))
-	sb.WriteString(fmt.Sprintf("  Squeeze: %s | Vol Delta: %.0f | BB %%: %.0f | EMA Slope: %.1f\\n",
-		map[bool]string{true: "ON", false: "off"}[s["squeezeOn"].(bool)],
+	sqOn, _ := s["squeezeOn"].(bool)
+	sb.WriteString(fmt.Sprintf("  Squeeze: %s | Vol Delta: %.0f | BB %%: %.0f | EMA Slope: %.1f\n",
+		map[bool]string{true: "ON", false: "off"}[sqOn],
 		toFloat(s["volDelta"]), toFloat(s["bbPct"]), toFloat(s["emaSlope"])))
 	if toFloat(s["slLevel"]) > 0 {
-		sb.WriteString(fmt.Sprintf("  Entry: %.2f | SL: %.2f | TP: %.2f | R:R = 1.5\\n",
+		sb.WriteString(fmt.Sprintf("  Entry: %.2f | SL: %.2f | TP: %.2f | R:R = 1.5\n",
 			toFloat(s["price"]), toFloat(s["slLevel"]), toFloat(s["tpLevel"])))
 	}
-	sb.WriteString(fmt.Sprintf("  Recent: %d bullish / %d bearish bars (20)\\n", toInt(s["bullBars"]), toInt(s["bearBars"])))
+	sb.WriteString(fmt.Sprintf("  Recent: %d bullish / %d bearish bars (20)\n", toInt(s["bullBars"]), toInt(s["bearBars"])))
 	return sb.String()
 }
 
