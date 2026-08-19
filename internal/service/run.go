@@ -47,7 +47,7 @@ func PreCheckScriptOwnership(cfg *config.Config, pineID string) error {
 	if pinefacade.AccessFromPineID(pineID) != "private" {
 		return nil
 	}
-	client := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
+	client := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond, pinefacade.WithProxy(cfg.ProxyURL))
 	owned, err := client.UserOwnsScript(pineID, cfg.CookieHeaderOrEmpty())
 	if err != nil {
 		return nil // best-effort: never block on a transient listing failure
@@ -63,7 +63,7 @@ func PreCheckScriptOwnership(cfg *config.Config, pineID string) error {
 // builds a *tradingview.PineIndicator with the given inputs applied.
 // Reserved keys are skipped (those are CLI flag names, not script inputs).
 func LoadIndicator(cfg *config.Config, pineID string, inputs map[string]string, reserved []string) (*tradingview.PineIndicator, error) {
-	pineClient := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
+	pineClient := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond, pinefacade.WithProxy(cfg.ProxyURL))
 	indResult, err := pineClient.Get(pineID, "last", cfg.CookieHeaderOrEmpty())
 	if err != nil {
 		return nil, fmt.Errorf("load indicator: %w", err)
@@ -193,6 +193,7 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 			tradingview.WithToken(cfg.SessionID),
 			tradingview.WithSignature(cfg.Signature),
 			tradingview.WithDeviceToken(cfg.DeviceToken),
+			tradingview.WithProxy(cfg.ProxyURL),
 			tradingview.WithDebug(cfg.Debug),
 		)
 		if err := client.Connect(); err != nil {

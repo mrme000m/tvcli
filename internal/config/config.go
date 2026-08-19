@@ -23,6 +23,7 @@ type Config struct {
 	Cookies       string
 	ExtraCookies  string
 	DeviceToken   string
+	ProxyURL      string
 	Debug         bool
 }
 
@@ -51,6 +52,7 @@ func Load() *Config {
 		Cookies:       os.Getenv("TV_COOKIES"),
 		ExtraCookies:  os.Getenv("EXTRA_COOKIES"),
 		DeviceToken:   firstNonEmpty("DEVICE_T", "TV_DEVICE_T"),
+		ProxyURL:      os.Getenv("TV_PROXY"),
 		Debug:         os.Getenv("DEBUG") == "1" || os.Getenv("TW_DEBUG") == "1",
 	}
 	return c

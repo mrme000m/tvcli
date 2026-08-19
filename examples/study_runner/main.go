@@ -36,6 +36,7 @@ func main() {
 	tf := flag.String("tf", "1H", "timeframe")
 	bars := flag.Int("bars", 180, "number of bars")
 	settle := flag.Int("settle", 1500, "settle time in ms after data arrives")
+	proxy := flag.String("proxy", "", "egress proxy (socks5://host:port or http://host:port)")
 	flag.Parse()
 
 	if *pineID == "" && *sourceFile == "" {
@@ -86,6 +87,7 @@ func main() {
 		tradingview.WithToken(acct.SessionID),
 		tradingview.WithSignature(acct.Signature),
 		tradingview.WithDeviceToken(acct.DeviceToken),
+		tradingview.WithProxy(*proxy),
 	)
 	if err := client.Connect(); err != nil {
 		fmt.Fprintln(os.Stderr, "error: ws connect:", err)

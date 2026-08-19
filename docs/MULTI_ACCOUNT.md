@@ -33,6 +33,7 @@ ACCOUNT_0_NAME=core           ACCOUNT_0_ROLE=core
 ACCOUNT_0_SESSION=...         ACCOUNT_0_SIGNATURE=...
 ACCOUNT_0_DEVICE_T=...        ACCOUNT_0_USER=...
 ACCOUNT_0_TIER=free
+ACCOUNT_0_PROXY=socks5://127.0.0.1:1080
 
 ACCOUNT_1_NAME=xau-scalp      ACCOUNT_1_ROLE=script
 ACCOUNT_1_SESSION=...
@@ -45,7 +46,8 @@ ACCOUNT_1_SESSION=...
   "default": "core",
   "accounts": {
     "core":      {"role": "core",   "sessionId": "...", "tier": "free"},
-    "xau-scalp": {"role": "script", "sessionId": "...", "tier": "free"},
+    "xau-scalp": {"role": "script", "sessionId": "...", "tier": "free",
+                  "proxy": "socks5://127.0.0.1:1080"},
     "signal-runner": {"role": "signal", "sessionId": "...", "tier": "free"},
     "adhoc-1":   {"role": "adhoc",  "sessionId": "..."}
   }
@@ -70,6 +72,24 @@ Per-account tiers: `acct.Limits()` returns the same `TierLimits` struct the
 CLI uses (`MaxCharts`, `MaxIndicators`, `MaxConnections`, `MaxBars`,
 `CalcTimeoutSecs`), resolved from `acct.Tier` instead of the global
 `TV_TIER`.
+
+## Per-account egress proxy
+
+Each account can carry its own `ProxyURL` (`ACCOUNT_N_PROXY` env key, `proxy`
+in the JSON sidecar, or the legacy `TV_PROXY` env var for the single-account
+case). All three transports honor it:
+
+- **WebSocket** (`pkg/tradingview.WithProxy`): `socks5://` and `socks5h://`
+  URLs dial through `golang.org/x/net/proxy` via `NetDial`; `http(s)://`
+  URLs use the standard `Dialer.Proxy`.
+- **Auth page fetch** (`pkg/tradingview/auth.WithProxy`): routed through
+  `http.Transport{Proxy: ...}`, which natively supports socks5 and http(s).
+- **Pine Facade HTTP** (`pkg/pinefacade.WithProxy`): same transport approach.
+
+Single-account CLI usage: set `TV_PROXY=socks5://127.0.0.1:1080` in `.env`
+and every WS client, auth check, and Pine Facade call in the CLI/server
+routes through it. Empty proxy (the default) means direct connection, so
+existing setups are unaffected.
 
 ## What is intentionally NOT implemented here
 

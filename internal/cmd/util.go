@@ -20,7 +20,7 @@ func PreCheckAuth(cfg *config.Config) error {
 	if !cfg.HasAuth() {
 		return nil // anonymous mode — some commands work without auth
 	}
-	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken)
+	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken, auth.WithProxy(cfg.ProxyURL))
 	if !info.Authenticated {
 		fmt.Fprintf(os.Stderr, "❌ Authentication failed: %v\n", info.Error)
 		fmt.Fprintf(os.Stderr, "  TradingView will reject all studies with a 'study limit' error.\n")

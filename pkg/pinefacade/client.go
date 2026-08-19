@@ -19,14 +19,36 @@ type Client struct {
 	httpClient *http.Client
 }
 
-func NewClient(baseURL, userName string, timeout time.Duration) *Client {
-	return &Client{
+// Option configures a Client.
+type Option func(*Client)
+
+// WithProxy routes all Pine Facade HTTP requests through the given proxy:
+// "socks5://host:port", "socks5h://host:port", "http://host:port", or
+// "https://host:port". Empty disables proxying. net/http's Transport natively
+// supports socks5 proxy URLs via the Proxy function.
+func WithProxy(proxyURL string) Option {
+	return func(c *Client) {
+		if proxyURL == "" {
+			return
+		}
+		if u, err := url.Parse(proxyURL); err == nil && u.Scheme != "" {
+			c.httpClient.Transport = &http.Transport{Proxy: http.ProxyURL(u)}
+		}
+	}
+}
+
+func NewClient(baseURL, userName string, timeout time.Duration, opts ...Option) *Client {
+	c := &Client{
 		baseURL:  strings.TrimRight(baseURL, "/"),
 		userName: userName,
 		httpClient: &http.Client{
 			Timeout: timeout,
 		},
 	}
+	for _, o := range opts {
+		o(c)
+	}
+	return c
 }
 
 func (c *Client) baseHeaders(cookie string) map[string]string {

@@ -8,9 +8,41 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strings"
 )
+
+// Option configures an auth fetch. Options are variadic so existing callers
+// keep working unchanged.
+type Option func(*fetchOpts)
+
+type fetchOpts struct {
+	proxyURL string
+}
+
+// WithProxy routes the page fetch through the given proxy
+// (e.g. "socks5://127.0.0.1:1080" or "http://proxy:8080"). Empty disables.
+func WithProxy(proxyURL string) Option {
+	return func(o *fetchOpts) { o.proxyURL = proxyURL }
+}
+
+// httpClient builds the client used for the page fetch, honoring the proxy
+// option. net/http's Transport natively supports socks5://, socks5h://,
+// http://, and https:// proxy URLs via the Proxy function.
+func httpClient(opts ...Option) *http.Client {
+	o := &fetchOpts{}
+	for _, fn := range opts {
+		fn(o)
+	}
+	if o.proxyURL == "" {
+		return http.DefaultClient
+	}
+	if u, err := url.Parse(o.proxyURL); err == nil && u.Scheme != "" {
+		return &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
+	}
+	return http.DefaultClient
+}
 
 // GenCookies builds the Cookie header value for TradingView API requests
 // from a session id, (optional) signature, and (optional) device_t token.
@@ -53,8 +85,8 @@ type AuthInfo struct {
 // The deviceT parameter is the device_t cookie value, required for proper
 // authentication on free accounts.
 // Returns an error if the page has no auth_token (e.g. cookies expired).
-func FetchToken(session, signature, location, deviceT string) (string, error) {
-	info := FetchAuthInfo(session, signature, location, deviceT)
+func FetchToken(session, signature, location, deviceT string, opts ...Option) (string, error) {
+	info := FetchAuthInfo(session, signature, location, deviceT, opts...)
 	return info.Token, info.Error
 }
 
@@ -65,7 +97,7 @@ func FetchToken(session, signature, location, deviceT string) (string, error) {
 // The HTML page embeds class flags like "is-not-authenticated" or "is-pro"
 // and sometimes a JSON block with the user's plan. This function parses those
 // to give callers a complete picture without running a study.
-func FetchAuthInfo(session, signature, location, deviceT string) AuthInfo {
+func FetchAuthInfo(session, signature, location, deviceT string, opts ...Option) AuthInfo {
 	if location == "" {
 		location = "https://www.tradingview.com/chart/"
 	}
@@ -80,7 +112,7 @@ func FetchAuthInfo(session, signature, location, deviceT string) AuthInfo {
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
 	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient(opts...).Do(req)
 	if err != nil {
 		return AuthInfo{Error: fmt.Errorf("fetch page: %w", err)}
 	}

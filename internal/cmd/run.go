@@ -278,6 +278,7 @@ func (c *runCmd) runPersistent(env *cli.Env) error {
 			tradingview.WithToken(cfg.SessionID),
 			tradingview.WithSignature(cfg.Signature),
 			tradingview.WithDeviceToken(cfg.DeviceToken),
+			tradingview.WithProxy(cfg.ProxyURL),
 			tradingview.WithDebug(cfg.Debug),
 		},
 		cfg.Debug,

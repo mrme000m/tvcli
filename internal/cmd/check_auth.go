@@ -39,7 +39,7 @@ func (c *checkAuthCmd) Run(env *cli.Env) error {
 	// Step 2: Fetch auth info from the TradingView page.
 	fmt.Fprintf(os.Stderr, "Checking TradingView authentication...\n")
 
-	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken)
+	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken, auth.WithProxy(cfg.ProxyURL))
 
 	result := &authResult{
 		Configured:   true,
@@ -75,6 +75,7 @@ func (c *checkAuthCmd) Run(env *cli.Env) error {
 			tradingview.WithToken(cfg.SessionID),
 			tradingview.WithSignature(cfg.Signature),
 			tradingview.WithDeviceToken(cfg.DeviceToken),
+			tradingview.WithProxy(cfg.ProxyURL),
 			tradingview.WithDebug(cfg.Debug),
 		)
 		if err := client.Connect(); err != nil {

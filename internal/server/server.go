@@ -68,7 +68,7 @@ func New(cfg *config.Config) *Server {
 	queueDepth := 8 // max queued requests before 429
 	s := &Server{
 		cfg:        cfg,
-		pfClient:   pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond),
+		pfClient:   pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond, pinefacade.WithProxy(cfg.ProxyURL)),
 		mux:        http.NewServeMux(),
 		runQueue:   make(chan struct{}, queueDepth),
 		queueDepth: queueDepth,
@@ -189,7 +189,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	authed := false
 	plan := ""
 	if s.cfg.HasAuth() {
-		info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken)
+		info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken, auth.WithProxy(s.cfg.ProxyURL))
 		authed = info.Authenticated
 		plan = info.Plan
 	}
@@ -301,6 +301,7 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 		tradingview.WithToken(s.cfg.SessionID),
 		tradingview.WithSignature(s.cfg.Signature),
 		tradingview.WithDeviceToken(s.cfg.DeviceToken),
+		tradingview.WithProxy(s.cfg.ProxyURL),
 		tradingview.WithDebug(s.cfg.Debug),
 	)
 	if err := client.Connect(); err != nil {
@@ -388,6 +389,7 @@ func (s *Server) handleClean(w http.ResponseWriter, r *http.Request) {
 		tradingview.WithToken(s.cfg.SessionID),
 		tradingview.WithSignature(s.cfg.Signature),
 		tradingview.WithDeviceToken(s.cfg.DeviceToken),
+		tradingview.WithProxy(s.cfg.ProxyURL),
 		tradingview.WithDebug(s.cfg.Debug),
 	)
 	if err := client.Connect(); err != nil {
@@ -522,7 +524,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-check auth before running (fail fast on expired cookies).
-	if authInfo := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken); !authInfo.Authenticated {
+	if authInfo := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken, auth.WithProxy(s.cfg.ProxyURL)); !authInfo.Authenticated {
 		writeJSON(w, http.StatusUnauthorized, map[string]any{
 			"error":         "auth: cookies expired — re-extract SESSION/SIGNATURE/DEVICE_T",
 			"authenticated": false,
@@ -883,7 +885,7 @@ func (s *Server) handleCheckAuth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken)
+	info := auth.FetchAuthInfo(s.cfg.SessionID, s.cfg.Signature, "", s.cfg.DeviceToken, auth.WithProxy(s.cfg.ProxyURL))
 
 	result := map[string]any{
 		"configured":    true,

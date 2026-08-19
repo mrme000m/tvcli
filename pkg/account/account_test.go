@@ -9,7 +9,7 @@ import (
 
 func clearEnv(t *testing.T) {
 	t.Helper()
-	for _, k := range []string{envSession, envSignature, envUser, envDevice, envTier, envCookies, envExtraCook} {
+	for _, k := range []string{envSession, envSignature, envUser, envDevice, envTier, envCookies, envExtraCook, envProxy} {
 		os.Unsetenv(k)
 	}
 	for i := 0; i < 10; i++ {
@@ -27,6 +27,7 @@ func TestLegacySynthesis(t *testing.T) {
 	os.Setenv(envUser, "trader")
 	os.Setenv(envDevice, "dev1")
 	os.Setenv(envTier, "plus")
+	os.Setenv(envProxy, "socks5://127.0.0.1:1080")
 
 	reg := LoadFromEnv()
 	if reg.Default != "default" {
@@ -42,6 +43,9 @@ func TestLegacySynthesis(t *testing.T) {
 	if got := a.CookieHeader(); got != "sessionid=sess1; sessionid_sign=sig1; device_t=dev1" {
 		t.Fatalf("cookie header = %q", got)
 	}
+	if a.ProxyURL != "socks5://127.0.0.1:1080" {
+		t.Fatalf("proxy not loaded: %q", a.ProxyURL)
+	}
 }
 
 func TestEnvArray(t *testing.T) {
@@ -49,6 +53,7 @@ func TestEnvArray(t *testing.T) {
 	os.Setenv("ACCOUNT_0_NAME", "core")
 	os.Setenv("ACCOUNT_0_ROLE", "core")
 	os.Setenv("ACCOUNT_0_SESSION", "sess-core")
+	os.Setenv("ACCOUNT_0_PROXY", "http://proxy.local:8080")
 	os.Setenv("ACCOUNT_1_NAME", "xau-scalp")
 	os.Setenv("ACCOUNT_1_ROLE", "script")
 	os.Setenv("ACCOUNT_1_SESSION", "sess-xau")
@@ -63,6 +68,10 @@ func TestEnvArray(t *testing.T) {
 	a, ok := reg.Get("xau-scalp")
 	if !ok || a.SessionID != "sess-xau" {
 		t.Fatalf("xau-scalp account wrong: %+v ok=%v", a, ok)
+	}
+	core, _ := reg.Get("core")
+	if core.ProxyURL != "http://proxy.local:8080" {
+		t.Fatalf("env-array proxy not loaded: %q", core.ProxyURL)
 	}
 	// Unknown tier defaults to free.
 	if a.Limits().MaxConnections != 2 {
@@ -90,7 +99,8 @@ func TestLoadFromJSON(t *testing.T) {
 		"default": "core",
 		"accounts": {
 			"core": {"role": "core", "sessionId": "s1", "tier": "essential"},
-			"adhoc-1": {"role": "adhoc", "sessionId": "s2"}
+			"adhoc-1": {"role": "adhoc", "sessionId": "s2",
+			            "proxy": "socks5h://127.0.0.1:1081"}
 		}
 	}`
 	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
@@ -110,6 +120,9 @@ func TestLoadFromJSON(t *testing.T) {
 	adhoc, _ := reg.Get("adhoc-1")
 	if !adhoc.HasAuth() || adhoc.CookieHeader() != "sessionid=s2" {
 		t.Fatalf("adhoc-1 cookie header = %q", adhoc.CookieHeader())
+	}
+	if adhoc.ProxyURL != "socks5h://127.0.0.1:1081" {
+		t.Fatalf("json proxy not loaded: %q", adhoc.ProxyURL)
 	}
 }
 

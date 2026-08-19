@@ -28,7 +28,7 @@ func (c *cleanCmd) Run(env *cli.Env) error {
 
 	// Pre-check auth before attempting cleanup.
 	if cfg.HasAuth() {
-		info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken)
+		info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken, auth.WithProxy(cfg.ProxyURL))
 		if !info.Authenticated {
 			fmt.Fprintf(env.Stderr, "⚠ Authentication check: cookies are EXPIRED.\n")
 			fmt.Fprintf(env.Stderr, "  %v\n", info.Error)
@@ -45,6 +45,7 @@ func (c *cleanCmd) Run(env *cli.Env) error {
 		tradingview.WithToken(cfg.SessionID),
 		tradingview.WithSignature(cfg.Signature),
 			tradingview.WithDeviceToken(cfg.DeviceToken),
+		tradingview.WithProxy(cfg.ProxyURL),
 		tradingview.WithDebug(cfg.Debug),
 	)
 	if err := client.Connect(); err != nil {

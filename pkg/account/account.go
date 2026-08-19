@@ -49,6 +49,11 @@ type Account struct {
 	// Tier is the subscription tier name: "free" (default), "essential",
 	// "plus", "premium", "ultimate". Empty means "free".
 	Tier string
+	// ProxyURL is an optional egress proxy for this account's WS and HTTP
+	// connections, e.g. "socks5://127.0.0.1:1080" or "http://proxy:8080".
+	// Honored by pkg/tradingview (WithProxy), pkg/pinefacade (WithProxy),
+	// and pkg/tradingview/auth (WithProxy). Empty means direct connection.
+	ProxyURL string
 	// Cookies is a full raw Cookie header override. When set, it takes
 	// precedence over SessionID/Signature/DeviceToken when building the
 	// Cookie header.

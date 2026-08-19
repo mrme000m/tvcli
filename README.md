@@ -230,6 +230,15 @@ DEVICE_T=<device_t cookie value>
 
 > **Important:** Cookies must be fetched from the `/chart/` page, not the main page. The `device_t` cookie is required for study creation.
 
+Optional egress proxy (SOCKS5 or HTTP) for all WS and HTTP traffic:
+
+```
+TV_PROXY=socks5://127.0.0.1:1080
+```
+
+Per-account proxies for multi-account setups are documented in
+[docs/MULTI_ACCOUNT.md](docs/MULTI_ACCOUNT.md).
+
 ## Subscription Tiers
 
 | Tier | Charts | Indicators | Connections | Bars | Calc Timeout |

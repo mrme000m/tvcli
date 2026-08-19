@@ -16,6 +16,7 @@ const (
 	envTier       = "TV_TIER"
 	envCookies    = "TV_COOKIES"
 	envExtraCook  = "EXTRA_COOKIES"
+	envProxy      = "TV_PROXY"
 )
 
 // LoadFromEnv builds a Registry from the environment. When no ACCOUNT_*
@@ -32,6 +33,7 @@ const (
 //	ACCOUNT_0_DEVICE_T=...       ACCOUNT_0_USER=...
 //	ACCOUNT_0_TIER=free          ACCOUNT_0_COOKIES=...
 //	ACCOUNT_0_EXTRA_COOKIES=...
+//	ACCOUNT_0_PROXY=socks5://127.0.0.1:1080
 //	ACCOUNT_1_NAME=xau-scalp     ...
 //
 // The loop stops at the first missing ACCOUNT_N_NAME.
@@ -58,15 +60,16 @@ func LoadFromEnv() *Registry {
 
 func legacyAccount() Account {
 	return Account{
-		Name:        "default",
-		Role:        RoleAdhoc,
-		SessionID:   firstNonEmpty(envSession, "SESSION_ID", "TV_SESSION"),
-		Signature:   firstNonEmpty(envSignature, "SESSION_SIGN", "TV_SIGNATURE"),
-		DeviceToken: firstNonEmpty(envDevice, "TV_DEVICE_T"),
-		UserName:    firstNonEmpty(envUser, "TV_USERNAME"),
-		Tier:        os.Getenv(envTier),
-		Cookies:     os.Getenv(envCookies),
+		Name:         "default",
+		Role:         RoleAdhoc,
+		SessionID:    firstNonEmpty(envSession, "SESSION_ID", "TV_SESSION"),
+		Signature:    firstNonEmpty(envSignature, "SESSION_SIGN", "TV_SIGNATURE"),
+		DeviceToken:  firstNonEmpty(envDevice, "TV_DEVICE_T"),
+		UserName:     firstNonEmpty(envUser, "TV_USERNAME"),
+		Tier:         os.Getenv(envTier),
+		Cookies:      os.Getenv(envCookies),
 		ExtraCookies: os.Getenv(envExtraCook),
+		ProxyURL:     os.Getenv(envProxy),
 	}
 }
 
@@ -88,6 +91,7 @@ func parseEnvAccounts() []Account {
 			Tier:         os.Getenv(prefix + "TIER"),
 			Cookies:      os.Getenv(prefix + "COOKIES"),
 			ExtraCookies: os.Getenv(prefix + "EXTRA_COOKIES"),
+			ProxyURL:     os.Getenv(prefix + "PROXY"),
 		})
 	}
 	return out
@@ -108,6 +112,7 @@ type jsonAcct struct {
 	Tier         string `json:"tier,omitempty"`
 	Cookies      string `json:"cookies,omitempty"`
 	ExtraCookies string `json:"extraCookies,omitempty"`
+	ProxyURL     string `json:"proxy,omitempty"`
 }
 
 // LoadFromJSON reads an accounts.json sidecar. Layout:
@@ -116,7 +121,8 @@ type jsonAcct struct {
 //	  "default": "core",
 //	  "accounts": {
 //	    "core":      {"role": "core",   "sessionId": "...", "tier": "free"},
-//	    "xau-scalp": {"role": "script", "sessionId": "...", "tier": "free"}
+//	    "xau-scalp": {"role": "script", "sessionId": "...", "tier": "free",
+//	                  "proxy": "socks5://127.0.0.1:1080"}
 //	  }
 //	}
 //
@@ -143,6 +149,7 @@ func LoadFromJSON(path string) (*Registry, error) {
 			Tier:         ja.Tier,
 			Cookies:      ja.Cookies,
 			ExtraCookies: ja.ExtraCookies,
+			ProxyURL:     ja.ProxyURL,
 		}
 	}
 	reg.Default = f.Default

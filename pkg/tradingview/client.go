@@ -6,12 +6,15 @@ import (
 	"log"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os"
 	"sync"
 	"time"
 
-	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 	"github.com/gorilla/websocket"
+	"golang.org/x/net/proxy"
+
+	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 )
 
 type Client interface {
@@ -46,6 +49,7 @@ type WSClient struct {
 	signature      string
 	deviceToken    string
 	location       string
+	proxyURL       string
 	loggedIn       bool
 	connected      bool
 	mu             sync.Mutex
@@ -78,6 +82,34 @@ func WithSignature(s string) ClientOption { return func(c *WSClient) { c.signatu
 func WithDeviceToken(d string) ClientOption { return func(c *WSClient) { c.deviceToken = d } }
 func WithLocation(l string) ClientOption  { return func(c *WSClient) { c.location = l } }
 func WithDebug(d bool) ClientOption       { return func(c *WSClient) { c.debug = d } }
+
+// WithProxy routes the WebSocket connection (and the auth-token page fetch)
+// through the given proxy: "socks5://host:port", "socks5h://host:port",
+// "http://host:port", or "https://host:port". Empty disables proxying.
+func WithProxy(proxyURL string) ClientOption {
+	return func(c *WSClient) { c.proxyURL = proxyURL }
+}
+
+// applyProxy configures a gorilla Dialer for the given proxy URL. SOCKS5 is
+// wired through x/net/proxy via NetDial (gorilla/websocket v1.5+ dropped
+// built-in socks5 support); http(s) proxies use the standard Dialer.Proxy.
+func applyProxy(d *websocket.Dialer, proxyURL string) {
+	if proxyURL == "" {
+		return
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil || u.Scheme == "" {
+		return
+	}
+	switch u.Scheme {
+	case "socks5", "socks5h":
+		if pd, err := proxy.FromURL(u, proxy.Direct); err == nil {
+			d.NetDial = pd.Dial
+		}
+	default:
+		d.Proxy = http.ProxyURL(u)
+	}
+}
 
 func (c *WSClient) OnConnected(fn func())    { c.onConnected = append(c.onConnected, fn) }
 func (c *WSClient) OnDisconnected(fn func()) { c.onDisconnected = append(c.onDisconnected, fn) }
@@ -126,6 +158,7 @@ func (c *WSClient) Connect() error {
 		HandshakeTimeout:  10 * time.Second,
 		EnableCompression: true,
 	}
+	applyProxy(&dialer, c.proxyURL)
 
 	conn, _, err := dialer.Dial(uri, headers)
 	if err != nil {
@@ -141,7 +174,7 @@ func (c *WSClient) Connect() error {
 	// most common cause of silent "study limit" errors.
 	authToken := "unauthorized_user_token"
 	if c.token != "" {
-		info := auth.FetchAuthInfo(c.token, c.signature, c.location, c.deviceToken)
+		info := auth.FetchAuthInfo(c.token, c.signature, c.location, c.deviceToken, auth.WithProxy(c.proxyURL))
 		c.authInfo = &info
 		if info.Error == nil && info.Token != "" {
 			authToken = info.Token
