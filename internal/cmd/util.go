@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/pkg/tradingview/auth"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 )
 
 // PreCheckAuth verifies TradingView auth cookies before attempting to run a

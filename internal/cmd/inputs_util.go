@@ -17,7 +17,7 @@ package cmd
 import (
 	"strings"
 
-	"github.com/ch99q/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/cli"
 )
 
 // collectInputs builds the map of Pine input overrides after CLI flag parsing.

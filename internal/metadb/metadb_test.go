@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ch99q/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/config"
 )
 
 // withTempConfig returns a Config whose DataDir and MetaFile point at a

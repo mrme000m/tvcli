@@ -11,7 +11,7 @@ Technical reference for the TradingView skill command system in `tvcli`. Covers 
                            │
                            ▼
 ┌─────────────────────────────────────────────────────────────┐
-│  1. Resolve skill from registry (internal/skill/registry.go)│
+│  1. Resolve skill from registry (pkg/skill/registry.go)│
 │     • Match command name → Skill struct                      │
 │     • Apply preset or --input overrides                      │
 └─────────────────────────────────────────────────────────────┘
@@ -46,7 +46,7 @@ Technical reference for the TradingView skill command system in `tvcli`. Covers 
 ./tvcli <skill> <SYMBOL> --tf <timeframe> --json --agent
 ```
 
-Uses the `ParseOutput` function in `internal/skill/parsers/<skill>.go`. Best when the script needs custom graphic/table extraction.
+Uses the `ParseOutput` function in `pkg/skill/parsers/<skill>.go`. Best when the script needs custom graphic/table extraction.
 
 ### 2. Generic schema-guided extractor
 
@@ -122,13 +122,13 @@ type SkillResult struct {
 
 ### 1. Create the parser file
 
-Path: `internal/skill/parsers/<name>.go`
+Path: `pkg/skill/parsers/<name>.go`
 
 ```go
 package parsers
 
 import (
-    "github.com/ch99q/tvcli/internal/skill"
+    "github.com/mrme000m/tvcli/pkg/skill"
 )
 
 var MySkill = &skill.Skill{
@@ -160,7 +160,7 @@ func init() { skill.Register(MySkill) }
 
 ### 2. Registration is automatic
 
-`internal/cmd/shared.go` blank-imports `internal/skill/parsers`, so `init()` runs automatically. No wiring needed.
+`internal/cmd/shared.go` blank-imports `pkg/skill/parsers`, so `init()` runs automatically. No wiring needed.
 
 ### 3. Add help text
 
@@ -168,15 +168,15 @@ Edit `internal/cmd/help.go` to list the new skill under **Indicator Skills**.
 
 ### 4. Add tests
 
-- Path: `internal/skill/parsers/<name>_test.go`
-- Capture fixture: `./tvcli run <pine-id> --raw-out internal/skill/parsers/testdata/<name>_fixture.json`
+- Path: `pkg/skill/parsers/<name>_test.go`
+- Capture fixture: `./tvcli run <pine-id> --raw-out pkg/skill/parsers/testdata/<name>_fixture.json`
 - Assert on `Status`, `Market.Bias`, `Structure` keys, `Conformance.AgenticScore`
 
 ### 5. Build and verify
 
 ```bash
 go build -o tvcli ./cmd/tvcli
-go test ./internal/skill/parsers -v
+go test ./pkg/skill/parsers -v
 ./tvcli my-skill --symbol BINANCE:BTCUSDT --tf 5m --agent --json
 ```
 
@@ -287,8 +287,8 @@ The `--signals` flag produces a `pipeline.Signals` object:
 
 | Layer | Location |
 |-------|----------|
-| Skill framework | `internal/skill/skill.go`, `internal/skill/registry.go` |
-| Per-skill parsers | `internal/skill/parsers/*.go` |
+| Skill framework | `pkg/skill/skill.go`, `pkg/skill/registry.go` |
+| Per-skill parsers | `pkg/skill/parsers/*.go` |
 | Generic extractor | `pkg/pipeline/extract.go`, `pkg/pipeline/extract_schema.go`, `pkg/pipeline/dynparse.go` |
 | Schema parsing | `pkg/schema/schema.go` |
 | Run orchestration | `internal/cmd/run.go`, `internal/cmd/skillcmd.go`, `internal/cmd/shared.go` |

@@ -1,7 +1,7 @@
 ---
 name: skill-creator
 package: tvcli
-description: Register any Pine Script (Pine ID or local .pine — including a script produced by tvcli.pine-builder) as a first-class `tvcli <skill>` command. Writes the Go parser (internal/skill/parsers/<name>.go), the human doc (docs/skills/<name>.md), builds the binary, and verifies the skill runs with default and custom inputs. Trigger on "register this script as a skill", "make X a tvcli skill", "add a skill for this indicator", "create a skill parser", or any handoff of a Pine ID / .pine file to turn into a reusable CLI skill.
+description: Register any Pine Script (Pine ID or local .pine — including a script produced by tvcli.pine-builder) as a first-class `tvcli <skill>` command. Writes the Go parser (pkg/skill/parsers/<name>.go), the human doc (docs/skills/<name>.md), builds the binary, and verifies the skill runs with default and custom inputs. Trigger on "register this script as a skill", "make X a tvcli skill", "add a skill for this indicator", "create a skill parser", or any handoff of a Pine ID / .pine file to turn into a reusable CLI skill.
 model: cloudflare-workers-ai/@cf/zai-org/glm-5.2
 thinking: high
 tools: read, bash, edit, write, find, ls, grep
@@ -50,7 +50,7 @@ You will be given:
    - **Graphics-based**: if plots are `na`/absent (e.g. `barstate.islast`-gated) →
      set `RequiresGraphic: true` and read levels from `dwglabels`/`dwglines`.
 
-5. **Write `internal/skill/parsers/<name>.go`.**
+5. **Write `pkg/skill/parsers/<name>.go`.**
    - Define `var <Name>Skill = &skill.Skill{ Name, Synopsis, PineID, Inputs,
      Presets, ParseOutput, FormatText }` (see `parsers/vp_pro.go` and `vp.go`).
    - Reuse helpers in `parsers/helpers.go` (`getField`, `toFloat`, `getValidFloat`,

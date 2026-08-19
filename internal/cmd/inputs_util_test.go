@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ch99q/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/cli"
 )
 
 // TestCollectInputs verifies that all documented Pine-input spellings

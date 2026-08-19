@@ -59,12 +59,12 @@ Two output paths were tested for every skill:
 
 ## Code fixes applied
 1. `internal/cmd/skillcmd.go`: stopped overwriting `result.Status` with `"ok"`; now preserves `no_data`/`error` from parsers and only back-fills `lastPrice` when the parser actually produced data.
-2. `internal/skill/parsers/smc.go`: replaced non-existent aggregated count fields with explicit counting of Bullish/Bearish BOS/CHoCH/FVG/OB event flags across bars.
-3. `internal/skill/parsers/ust.go`: read SuperTrend line prices from `plot_0`/`plot_2` instead of the style-mapped `ST1`/`ST2` colorers.
-4. `internal/skill/parsers/sniper.go`: read EMA line prices from `plot_0`/`plot_2`/`plot_5` instead of style-mapped color-code values.
-5. `internal/skill/parsers/quantum.go`: fixed `FormatText` referencing a non-existent `ribbonState` key.
-6. `internal/skill/parsers/golden.go`: returns `no_data` when the expected `Verdict` field is missing (the skill is registered to the same Pine ID as `smc`).
-7. `internal/skill/parsers/trend.go`: replaced obsolete `TrendDirection`/`TQI`/`Regime` lookup with `plot_0` SuperTrend line and buy/sell signal flags.
+2. `pkg/skill/parsers/smc.go`: replaced non-existent aggregated count fields with explicit counting of Bullish/Bearish BOS/CHoCH/FVG/OB event flags across bars.
+3. `pkg/skill/parsers/ust.go`: read SuperTrend line prices from `plot_0`/`plot_2` instead of the style-mapped `ST1`/`ST2` colorers.
+4. `pkg/skill/parsers/sniper.go`: read EMA line prices from `plot_0`/`plot_2`/`plot_5` instead of style-mapped color-code values.
+5. `pkg/skill/parsers/quantum.go`: fixed `FormatText` referencing a non-existent `ribbonState` key.
+6. `pkg/skill/parsers/golden.go`: returns `no_data` when the expected `Verdict` field is missing (the skill is registered to the same Pine ID as `smc`).
+7. `pkg/skill/parsers/trend.go`: replaced obsolete `TrendDirection`/`TQI`/`Regime` lookup with `plot_0` SuperTrend line and buy/sell signal flags.
 
 ## Outstanding issues
 - **anchored-vp**: Graphics-only script (no period data). Reports `no_data` on XAUUSD; errors on BTCUSD (TradingView-side).

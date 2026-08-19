@@ -3,7 +3,7 @@ package pipeline
 import (
 	"testing"
 
-	"github.com/ch99q/tvcli/pkg/schema"
+	"github.com/mrme000m/tvcli/pkg/schema"
 )
 
 func TestParse_WithSchema(t *testing.T) {

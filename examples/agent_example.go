@@ -11,8 +11,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/agent"
-	"github.com/ch99q/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/agent"
+	"github.com/mrme000m/tvcli/internal/config"
 )
 
 func main() {

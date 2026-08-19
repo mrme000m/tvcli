@@ -6,11 +6,11 @@ import (
 	"io"
 	"strings"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/skill"
-	"github.com/ch99q/tvcli/internal/service"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
-	"github.com/ch99q/tvcli/pkg/tradingview"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/pkg/skill"
+	"github.com/mrme000m/tvcli/internal/service"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/pkg/tradingview"
 )
 
 // inputsCmd implements `tv inputs <pineId|skillName>` — a diagnostic that

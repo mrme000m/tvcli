@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
 )
 
 type compileCmd struct{ app *App }

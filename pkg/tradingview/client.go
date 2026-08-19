@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ch99q/tvcli/pkg/tradingview/auth"
+	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 	"github.com/gorilla/websocket"
 )
 

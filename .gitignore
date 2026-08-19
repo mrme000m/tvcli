@@ -8,6 +8,9 @@ authenticated_cookies.json
 # Compiled binaries
 /tv
 /tvcli
+/tvcli-linux
+/tvcli-arm64
+/tvcli.exe
 
 # OS
 .DS_Store

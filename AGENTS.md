@@ -23,7 +23,7 @@ around the `tvcli` Go CLI. It is packaged for agent consumption two ways:
   `TV_TIER`) — never commit it, never print cookie values.
 - Prefer `xau-scalp` (consolidated script) over running indicators one by one:
   free tier allows only 2 studies per chart; the consolidated engine returns
-  the full composite in ~4s.
+  the full composite in a single run.
 - Use `--json --agent` for machine-readable envelopes; `--raw` only for
   debugging.
 - Reference docs for Pine v5 live in

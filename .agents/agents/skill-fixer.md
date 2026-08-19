@@ -47,7 +47,7 @@ You will be given:
    plane, issue, evidence pointers, proposed improvement, and any
    "Verification after changes" block — that block is your acceptance criteria.
 2. Read every artifact the report references: the `.pine` source, the parser
-   (`internal/skill/parsers/<name>.go`), helpers (`helpers.go`, `resolve.go`)
+   (`pkg/skill/parsers/<name>.go`), helpers (`helpers.go`, `resolve.go`)
    when parser findings exist, cmd-layer files when cmd findings exist, the
    doc (`docs/skills/<name>.md`), and both raw JSON outputs.
 3. Snapshot baselines for before/after comparison:
@@ -93,7 +93,7 @@ guardrail or needs a decision (record exactly why).
 
 ### 2b. Parser fixes
 
-1. Edit only `internal/skill/parsers/<name>.go` (inline small local helpers;
+1. Edit only `pkg/skill/parsers/<name>.go` (inline small local helpers;
    do not extend `helpers.go`/`resolve.go` unless the finding explicitly
    targets shared code).
 2. `go build -o tvcli ./cmd/tvcli` → exit 0.

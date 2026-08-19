@@ -9,12 +9,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/internal/skill"
-	_ "github.com/ch99q/tvcli/internal/skill/parsers"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
-	"github.com/ch99q/tvcli/pkg/pipeline"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/skill"
+	_ "github.com/mrme000m/tvcli/pkg/skill/parsers"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/pkg/pipeline"
 )
 
 // App is the shared context passed to every command: the loaded config plus

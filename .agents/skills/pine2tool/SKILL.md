@@ -154,7 +154,7 @@ Instead of hand-coding patterns for each indicator, it:
 | **Layer 2: structural topology analysis** | `internal/agent/graphics_generic.go` | Groups graphic elements by geometric topology and infers semantics from group properties — not from script-specific layouts. |
 
 Both layers run automatically for every `tv analyze` and `tv eval --agent` call.
-Per-script parsers in `internal/skill/parsers/` remain only for **registered
+Per-script parsers in `pkg/skill/parsers/` remain only for **registered
 skills** where exact Pine field names and plot semantics are known.
 
 ### Inspecting and extending
@@ -174,7 +174,7 @@ topology rules, regardless of how they arrange boxes, lines, and labels.
 ## Registering the script as a reusable tvcli skill
 
 Matrix: `docs/skills/<name>.md` (human doc) + a `skill.Skill` registration in
-`internal/skill/parsers/<name>.go` via `func init() { skill.Register(XxxSkill) }`
+`pkg/skill/parsers/<name>.go` via `func init() { skill.Register(XxxSkill) }`
 (name, PineID, InputDef slice keyed by TVInputID, optional presets). The emitted
 `<slug>.skill.yaml` has the skeleton to fill in. After registering, the script
 becomes `tvcli <name> --symbol … --tf …`.

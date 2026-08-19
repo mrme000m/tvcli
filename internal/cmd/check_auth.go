@@ -6,10 +6,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/pkg/tradingview"
-	"github.com/ch99q/tvcli/pkg/tradingview/auth"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/tradingview"
+	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 )
 
 type checkAuthCmd struct{ app *App }

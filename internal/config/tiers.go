@@ -1,32 +1,17 @@
 package config
 
-import "os"
+import (
+	"os"
 
-// TierLimits holds subscription-tier resource caps (from tradingview.com/pricing/).
-type TierLimits struct {
-	MaxCharts       int // charts per tab
-	MaxIndicators   int // indicators per chart
-	MaxConnections  int // simultaneous WebSocket connections
-	MaxBars         int // historical bars (minute); 0 = unlimited
-	CalcTimeoutSecs int // calculation time limit
-}
+	"github.com/mrme000m/tvcli/pkg/account"
+)
 
-var tiers = map[string]TierLimits{
-	"free":      {1, 2, 2, 180, 20},
-	"essential": {2, 5, 10, 365, 40},
-	"plus":      {4, 10, 20, 0, 40},   // 0 = unlimited
-	"premium":   {8, 25, 50, 0, 40},
-	"ultimate":  {16, 50, 200, 0, 100},
-}
+// TierLimits is the resource-caps type for a subscription tier. The
+// canonical definition lives in pkg/account so external programs share it.
+type TierLimits = account.TierLimits
 
-// GetTierLimits returns the TierLimits for the TV_TIER env var, defaulting to "free".
+// GetTierLimits returns the TierLimits for the TV_TIER env var, defaulting to
+// "free". Legacy single-account behavior is unchanged: the tier is global.
 func GetTierLimits() TierLimits {
-	tier := os.Getenv("TV_TIER")
-	if tier == "" {
-		tier = "free"
-	}
-	if l, ok := tiers[tier]; ok {
-		return l
-	}
-	return tiers["free"]
+	return account.LimitsForTier(os.Getenv("TV_TIER"))
 }

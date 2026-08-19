@@ -291,7 +291,7 @@ If this produces useful output, **no custom parser is needed**.
 If you want a named command like `tv my-skill`, add it to the skill registry:
 
 ```go
-// internal/skill/registry.go
+// pkg/skill/registry.go
 var MySkill = &skill.Skill{
     Name:     "my-skill",
     Synopsis: "My custom indicator",
@@ -494,7 +494,7 @@ The generic `--signals` extractor is the right default, but some scripts need a 
    ```bash
    ./tvcli run PUB;b9372355c2e6483f952ca49a21d2ebbb \
      --symbol BINANCE:BTCUSDT --tf 1h --bars 50 \
-     --raw-out internal/skill/parsers/testdata/my_skill_fixture.json
+     --raw-out pkg/skill/parsers/testdata/my_skill_fixture.json
    ```
    Use BTC/USDT (or any 24/7 market) on weekends when XAUUSD is thin/closed.
 
@@ -503,23 +503,23 @@ The generic `--signals` extractor is the right default, but some scripts need a 
    - If the script is overlay and lacks a price plot, derive the price from the most recent `dwglabels` entry (`y` field is price when `yl == "pr"`).
 
 5. **Create the skill file**
-   - Path: `internal/skill/parsers/<name>.go`
+   - Path: `pkg/skill/parsers/<name>.go`
    - Declare `var XxxSkill = &skill.Skill{...}`
    - Provide `Inputs`, `Presets`, `ParseOutput`, `FormatText`
    - Call `skill.Register` in `init()`
-   - `internal/cmd/shared.go` already blank-imports `internal/skill/parsers`, so no extra wiring is needed.
+   - `internal/cmd/shared.go` already blank-imports `pkg/skill/parsers`, so no extra wiring is needed.
 
 6. **Register skill metadata in `internal/cmd/help.go`**
    Add the skill name under **Indicator Skills** in the static help text.
 
 7. **Add tests**
-   - Path: `internal/skill/parsers/<name>_test.go`
+   - Path: `pkg/skill/parsers/<name>_test.go`
    - Load the captured fixture and assert on `Status`, `Market.Bias`, `Structure` keys, and `Conformance.AgenticScore`.
 
 8. **Build and verify**
    ```bash
    go build -o tvcli ./cmd/tvcli
-   go test ./internal/skill/parsers -v
+   go test ./pkg/skill/parsers -v
    ./tvcli <skill> --symbol BINANCE:BTCUSDT --tf 5m --preset scalping --agent --json
    ```
 
@@ -543,7 +543,7 @@ import (
     "math"
     "strings"
 
-    "github.com/ch99q/tvcli/internal/skill"
+    "github.com/mrme000m/tvcli/pkg/skill"
 )
 
 var MySkill = &skill.Skill{
@@ -589,7 +589,7 @@ func init() { skill.Register(MySkill) }
 
 ### Example: `liq-sweep` findings
 
-Implemented in `internal/skill/parsers/liq_sweep.go` for:
+Implemented in `pkg/skill/parsers/liq_sweep.go` for:
 
 ```text
 PUB;b9372355c2e6483f952ca49a21d2ebbb

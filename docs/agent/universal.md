@@ -111,7 +111,7 @@ no per-script matchers needed. If a new arrangement is observed, add a topology
 rule in `buildBoxTopology` / `buildLineTopology` (a geometric grouping criterion),
 not a script-specific matcher.
 
-Per-script parsers in `internal/skill/parsers/` remain only for **registered
+Per-script parsers in `pkg/skill/parsers/` remain only for **registered
 skills** where exact Pine field names and plot semantics are known.
 
 ## Output Formats
@@ -182,7 +182,7 @@ Complete structured data for programmatic consumption:
 ## Programmatic Usage
 
 ```go
-import "github.com/ch99q/tvcli/internal/agent"
+import "github.com/mrme000m/tvcli/internal/agent"
 
 cfg := agent.UniversalAnalyzerConfig{
     Symbol:    "BINANCE:BTCUSDT",

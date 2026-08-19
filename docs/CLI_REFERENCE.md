@@ -382,7 +382,7 @@ tvcli serve [--addr :8765]
 
 ---
 
-## Skill Commands (22 indicators)
+## Skill Commands (19 indicator skills)
 
 Each skill is a shortcut for `run` with a pre-configured Pine ID and custom output parser.
 

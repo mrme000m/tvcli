@@ -3,7 +3,7 @@ name: tvcli
 description: >
   TradingView Pine Script market analysis toolkit — compile, run, and extract
   structured signals from any Pine Script indicator on live market data via
-  the Go tvcli binary. Includes 18 built-in indicator skills (SMC, EMA stack,
+  the Go tvcli binary. Includes 19 built-in indicator skills (SMC, EMA stack,
   SuperTrend, RSI, Squeeze Momentum, Ichimoku, Volume Profile, CVD, Camarilla,
   Choppiness, and a consolidated XAUUSD Scalping Confluence Engine), an async
   HTTP server for agent integration, and progressive reference docs for Pine
@@ -16,7 +16,7 @@ metadata:
   author: ch99q
   version: "1.0"
   binary: tvcli
-  skills: "smc,dvi,liq-sweep,sr-breaks,gold-divergence,xau-trend,vp,swingarm,golden,sniper,ust,quantum,squeeze,ichimoku,camarilla,cvd,choppiness,xau-scalp"
+  skills: "smc,dvi,liq-sweep,sr-breaks,gold-divergence,xau-trend,vp,vp-pro,swingarm,golden,sniper,ust,quantum,squeeze,ichimoku,camarilla,cvd,choppiness,xau-scalp"
 ---
 
 # tvcli — TradingView Pine Script Market Analysis Toolkit
@@ -56,14 +56,14 @@ TV_TIER=free
 # Then: curl http://localhost:8765/health
 ```
 
-## Built-in Skills (18)
+## Built-in Skills (19)
 
 All skills output `--json --agent` for agent-ready v2 envelopes with market
 data, structure, opportunities, narrative, and conformance scoring.
 
 | Skill | Category | Description |
 |-------|----------|-------------|
-| `xau-scalp` | consolidated | All-in-one EMA+ST+RSI+Squeeze+BB+Volume composite signal (~4s, replaces 17 separate runs) |
+| `xau-scalp` | other | All-in-one EMA+ST+RSI+Squeeze+BB+Volume composite signal (one run instead of 6 separate indicators; private `USER;` script — works only on accounts that own it) |
 | `smc` | smc | Smart Money Concepts — BOS/CHoCH, FVG, Order Blocks |
 | `dvi` | volume | Delta Volume Intensity — trend, S/R, momentum |
 | `liq-sweep` | smc | Institutional Liquidity Sweep & Volume Breakout |
@@ -71,6 +71,7 @@ data, structure, opportunities, narrative, and conformance scoring.
 | `gold-divergence` | divergence | Gold RSI divergence — bullish/bearish |
 | `xau-trend` | trend | XAUUSD EMA + Bollinger structure |
 | `vp` | volume | Volume Profile Zones — POC, VAH, VAL |
+| `vp-pro` | volume | Volume Profile Pro — fixed-range POC/VAH/VAL (private; see xau-scalp caveat below) |
 | `swingarm` | smc | SwingArm ATR Trend — trailing stop + Fibonacci |
 | `golden` | other | Golden Rule — multi-TF weekly/daily/4H alignment |
 | `sniper` | other | BS Buy & Sell Signals — multi-EMA confluence |
@@ -107,7 +108,7 @@ data, structure, opportunities, narrative, and conformance scoring.
 
 - **2 indicators per chart** (use `xau-scalp` consolidated script to avoid this)
 - **180 bars** (auto-capped by CLI)
-- **20s calc timeout** (consolidated script runs in ~4s)
+- **20s calc timeout** (the consolidated script runs well under it in practice)
 
 ## Assets
 
@@ -135,14 +136,30 @@ Deep-dive documentation is in `references/`:
    from Pine Facade, NOT raw Pine source. Passing raw source causes
    `line 1:12 no viable alternative at character '\n'`.
 
-2. **Private scripts**: `USER;` scripts need `--allow-private` and must be
-   pushed via `tvcli push` before the skill/run path works.
+2. **Private scripts**: `USER;` skills (`xau-scalp`, `vp-pro`) are bound to the
+   author's TradingView account — TradingView rejects accounts that don't own
+   them. `--allow-private` only bypasses the CLI's local access gate. On your
+   own account, run the local source instead:
+   `./tvcli eval .agents/skills/tvcli/assets/xau-scalp.pine --signals --agent --symbol OANDA:XAUUSD --tf 1H`
+   (or use `pine2tool` to register your own copy under a different ID).
 
-3. **`var` + pivots**: Scripts using `var` + `ta.pivothigh/lows` may return
+3. **Non-`var` recursive series → silent 0 periods**: A series that references
+   its own history and is declared WITHOUT `var` (e.g.
+   `stDir = close > stUpper[1] ? ... : nz(stDir[1], 1)`) **compiles** clean via
+   Pine Facade but the headless runner resolves its type as "undetermined",
+   silently degrading the whole study to 0 fields / 0 periods (plots lost,
+   ST_Dir stuck at +100, no short side). `compile` passing does NOT guarantee a
+   runnable study. If a script that used to return periods suddenly gets 0,
+   look for self-referential series and replace them with the `var`-state form
+   (`var float stLine = na` / `var int stDir = 1`). `assets/xau-scalp.pine` is
+   annotated with this guard at the SuperTrend block.
+
+4. **`var` + pivots**: Scripts using `var` + `ta.pivothigh/lows` may return
    0 periods in headless mode. Remove these constructs if you get 0 periods.
 
-4. **Consolidation**: Combining indicators into one script gives ~15× speedup
-   and avoids the 2-indicator limit. See `assets/xau-scalp.pine`.
+5. **Consolidation**: Combining indicators into one script avoids the
+   2-indicator limit and is much faster than running each indicator separately
+   (one round-trip instead of many). See `assets/xau-scalp.pine`.
 
 ## HTTP Server Endpoints
 
@@ -165,18 +182,18 @@ go build -o tvcli ./cmd/tvcli              # exit 0; matches the `./tvcli` examp
 
 # CLI help and skill registry
 ./tvcli --help                              # exit 0
-./tvcli skills --json                       # exit 0; returns 18 registered skills
+./tvcli skills --json                       # exit 0; returns 19 registered skills
 ./tvcli serve --status                      # exit 0 (server stopped, no hang)
 ./tvcli serve --stop                        # exit 0 (server stopped, no hang)
 
 # Per-skill help for every skill listed above
-for s in smc dvi liq-sweep sr-breaks gold-divergence xau-trend vp \
+for s in smc dvi liq-sweep sr-breaks gold-divergence xau-trend vp vp-pro \
          swingarm golden sniper ust quantum squeeze ichimoku \
          camarilla cvd choppiness xau-scalp; do
   ./tvcli "$s" --help > /dev/null 2>&1
   echo "$s: $?"
 done
-# All 18 exit 0
+# All 19 exit 0
 ```
 
 Notes:

@@ -180,7 +180,7 @@ na, nz, fixnan
   help.go       # Help text
   shared.go     # Shared utilities
 
-/internal/skill/parsers/
+/pkg/skill/parsers/
   *.go          # 30+ skill parsers extracting signals from study data
 ```
 
@@ -241,7 +241,7 @@ skills/pinescript/       # THIS SKILL
 
 ## Skill Development: Adding a Parser
 
-1. Create `/internal/skill/parsers/my_skill.go`
+1. Create `/pkg/skill/parsers/my_skill.go`
 2. Implement parser function taking `periods`, `graphic`, `strategyReport`
 3. Register in `/internal/cmd/skillcmd.go`
 4. Add to `help.go` skills list
@@ -253,4 +253,4 @@ skills/pinescript/       # THIS SKILL
 
 - **Pine Script Reference (v6 is current; v5 still supported):** https://www.tradingview.com/pine-script-docs
 - **tvcli Source:** the repo/package root containing this skill (`cmd/`, `internal/`, `pkg/`)
-- **Go Docs:** `go doc github.com/ch99q/tvcli/...`
+- **Go Docs:** `go doc github.com/mrme000m/tvcli/...`

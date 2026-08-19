@@ -5,9 +5,9 @@ import (
 	"io"
 	"os"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/cmd"
-	"github.com/ch99q/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/cmd"
+	"github.com/mrme000m/tvcli/internal/config"
 )
 
 func main() {

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ch99q/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/cli"
 )
 
 // execRaw handles the shared --raw / --raw-out / --out dumping used by both

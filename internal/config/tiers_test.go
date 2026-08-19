@@ -18,11 +18,11 @@ func TestGetTierLimitsKnownTiers(t *testing.T) {
 		tier     string
 		expected TierLimits
 	}{
-		{"free", TierLimits{1, 2, 2, 180, 20}},
-		{"essential", TierLimits{2, 5, 10, 365, 40}},
-		{"plus", TierLimits{4, 10, 20, 0, 40}},
-		{"premium", TierLimits{8, 25, 50, 0, 40}},
-		{"ultimate", TierLimits{16, 50, 200, 0, 100}},
+		{"free", TierLimits{MaxCharts: 1, MaxIndicators: 2, MaxConnections: 2, MaxBars: 180, CalcTimeoutSecs: 20}},
+		{"essential", TierLimits{MaxCharts: 2, MaxIndicators: 5, MaxConnections: 10, MaxBars: 365, CalcTimeoutSecs: 40}},
+		{"plus", TierLimits{MaxCharts: 4, MaxIndicators: 10, MaxConnections: 20, MaxBars: 0, CalcTimeoutSecs: 40}},
+		{"premium", TierLimits{MaxCharts: 8, MaxIndicators: 25, MaxConnections: 50, MaxBars: 0, CalcTimeoutSecs: 40}},
+		{"ultimate", TierLimits{MaxCharts: 16, MaxIndicators: 50, MaxConnections: 200, MaxBars: 0, CalcTimeoutSecs: 100}},
 	}
 	for _, c := range cases {
 		t.Setenv("TV_TIER", c.tier)

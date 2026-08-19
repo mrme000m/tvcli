@@ -22,7 +22,7 @@ directories above. Skills follow the [Agent Skills standard](https://agentskills
 pi install /Volumes/ExMac/code/tradingview/go
 
 # From git
-pi install git:github.com/ch99q/tvcli-skills
+pi install git:github.com/mrme000m/tvcli-skills
 ```
 
 ### Use with any Agent Skills-compatible harness

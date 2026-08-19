@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
 )
 
 // Entry is one tracked Pine script's local metadata.

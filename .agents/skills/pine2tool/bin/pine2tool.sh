@@ -137,7 +137,7 @@ $([ "$IS_LOCAL" -eq 1 ] && echo "Source: local \`$SRC_FILE\`" || echo "Pine ID: 
 Symbol: \`$SYMBOL\` · Timeframe: \`$TF\`
 
 Reusable analysis artifacts in this directory. To make this a first-class
-\`tvcli\` skill, create \`internal/skill/parsers/$SLUG.go\` with
+\`tvcli\` skill, create \`pkg/skill/parsers/$SLUG.go\` with
 \`func init() { skill.Register(${SKILL_NAME}Skill) }\` (using \`$SLUG.skill.yaml\`
 as a skeleton), add a human doc under \`docs/skills/$SLUG.md\`, and add the
 skill to the built-in list if desired.

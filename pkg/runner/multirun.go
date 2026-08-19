@@ -8,8 +8,8 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ch99q/tvcli/pkg/pipeline"
-	"github.com/ch99q/tvcli/pkg/schema"
+	"github.com/mrme000m/tvcli/pkg/pipeline"
+	"github.com/mrme000m/tvcli/pkg/schema"
 )
 
 // RunConfig specifies one execution of a script with particular inputs.

@@ -8,7 +8,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/ch99q/tvcli/pkg/schema"
+	"github.com/mrme000m/tvcli/pkg/schema"
 )
 
 // ExtractWithSchema is the schema-guided version of Extract.

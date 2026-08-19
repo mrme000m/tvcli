@@ -151,7 +151,7 @@ Generated: 2026-01-15 14:30 | tvcli agent
 The agent can be used as a library in your own Go code:
 
 ```go
-import "github.com/ch99q/tvcli/internal/agent"
+import "github.com/mrme000m/tvcli/internal/agent"
 
 cfg := agent.AgentConfig{
     Symbol:    "BINANCE:BTCUSDT",
@@ -280,7 +280,7 @@ matchers:
 | **Layer 1: Flat signal extraction** | `pkg/pipeline/extract.go` | Universal handlers for every TV draw type (boxes→S/R, lines→levels, labels→events, tables→grids, hhists→volume bins). Zero script-specific code. |
 | **Layer 2: Structural topology analysis** | `internal/agent/graphics_generic.go` | Groups elements by geometric topology (shared edges, width, extension, style) and infers semantics from group properties. Detects POC/VAH/VAL, order blocks, FVGs, breaker blocks, liquidity levels, session markers. |
 
-**Per-script parsers** in `internal/skill/parsers/` remain only for **registered
+**Per-script parsers** in `pkg/skill/parsers/` remain only for **registered
 skills** where exact Pine field names and plot semantics are known (e.g., SMC's
 `Bullish_BOS` field, VP's `POC`/`VAH`/`VAL` plot values). For unknown/arbitrary
 scripts, the generic topology approach handles any arrangement without

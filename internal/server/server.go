@@ -15,15 +15,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/internal/service"
-	"github.com/ch99q/tvcli/internal/skill"
-	_ "github.com/ch99q/tvcli/internal/skill/parsers" // register all skills via init()
-	"github.com/ch99q/tvcli/pkg/pinefacade"
-	"github.com/ch99q/tvcli/pkg/runner"
-	"github.com/ch99q/tvcli/pkg/schema"
-	"github.com/ch99q/tvcli/pkg/tradingview"
-	"github.com/ch99q/tvcli/pkg/tradingview/auth"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/service"
+	"github.com/mrme000m/tvcli/pkg/skill"
+	_ "github.com/mrme000m/tvcli/pkg/skill/parsers" // register all skills via init()
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/pkg/runner"
+	"github.com/mrme000m/tvcli/pkg/schema"
+	"github.com/mrme000m/tvcli/pkg/tradingview"
+	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 )
 
 // Server wraps the tvcli core functions behind an HTTP API.

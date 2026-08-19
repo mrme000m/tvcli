@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/config"
 )
 
 var (

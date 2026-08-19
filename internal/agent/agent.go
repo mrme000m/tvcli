@@ -11,10 +11,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/internal/service"
-	"github.com/ch99q/tvcli/internal/skill"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/internal/service"
+	"github.com/mrme000m/tvcli/pkg/skill"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
 )
 
 // AgentConfig configures an agent run.

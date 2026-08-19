@@ -10,7 +10,7 @@ The codebase is a Go CLI (~16,500 lines) that acts as an unofficial TradingView 
 4. **pipeline** (`pkg/pipeline/`) — Dynamic parser + signal extractor that converts raw study output → typed bars → signals/events/levels
 5. **runner** (`pkg/runner/`) — Orchestrates runs (one-shot, persistent, loop, multi-run/sweep)
 6. **service** (`internal/service/`) — Use-case layer wiring pinefacade + tradingview + runner
-7. **skill** (`internal/skill/`) — Framework wrapping specific Pine indicators as typed CLI commands with custom parsers
+7. **skill** (`pkg/skill/`) — Framework wrapping specific Pine indicators as typed CLI commands with custom parsers
 8. **cmd** (`internal/cmd/`) — CLI commands (run, create, push, pull, compile, fetch, sync, search, skills, etc.)
 
 ### Current Execution Flow

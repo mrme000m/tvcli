@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/ch99q/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/cli"
 )
 
 type publistCmd struct{ app *App }

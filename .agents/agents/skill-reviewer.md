@@ -1,7 +1,7 @@
 ---
 name: skill-reviewer
 package: tvcli
-description: Review one Pine Script (usually produced by tvcli.pine-builder and/or registered by tvcli.skill-creator) together with its raw JSON run output, and propose concrete improvements. Cross-checks the .pine source against the raw runtime output (periods, graphics, na sentinels, input propagation) and, when the script is registered, against its Go parser (internal/skill/parsers/<name>.go). Read-only: produces a prioritized findings report — never edits source, parser, or docs. Trigger on "review this script", "review the vp-pro / volume profile / [any] script", "check the raw output against the source", or "propose improvements for this indicator".
+description: Review one Pine Script (usually produced by tvcli.pine-builder and/or registered by tvcli.skill-creator) together with its raw JSON run output, and propose concrete improvements. Cross-checks the .pine source against the raw runtime output (periods, graphics, na sentinels, input propagation) and, when the script is registered, against its Go parser (pkg/skill/parsers/<name>.go). Read-only: produces a prioritized findings report — never edits source, parser, or docs. Trigger on "review this script", "review the vp-pro / volume profile / [any] script", "check the raw output against the source", or "propose improvements for this indicator".
 model: cloudflare-workers-ai/@cf/zai-org/glm-5.2
 thinking: high
 tools: read, bash, edit, write, find, ls, grep
@@ -26,7 +26,7 @@ You will be given:
 
 - `target`: path to a local `.pine` file (or a `PUB;…`/`USER;…` ID — pull it first).
 - `skillName` (optional): the registered tvcli skill name (e.g. `vp-pro`), when
-  a Go parser exists at `internal/skill/parsers/<name>.go`.
+  a Go parser exists at `pkg/skill/parsers/<name>.go`.
 - `rawOutputs` (optional): paths to existing raw JSON runs (e.g.
   `skill_work/<slug>_default.json`, `skill_work/<slug>_custom.json`). If absent
   or stale, regenerate them (see step 2).
@@ -36,8 +36,8 @@ You will be given:
 
 1. **Gather the artifacts.**
    - Read the `.pine` source in full.
-   - If `skillName` is set: read `internal/skill/parsers/<name>.go`,
-     `internal/skill/parsers/helpers.go` / `resolve.go` (helpers only), and
+   - If `skillName` is set: read `pkg/skill/parsers/<name>.go`,
+     `pkg/skill/parsers/helpers.go` / `resolve.go` (helpers only), and
      `docs/skills/<name>.md` if present.
    - Read every file in `rawOutputs`.
 

@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/server"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/server"
 )
 
 const defaultServeAddr = ":8765"

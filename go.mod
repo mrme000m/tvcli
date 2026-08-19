@@ -1,4 +1,4 @@
-module github.com/ch99q/tvcli
+module github.com/mrme000m/tvcli
 
 go 1.22
 

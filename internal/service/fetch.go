@@ -13,9 +13,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
-	"github.com/ch99q/tvcli/pkg/tradingview"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/pkg/tradingview"
 )
 
 // OHLCVBar is a single OHLCV bar for serialization.

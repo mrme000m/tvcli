@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ch99q/tvcli/pkg/schema"
+	"github.com/mrme000m/tvcli/pkg/schema"
 )
 
 // nanSentinel and toFloat are defined in extract.go (the extract version of

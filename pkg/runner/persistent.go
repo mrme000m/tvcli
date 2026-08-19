@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ch99q/tvcli/pkg/tradingview"
+	"github.com/mrme000m/tvcli/pkg/tradingview"
 )
 
 // PersistentRunner holds a long-lived WebSocket connection to TradingView

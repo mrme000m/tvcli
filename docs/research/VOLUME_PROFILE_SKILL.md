@@ -24,7 +24,7 @@ The speaker uses TradingView's **Fixed Range Volume Profile** to find the price 
 
 ## Implemented skill: `vp`
 
-File: [`internal/skill/parsers/vp.go`](../internal/skill/parsers/vp.go)
+File: [`pkg/skill/parsers/vp.go`](../pkg/skill/parsers/vp.go)
 
 Pine script: **`PUB;a4e251b831084685afecaa9192f2a3c5`** — *Fixed Range Volume Profile Zones (with Dynamic Percentile Buffers)* by RWCS_LTD
 

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ch99q/tvcli/internal/agent"
-	"github.com/ch99q/tvcli/internal/cli"
-	"github.com/ch99q/tvcli/internal/config"
-	"github.com/ch99q/tvcli/pkg/pinefacade"
+	"github.com/mrme000m/tvcli/internal/agent"
+	"github.com/mrme000m/tvcli/internal/cli"
+	"github.com/mrme000m/tvcli/internal/config"
+	"github.com/mrme000m/tvcli/pkg/pinefacade"
 )
 
 type universalCmd struct {

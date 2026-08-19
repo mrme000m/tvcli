@@ -25,7 +25,7 @@ EOF
 # 5. Run a pre-published script by Pine ID
 ./tvcli run "PUB;6daafb2cabe6419d98ae25229d2327f8" --signals --agent --json --symbol BTCUSDT --tf 1H
 
-# 6. Run a built-in skill (22 indicators pre-configured)
+# 6. Run a built-in skill (19 indicator skills pre-configured)
 ./tvcli smc --symbol BTCUSDT --tf 1H --agent --json
 
 # 7. Search TradingView's public script library
@@ -40,31 +40,75 @@ EOF
 ```
 tvcli/
 ├── cmd/tvcli/          CLI entry point
-├── internal/
+├── internal/           Application glue (not importable by other modules)
 │   ├── cli/            CLI framework (routing, flags)
 │   ├── cmd/            Command implementations (23 commands)
 │   ├── config/         Env/.env config, cookie auth, tier limits
 │   ├── metadb/         Local script metadata database
 │   ├── server/         HTTP server for AI agent integration
-│   ├── service/        Script execution orchestration
-│   └── skill/
-│       ├── skill.go    Skill, InputDef, AgentResult types
-│       ├── registry.go Global skill registry
-│       └── parsers/    Per-skill output parsers (22 indicators)
-├── pkg/
+│   └── service/        Script execution orchestration
+├── pkg/                ← importable library surface
+│   ├── account/        Optional multi-account registry + per-account tier limits
 │   ├── pinefacade/     HTTP client: Pine Facade (CRUD, search, compile)
 │   ├── pipeline/       Signal extractor (periods → events/levels/report)
 │   ├── runner/         WS orchestration (one-shot, persistent, loop, sweep)
 │   ├── schema/         PineScript metaInfo schema parsing
+│   ├── skill/          Skill registry, types, 19 per-script parsers
 │   └── tradingview/    WebSocket client: protocol, chart/study lifecycle
 ├── docs/
 │   ├── skills/         Per-skill documentation (21 files)
 │   ├── research/       Research notes from reverse engineering
+│   ├── MULTI_ACCOUNT.md
 │   └── CLI_REFERENCE.md
-├── go.mod
+├── go.mod              module github.com/mrme000m/tvcli
 ├── Makefile
 └── .env (not committed)
 ```
+
+## Using tvcli as a Library
+
+Everything under `pkg/` is importable by other Go programs; `internal/` is
+application glue and intentionally not importable. Add the module to your
+`go.mod`:
+
+```
+require github.com/mrme000m/tvcli v0.0.0
+replace github.com/mrme000m/tvcli => /path/to/tvcli   # local development
+```
+
+| Package | What you get |
+|---------|--------------|
+| `pkg/tradingview` | WebSocket client: connect/auth, chart sessions, run Pine studies, collect periods / graphics / strategy reports |
+| `pkg/pinefacade` | HTTP client: compile Pine, save/get/delete scripts, search the public library, fetch compiled IL |
+| `pkg/schema` | Parse Pine metaInfo into typed inputs/plots for schema-driven parsing |
+| `pkg/pipeline` | Script-agnostic signal extraction (order blocks, levels, FVGs, ...) from raw study output |
+| `pkg/runner` | High-level study orchestration (persistent WS, input sweeps) + `ParseOutput` |
+| `pkg/skill` | The 19-skill registry with per-script parsers and agent-ready result types |
+| `pkg/account` | Optional multi-account credential registry + per-account tier limits |
+
+Minimal study run:
+
+```go
+client := tradingview.NewClient(
+    tradingview.WithToken(acct.SessionID),
+    tradingview.WithSignature(acct.Signature),
+    tradingview.WithDeviceToken(acct.DeviceToken),
+)
+client.Connect()
+ch := tradingview.NewChartSession(client)
+ch.SetMarket("OANDA:XAUUSD", map[string]any{"timeframe": "1H", "range": 180})
+study := ch.Study(indicator) // tradingview.NewPineIndicator({pineId, script, metaInfo})
+// ... collect study.Periods() / study.Graphic() / study.StrategyReport()
+```
+
+A complete, runnable example lives in `examples/study_runner`.
+
+**Multi-account (optional):** `pkg/account` loads one or many accounts —
+legacy single `.env` synthesizes one `default` account (behavior unchanged),
+while `ACCOUNT_N_*` env rows or an `accounts.json` sidecar define N accounts
+with per-account tier limits. The transports are already account-parameterized,
+so wiring a full pool/router into a service is a follow-on, not a rewrite.
+See [docs/MULTI_ACCOUNT.md](docs/MULTI_ACCOUNT.md).
 
 ## Commands
 
@@ -148,7 +192,7 @@ that works across any script without per-script matchers:
   **order-block zones**, **FVG/gap boxes**, **breaker blocks**, **liquidity
   levels** and **session markers** purely from the drawing layer.
 
-Per-script parsers in `internal/skill/parsers/` remain only for **registered
+Per-script parsers in `pkg/skill/parsers/` remain only for **registered
 skills** where exact Pine field names and plot semantics are known.
 
 ### Passing Pine inputs (all spellings work)
