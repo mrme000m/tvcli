@@ -101,6 +101,9 @@ func (c *pushCmd) Run(env *cli.Env) error {
 	if id != "" {
 		store.Set(id, metadb.Entry{
 			PineID:        pushedPine,
+			Owner:         cfg.UserName,
+			Access:        pinefacade.AccessFromPineID(pushedPine),
+			ScriptType:    pinefacade.ScriptTypeFromSource(sourceStr),
 			LocalHash:     localHash,
 			RemoteHash:    localHash,
 			RemoteVersion: version,

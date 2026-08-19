@@ -33,6 +33,19 @@ func LooksLikePineID(s string) bool {
 	return regexp.MustCompile(`(?i)^\s*(USER|PUB|STD|INDIC);`).MatchString(s)
 }
 
+// ScriptTypeFromSource reports whether Pine source declares a strategy
+// (emits signals) or an indicator (analysis only). It scans the declaration
+// line (`strategy(`, `indicator(`, or legacy `study(`) — the authoritative
+// marker set at script creation. Anything that is not an explicit strategy is
+// reported as an indicator.
+func ScriptTypeFromSource(source string) string {
+	m := regexp.MustCompile(`(?m)^\s*(strategy|indicator|study)\s*\(`).FindStringSubmatch(source)
+	if len(m) > 1 && strings.EqualFold(m[1], "strategy") {
+		return "strategy"
+	}
+	return "indicator"
+}
+
 // SHA256 returns the hex-encoded SHA-256 hash of text.
 func SHA256(text string) string {
 	h := sha256.Sum256([]byte(text))

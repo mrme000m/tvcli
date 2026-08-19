@@ -149,3 +149,29 @@ func TestLoadPersistsAcrossInstances(t *testing.T) {
 		t.Errorf("entry did not persist: %+v", got)
 	}
 }
+
+func TestSetPreservesOwnershipMetadata(t *testing.T) {
+	cfg := withTempConfig(t)
+	store, _ := Load(cfg)
+
+	store.Set("1", Entry{
+		Name:       "Custom",
+		PineID:     "USER;abc",
+		Owner:      "siner15",
+		Access:     "private",
+		ScriptType: "indicator",
+	})
+
+	// A partial update (e.g. push refresh) must keep the ownership metadata.
+	store.Set("1", Entry{RemoteHash: "h2"})
+	got := store.Get("1")
+	if got.Owner != "siner15" {
+		t.Errorf("Owner = %q, want siner15", got.Owner)
+	}
+	if got.Access != "private" {
+		t.Errorf("Access = %q, want private", got.Access)
+	}
+	if got.ScriptType != "indicator" {
+		t.Errorf("ScriptType = %q, want indicator", got.ScriptType)
+	}
+}

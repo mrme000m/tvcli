@@ -93,6 +93,9 @@ func (c *createCmd) Run(env *cli.Env) error {
 	store.Set(id, metadb.Entry{
 		Name:          name,
 		PineID:        pineID,
+		Owner:         cfg.UserName,
+		Access:        pinefacade.AccessFromPineID(pineID),
+		ScriptType:    pinefacade.ScriptTypeFromSource(sourceStr),
 		LocalPath:     RelPath(cfg, absPath),
 		LocalHash:     pinefacade.SHA256(sourceStr),
 		RemoteHash:    pinefacade.SHA256(sourceStr),

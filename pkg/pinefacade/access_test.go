@@ -25,11 +25,11 @@ func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { retu
 
 func TestPineIDPrefixAndAccess(t *testing.T) {
 	cases := []struct {
-		id      string
-		prefix  string
-		idPart  string
-		public  bool
-		access  string
+		id     string
+		prefix string
+		idPart string
+		public bool
+		access string
 	}{
 		{"PUB;abc123", "PUB", "abc123", true, "public"},
 		{"PRIVATE;xyz", "PRIVATE", "xyz", false, "invite-only"},
@@ -89,5 +89,44 @@ func TestGetScriptAccessInviteOnlyNotFound(t *testing.T) {
 	}
 	if sa.Source != "search" {
 		t.Errorf("source = %q, want search", sa.Source)
+	}
+}
+
+func TestUserOwnsScript(t *testing.T) {
+	body := `[{"scriptIdPart":"USER;owned1","scriptTitle":"Owned"},{"scriptIdPart":"USER;owned2","scriptTitle":"Also owned"}]`
+	c := NewClient("http://unused", "tester", 0)
+	c.httpClient = &http.Client{Transport: stubTransport(body)}
+
+	owned, err := c.UserOwnsScript("USER;owned1", "")
+	if err != nil {
+		t.Fatalf("UserOwnsScript(owned) error: %v", err)
+	}
+	if !owned {
+		t.Error("UserOwnsScript(USER;owned1) = false, want true")
+	}
+
+	owned, err = c.UserOwnsScript("USER;not-mine", "")
+	if err != nil {
+		t.Fatalf("UserOwnsScript(not-mine) error: %v", err)
+	}
+	if owned {
+		t.Error("UserOwnsScript(USER;not-mine) = true, want false")
+	}
+}
+
+func TestScriptTypeFromSource(t *testing.T) {
+	cases := []struct {
+		source string
+		want   string
+	}{
+		{"//@version=5\nstrategy('My Strat', overlay=true)", "strategy"},
+		{"//@version=5\nindicator('My Ind', overlay=true)", "indicator"},
+		{"//@version=5\nstudy('Legacy Study')", "indicator"},
+		{"//@version=5\nplot(close)", "indicator"}, // no declaration -> indicator
+	}
+	for _, c := range cases {
+		if got := ScriptTypeFromSource(c.source); got != c.want {
+			t.Errorf("ScriptTypeFromSource(%q) = %q, want %q", c.source, got, c.want)
+		}
 	}
 }

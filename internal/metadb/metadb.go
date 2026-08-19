@@ -14,9 +14,20 @@ import (
 
 // Entry is one tracked Pine script's local metadata.
 type Entry struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	PineID        string `json:"pineId"`
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	PineID string `json:"pineId"`
+	// Owner is the TradingView username that created/owns the script. It is
+	// captured at create/push/pull time so private (USER;) scripts can be
+	// attributed and re-checked against the current session's saved list.
+	Owner string `json:"owner,omitempty"`
+	// Access classifies the script's visibility: "public" (PUB;), "private"
+	// (USER;), or "invite-only" (PRIVATE/STD/PRO;). Derived from the Pine ID
+	// namespace — see pinefacade.AccessFromPineID.
+	Access string `json:"access,omitempty"`
+	// ScriptType is "strategy" (emits signals) or "indicator" (analysis
+	// only), detected from the Pine source declaration.
+	ScriptType    string `json:"scriptType,omitempty"`
 	LocalPath     string `json:"localPath"`
 	LocalHash     string `json:"localHash"`
 	RemoteHash    string `json:"remoteHash"`
@@ -50,7 +61,7 @@ func Load(cfg *config.Config) (*Store, error) {
 	}
 
 	var raw struct {
-		Version int             `json:"version"`
+		Version int               `json:"version"`
 		Scripts map[string]*Entry `json:"scripts"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -81,6 +92,15 @@ func (ms *Store) Set(id string, entry Entry) {
 		}
 		if entry.PineID == "" {
 			entry.PineID = existing.PineID
+		}
+		if entry.Owner == "" {
+			entry.Owner = existing.Owner
+		}
+		if entry.Access == "" {
+			entry.Access = existing.Access
+		}
+		if entry.ScriptType == "" {
+			entry.ScriptType = existing.ScriptType
 		}
 		if entry.LocalPath == "" {
 			entry.LocalPath = existing.LocalPath

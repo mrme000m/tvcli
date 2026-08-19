@@ -61,6 +61,15 @@ func (c *listCmd) Run(env *cli.Env) error {
 		}
 		fmt.Fprintf(env.Stdout, "  %s #%-3s | %s\n", status, s.ID, s.Name)
 		fmt.Fprintf(env.Stdout, "         pineId: %s\n", s.PineID)
+		if s.Owner != "" {
+			fmt.Fprintf(env.Stdout, "         owner:  %s\n", s.Owner)
+		}
+		if s.Access != "" {
+			fmt.Fprintf(env.Stdout, "         access: %s\n", s.Access)
+		}
+		if s.ScriptType != "" {
+			fmt.Fprintf(env.Stdout, "         type:   %s\n", s.ScriptType)
+		}
 		if s.LocalPath != "" {
 			fmt.Fprintf(env.Stdout, "         local:  %s\n", s.LocalPath)
 		}

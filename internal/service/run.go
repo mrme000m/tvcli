@@ -25,7 +25,7 @@ type RunRequest struct {
 	ForceCleanup bool
 	CalcTimeout  time.Duration // 0 → 120s
 	Debug        bool
-	Source       string            // raw Pine source; when set, bypasses Pine Facade LoadIndicator
+	Source       string // raw Pine source; when set, bypasses Pine Facade LoadIndicator
 }
 
 // RunResult is the raw output of one indicator run.
@@ -34,6 +34,29 @@ type RunResult struct {
 	Periods        []map[string]any
 	Graphic        map[string]map[string]any
 	StrategyReport map[string]any
+}
+
+// PreCheckScriptOwnership verifies a private (USER;) Pine script is still
+// owned by the current TradingView user BEFORE a run is attempted. A USER;
+// ID that is absent from the session's saved-script list belongs to a
+// different account (or was deleted) and would otherwise fail mid-run with an
+// opaque "no source / status 401" study error. Public (PUB;) scripts are
+// never blocked; transient listing failures also pass so a valid script is
+// not wrongly refused.
+func PreCheckScriptOwnership(cfg *config.Config, pineID string) error {
+	if pinefacade.AccessFromPineID(pineID) != "private" {
+		return nil
+	}
+	client := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
+	owned, err := client.UserOwnsScript(pineID, cfg.CookieHeaderOrEmpty())
+	if err != nil {
+		return nil // best-effort: never block on a transient listing failure
+	}
+	if !owned {
+		return fmt.Errorf(
+			"private script %s is not among the current user's saved scripts — it belongs to a different account or was deleted; re-upload with `tvcli create <file.pine>` and update the skill's PineID", pineID)
+	}
+	return nil
 }
 
 // LoadIndicator fetches the script source + metaInfo from Pine Facade and
@@ -131,17 +154,22 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 	if req.Source != "" {
 		indicatorOpts := map[string]any{
 			"pineId":      req.PineID,
-			"script":     req.Source,
-			"metaInfo":   map[string]any{"inputs": []any{}},
+			"script":      req.Source,
+			"metaInfo":    map[string]any{"inputs": []any{}},
 			"pineVersion": "1.0",
 		}
 		indicator = tradingview.NewPineIndicator(indicatorOpts)
 		for k, v := range req.Inputs {
 			skip := false
 			for _, r := range req.ReservedKeys {
-				if k == r { skip = true; break }
+				if k == r {
+					skip = true
+					break
+				}
 			}
-			if skip { continue }
+			if skip {
+				continue
+			}
 			if sErr := indicator.SetOption(k, v); sErr != nil {
 				fmt.Fprintf(os.Stderr, "⚠ Input '%s': %v\n", k, sErr)
 			}

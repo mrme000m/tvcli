@@ -211,6 +211,39 @@ func (c *Client) ListSaved(cookie string) (any, error) {
 	return result, nil
 }
 
+// UserScripts returns the set of Pine IDs currently saved by the authenticated
+// user (filter=saved), keyed by normalized Pine ID. This is the live source of
+// truth for "which scripts exist for this user": a private USER; script must
+// appear here to be runnable — an ID that is absent belongs to a different
+// TradingView account (or was deleted) and will fail with "no source / status
+// 401" when loaded.
+func (c *Client) UserScripts(cookie string) (map[string]bool, error) {
+	data, err := c.ListSaved(cookie)
+	if err != nil {
+		return nil, err
+	}
+	owned := make(map[string]bool)
+	for _, it := range normalizeSearchItems(data) {
+		sid, _ := it["scriptIdPart"].(string)
+		if sid != "" {
+			owned[NormalizePineID(sid)] = true
+		}
+	}
+	return owned, nil
+}
+
+// UserOwnsScript reports whether pineID is among the current user's saved
+// scripts. Lookup failures return (true, err) — never block a potentially
+// valid script on a transient listing error; only an explicit absence is a
+// hard negative.
+func (c *Client) UserOwnsScript(pineID, cookie string) (bool, error) {
+	owned, err := c.UserScripts(cookie)
+	if err != nil {
+		return true, err
+	}
+	return owned[NormalizePineID(pineID)], nil
+}
+
 func (c *Client) Compile(source, cookie string) (any, error) {
 	u := fmt.Sprintf("%s/translate_light?user_name=%s&v=3", c.baseURL, url.QueryEscape(c.userName))
 	return c.postMultipart(u, source, cookie)
@@ -259,7 +292,6 @@ func (c *Client) Delete(pineID, cookie string) (any, error) {
 	json.Unmarshal(body, &result)
 	return result, nil
 }
-
 
 func (c *Client) postMultipart(u, source, cookie string) (any, error) {
 	var buf bytes.Buffer
@@ -378,4 +410,3 @@ func decodeIL(il string) string {
 	}
 	return string(decoded)
 }
-

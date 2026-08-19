@@ -75,6 +75,9 @@ func (c *pullCmd) Run(env *cli.Env) error {
 		store.Set(id, metadb.Entry{
 			Name:          scriptName,
 			PineID:        pineID,
+			Owner:         cfg.UserName,
+			Access:        pinefacade.AccessFromPineID(pineID),
+			ScriptType:    pinefacade.ScriptTypeFromSource(result.Source),
 			LocalPath:     fileName,
 			LocalHash:     pinefacade.SHA256(result.Source),
 			RemoteHash:    pinefacade.SHA256(result.Source),

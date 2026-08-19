@@ -71,6 +71,16 @@ func (c *skillCmd) Run(env *cli.Env) error {
 		return nil
 	}
 
+	// Ownership precheck: a private (USER;) script must still exist in the
+	// current user's saved list, otherwise it will 401 ("no source") mid-run.
+	// Skipped when the skill carries raw Source (that path never hits the
+	// facade's LoadIndicator).
+	if pinefacade.AccessFromPineID(c.skill.PineID) == "private" && c.skill.Source == "" {
+		if err := service.PreCheckScriptOwnership(cfg, c.skill.PineID); err != nil {
+			return err
+		}
+	}
+
 	tf := flags.Get("tf")
 	if tf == "" {
 		tf = flags.Get("timeframe")
