@@ -75,7 +75,7 @@ func signalsToAgent(signals *pipeline.Signals, workflow, symbol, tf string, dura
 			LastPrice: pickLastPrice(signals),
 			Bias:      signals.Bias,
 		},
-		Structure: buildStructure(signals),
+		Structure:     buildStructure(signals),
 		Opportunities: nonNilOpps(opportunitiesFromSignals(signals)),
 		Narrative: skill.Narrative{
 			MarketStructure: fmt.Sprintf("%s | confidence=%.2f | fields=%d", signals.Bias, signals.Confidence, len(signals.Classifications)),
@@ -129,7 +129,7 @@ func buildStructure(signals *pipeline.Signals) map[string]any {
 	// "indicator" when the extractor left it unset.
 	kind := signals.Meta.ScriptType
 	if kind == "" {
-		kind = "indicator"
+		kind = pipeline.ScriptTypeIndicator
 	}
 	structure := map[string]any{
 		"kind":            kind,
@@ -142,7 +142,7 @@ func buildStructure(signals *pipeline.Signals) map[string]any {
 		"meta":            signals.Meta,
 	}
 	// Only strategies carry a strategy summary; indicators get none.
-	if kind == "strategy" && signals.Report != nil {
+	if kind == pipeline.ScriptTypeStrategy && signals.Report != nil {
 		structure["strategy"] = signals.Report
 	}
 	return structure

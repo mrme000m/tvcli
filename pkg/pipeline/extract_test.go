@@ -53,10 +53,10 @@ func TestExtractGraphicLabels(t *testing.T) {
 
 func TestResolveScriptTypeSeparatesStrategyFromIndicator(t *testing.T) {
 	cases := []struct {
-		name      string
-		isStrat   bool
-		report    map[string]any
-		want      string
+		name    string
+		isStrat bool
+		report  map[string]any
+		want    ScriptType
 	}{
 		{"schema hint strategy wins", true, nil, "strategy"},
 		{"no hint, no report -> indicator", false, nil, "indicator"},
@@ -112,7 +112,7 @@ func TestExtractMarksStrategyScriptType(t *testing.T) {
 		},
 	}
 	sig := Extract("PUB;test", "TEST", "1m", periods, nil, report)
-	if sig.Meta.ScriptType != "strategy" {
+	if sig.Meta.ScriptType != ScriptTypeStrategy {
 		t.Errorf("ScriptType=%q want strategy", sig.Meta.ScriptType)
 	}
 	if sig.Report == nil || sig.Report.TotalTrades != 2 {
@@ -127,7 +127,7 @@ func TestExtractMarksStrategyScriptType(t *testing.T) {
 
 	// Same periods, no report -> indicator.
 	sig2 := Extract("PUB;test", "TEST", "1m", periods, nil, nil)
-	if sig2.Meta.ScriptType != "indicator" {
+	if sig2.Meta.ScriptType != ScriptTypeIndicator {
 		t.Errorf("no-report ScriptType=%q want indicator", sig2.Meta.ScriptType)
 	}
 	if sig2.Report != nil {

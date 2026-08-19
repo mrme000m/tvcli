@@ -33,7 +33,7 @@ type ScriptSchema struct {
 	Version     string                `json:"version,omitempty"`
 	Name        string                `json:"name"`
 	Description string                `json:"description"`
-	IsStrategy  bool                  `json:"isStrategy"`
+	IsStrategy  bool                  `json:"isStrategy"` // true = strategy (emits signals); false = indicator (analysis only, see pkg/pipeline.ScriptType)
 	IsOverlay   bool                  `json:"isOverlay"`
 	Plots       []PlotDef             `json:"plots"`
 	PlotByName  map[string]PlotDef    `json:"plotByName,omitempty"` // name → PlotDef lookup
@@ -120,16 +120,16 @@ func parsePlotIndex(key string) int {
 type PlotDef struct {
 	Index       int      `json:"index"`
 	ID          string   `json:"id"`
-	Name        string   `json:"name"`        // human-readable from styles.title
-	StyleType   string   `json:"styleType"`   // "line", "histogram", "columns", "circles"
-	PlotType    string   `json:"plotType"`    // "plot", "hline", "plotshape", "fill", "bgcolor"
+	Name        string   `json:"name"`      // human-readable from styles.title
+	StyleType   string   `json:"styleType"` // "line", "histogram", "columns", "circles"
+	PlotType    string   `json:"plotType"`  // "plot", "hline", "plotshape", "fill", "bgcolor"
 	IsOverlay   bool     `json:"isOverlay"`
 	IsHLine     bool     `json:"isHLine"`
-	IsColorer   bool     `json:"isColorer"`   // bgcolor/barcolor/plotcolor (alias for dynparse compat)
+	IsColorer   bool     `json:"isColorer"`         // bgcolor/barcolor/plotcolor (alias for dynparse compat)
 	Palette     string   `json:"palette,omitempty"` // color palette ID
 	HLineValue  *float64 `json:"hLineValue,omitempty"`
-	Semantic    string   `json:"semantic"`    // "price", "signal", "oscillator", "band", "level", "color", "unknown"
-	IsColor     bool     `json:"isColor"`     // bgcolor/barcolor/plotcolor
+	Semantic    string   `json:"semantic"`              // "price", "signal", "oscillator", "band", "level", "color", "unknown"
+	IsColor     bool     `json:"isColor"`               // bgcolor/barcolor/plotcolor
 	TargetStyle string   `json:"targetStyle,omitempty"` // style ID this plot references
 }
 
@@ -137,7 +137,7 @@ type PlotDef struct {
 type InputDef struct {
 	ID       string   `json:"id"`
 	Name     string   `json:"name"`
-	Type     string   `json:"type"`     // "integer", "float", "bool", "string", "color"
+	Type     string   `json:"type"` // "integer", "float", "bool", "string", "color"
 	Default  any      `json:"default"`
 	Min      any      `json:"min,omitempty"`
 	Max      any      `json:"max,omitempty"`
@@ -150,9 +150,9 @@ type InputDef struct {
 
 // StyleDef describes a visual style entry from metaInfo.styles.
 type StyleDef struct {
-	Title         string `json:"title"`
-	Type          string `json:"type"`          // plottype: "line", "histogram", etc.
-	ColorPalette  string `json:"colorPalette,omitempty"` // palette ID
+	Title        string `json:"title"`
+	Type         string `json:"type"`                   // plottype: "line", "histogram", etc.
+	ColorPalette string `json:"colorPalette,omitempty"` // palette ID
 }
 
 // GraphicsProfile summarizes what graphic types the script produces.

@@ -121,13 +121,13 @@ func ExtractWithSchema(pineID, symbol, timeframe string, parsed *ParseResult, gr
 
 	// Separate strategy from indicator scripts. Schema ground-truth wins;
 	// otherwise a non-empty strategy report marks the run as a strategy.
-	s.Meta.ScriptType = "indicator"
+	s.Meta.ScriptType = ScriptTypeIndicator
 	if sch != nil && sch.IsStrategy {
-		s.Meta.ScriptType = "strategy"
-	} else if resolveScriptType(false, strategyReport) == "strategy" {
-		s.Meta.ScriptType = "strategy"
+		s.Meta.ScriptType = ScriptTypeStrategy
+	} else if resolveScriptType(false, strategyReport) == ScriptTypeStrategy {
+		s.Meta.ScriptType = ScriptTypeStrategy
 	}
-	if s.Meta.ScriptType == "strategy" {
+	if s.Meta.ScriptType == ScriptTypeStrategy {
 		s.Events = append(s.Events, strategyEvents(strategyReport)...)
 		s.Events = capEvents(s.Events, 30)
 	}

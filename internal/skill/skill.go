@@ -1,6 +1,17 @@
 // Package skill defines the framework for indicator-specific CLI commands.
-// Each skill wraps a Pine Script indicator with typed inputs, presets,
-// and structured output parsing.
+//
+// Skills wrap Pine Script INDICATORS (not strategies). The two Pine types are
+// fundamentally different in this pipeline:
+//
+//   - indicator — emits plots/graphics for analysis only; it never places
+//     orders. An indicator is a generic analysis function, so each skill
+//     specialises it with typed Inputs (custom inputs) and Presets (named
+//     input templates) and a parser that turns its output into structure.
+//
+//   - strategy — an executable model that emits signals as orders/trades in a
+//     strategy report. Strategies are NOT wrapped as skills; they run through
+//     the generic pipeline path, which converts the strategy report into
+//     directional buy/sell events (see pkg/pipeline.ScriptType).
 package skill
 
 import (
@@ -64,11 +75,11 @@ type Opportunity struct {
 	// Optional structured trade levels (ScalpQuant v2 and similar composite
 	// skills). Filled when the underlying Pine script emits dynamic TP/SL
 	// plots. Other parsers leave them at zero / omitempty.
-	Entry     float64 `json:"entry,omitempty"`
-	StopLoss  float64 `json:"stopLoss,omitempty"`
-	TP1       float64 `json:"tp1,omitempty"`
-	TP2       float64 `json:"tp2,omitempty"`
-	TP3       float64 `json:"tp3,omitempty"`
+	Entry      float64 `json:"entry,omitempty"`
+	StopLoss   float64 `json:"stopLoss,omitempty"`
+	TP1        float64 `json:"tp1,omitempty"`
+	TP2        float64 `json:"tp2,omitempty"`
+	TP3        float64 `json:"tp3,omitempty"`
 	RiskReward float64 `json:"riskReward,omitempty"`
 }
 
@@ -91,18 +102,18 @@ type Conformance struct {
 
 // AgentResult is the agent-ready-v2 envelope wrapping a SkillResult.
 type AgentResult struct {
-	Status        string            `json:"status"`
-	ExitCode      int               `json:"exitCode"`
-	Timestamp     string            `json:"timestamp"`
-	Execution     ExecutionMeta     `json:"execution"`
-	AgentContext  AgentContext      `json:"agentContext"`
-	Market        MarketData        `json:"market"`
-	Structure     map[string]any    `json:"structure"`
-	Opportunities []Opportunity     `json:"opportunities"`
-	Narrative     Narrative         `json:"narrative"`
-	Conformance   Conformance       `json:"conformance"`
-	SchemaVersion string            `json:"schemaVersion"`
-	Extra         map[string]any    `json:"-"`
+	Status        string         `json:"status"`
+	ExitCode      int            `json:"exitCode"`
+	Timestamp     string         `json:"timestamp"`
+	Execution     ExecutionMeta  `json:"execution"`
+	AgentContext  AgentContext   `json:"agentContext"`
+	Market        MarketData     `json:"market"`
+	Structure     map[string]any `json:"structure"`
+	Opportunities []Opportunity  `json:"opportunities"`
+	Narrative     Narrative      `json:"narrative"`
+	Conformance   Conformance    `json:"conformance"`
+	SchemaVersion string         `json:"schemaVersion"`
+	Extra         map[string]any `json:"-"`
 }
 
 type ExecutionMeta struct {
@@ -119,12 +130,18 @@ type AgentContext struct {
 }
 
 // Skill defines a complete indicator CLI command.
+//
+// A Skill is always an INDICATOR wrapper, never a strategy: indicators emit
+// analysis output (plots/graphics) only, so they are specialised at run time
+// through custom inputs and named input templates (see Inputs and Presets).
+// Strategies, which emit signals via a strategy report, are handled by the
+// generic pipeline path instead (see pkg/pipeline.ScriptType).
 type Skill struct {
 	Name     string // CLI command name: "smc"
 	Synopsis string // Short description for help text
 	PineID   string // TradingView Pine Script ID
 	Inputs   []InputDef
-	Presets  map[string]map[string]any // "scalping" -> {inputs}
+	Presets  map[string]map[string]any // named input templates: "scalping" -> {inputName: value}
 
 	// Tier is the minimum TradingView subscription tier needed for this script
 	// to return data (e.g. "essential", "plus"). Empty means it works on free.
@@ -187,8 +204,8 @@ func (s *Skill) EffectiveCategory() string {
 // ToAgent converts a SkillResult into the agent-ready-v2 envelope.
 func (s *Skill) ToAgent(result SkillResult, symbol, tf string, durationMs int64) AgentResult {
 	return AgentResult{
-		Status:   result.Status,
-		ExitCode: 0,
+		Status:    result.Status,
+		ExitCode:  0,
 		Timestamp: time.Now().UTC().Format(time.RFC3339),
 		Execution: ExecutionMeta{
 			DurationMs: durationMs,

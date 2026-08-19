@@ -27,32 +27,32 @@ const (
 
 // Signals is the cleaned, script-agnostic output for trade automation.
 type Signals struct {
-	Meta           Meta                  `json:"meta"`
-	Classifications map[string]PlotClass  `json:"classifications"`
-	Last           map[string]any        `json:"last"`
-	Series         []map[string]any      `json:"series,omitempty"`
-	Events         []Event               `json:"events,omitempty"`
-	Levels         []Level               `json:"levels,omitempty"`
-	GraphicCounts  map[string]int        `json:"graphicCounts,omitempty"`
-	Bias           string                `json:"bias"`
-	Confidence     float64               `json:"confidence"`
-	Report         *StrategySummary      `json:"strategy,omitempty"`
-	Warnings       []string              `json:"warnings,omitempty"`
+	Meta            Meta                 `json:"meta"`
+	Classifications map[string]PlotClass `json:"classifications"`
+	Last            map[string]any       `json:"last"`
+	Series          []map[string]any     `json:"series,omitempty"`
+	Events          []Event              `json:"events,omitempty"`
+	Levels          []Level              `json:"levels,omitempty"`
+	GraphicCounts   map[string]int       `json:"graphicCounts,omitempty"`
+	Bias            string               `json:"bias"`
+	Confidence      float64              `json:"confidence"`
+	Report          *StrategySummary     `json:"strategy,omitempty"`
+	Warnings        []string             `json:"warnings,omitempty"`
 }
 
 type Meta struct {
-	PineID      string `json:"pineId"`
-	Symbol      string `json:"symbol,omitempty"`
-	Timeframe   string `json:"timeframe"`
-	PeriodCount int    `json:"periodCount"`
-	Timestamp   int64  `json:"timestamp"`
-	ScriptType  string `json:"scriptType,omitempty"` // "strategy" | "indicator"
+	PineID      string     `json:"pineId"`
+	Symbol      string     `json:"symbol,omitempty"`
+	Timeframe   string     `json:"timeframe"`
+	PeriodCount int        `json:"periodCount"`
+	Timestamp   int64      `json:"timestamp"`
+	ScriptType  ScriptType `json:"scriptType,omitempty"` // "strategy" | "indicator" (see ScriptType)
 }
 
 type Event struct {
 	Time  int64   `json:"time"`
 	Field string  `json:"field"`
-	Kind  string  `json:"kind"`  // "buy", "sell", "alert", "state", "text"
+	Kind  string  `json:"kind"` // "buy", "sell", "alert", "state", "text"
 	Value float64 `json:"value"`
 	Prev  float64 `json:"prev,omitempty"`
 	Text  string  `json:"text,omitempty"`
@@ -206,7 +206,7 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 
 	// Separate strategy from indicator scripts and enrich accordingly.
 	s.Meta.ScriptType = resolveScriptType(len(isStrategy) > 0 && isStrategy[0], strategyReport)
-	if s.Meta.ScriptType == "strategy" {
+	if s.Meta.ScriptType == ScriptTypeStrategy {
 		s.Events = append(s.Events, strategyEvents(strategyReport)...)
 		s.Events = capEvents(s.Events, 30)
 	}
@@ -232,15 +232,20 @@ func (s *Signals) JSON() ([]byte, error) {
 	return json.MarshalIndent(s, "", "  ")
 }
 
-// resolveScriptType distinguishes a strategy from an indicator. An explicit
-// hint from the Pine schema declaration (IsStrategy) takes precedence; otherwise
-// a non-empty strategy report (performance/trades) marks the run as a strategy.
-// Scripts that produce periods but are neither are reported as indicators.
-func resolveScriptType(isStrategy bool, report map[string]any) string {
+// resolveScriptType distinguishes a strategy from an indicator (see ScriptType).
+// A strategy emits signals: its trades arrive in the strategy report. An
+// indicator emits only analysis output (plots/graphics) and is specialised via
+// custom inputs or input templates.
+//
+// An explicit hint from the Pine schema declaration (IsStrategy) takes
+// precedence; otherwise a non-empty strategy report (performance/trades) marks
+// the run as a strategy. Scripts that produce periods but are neither are
+// reported as indicators.
+func resolveScriptType(isStrategy bool, report map[string]any) ScriptType {
 	if isStrategy || hasStrategyReport(report) {
-		return "strategy"
+		return ScriptTypeStrategy
 	}
-	return "indicator"
+	return ScriptTypeIndicator
 }
 
 // dominantPriceFromGraphics extracts a representative price from the y-values
@@ -425,15 +430,19 @@ func calcStats(periods []map[string]any, fields []string) map[string]stats {
 			out[f] = stats{count: len(periods), allNaN: true}
 			continue
 		}
-	
+
 		uniqSet := map[float64]struct{}{}
 		min, max := vals[0], vals[0]
 		sum := 0.0
 		intCount := 0
 		for _, v := range vals {
 			uniqSet[round6(v)] = struct{}{}
-			if v < min { min = v }
-			if v > max { max = v }
+			if v < min {
+				min = v
+			}
+			if v > max {
+				max = v
+			}
 			sum += v
 			if math.Abs(v-math.Round(v)) < 1e-6 {
 				intCount++
@@ -446,7 +455,7 @@ func calcStats(periods []map[string]any, fields []string) map[string]stats {
 			sq += d * d
 		}
 		stddev := math.Sqrt(sq / float64(n))
-	
+
 		out[f] = stats{
 			count:          len(periods),
 			allNaN:         nanCount == len(periods),
@@ -840,7 +849,7 @@ func extractGraphicSignals(graphic map[string]map[string]any, classes map[string
 			for _, item := range items {
 				m, _ := item.(map[string]any)
 				if m == nil {
-									continue
+					continue
 				}
 				// dwgboxes: {x1, y1, x2, y2, t, ...}
 				y1, y1Ok := toFloat(m["y1"])
@@ -1049,8 +1058,6 @@ func dedupeLevels(levels []Level) []Level {
 	}
 	return out
 }
-
-
 
 // classifyGraphicsOnly attempts to classify graphic fields based on their values.
 // Since there are no periods, we use heuristic rules on the graphic data values
