@@ -15,9 +15,9 @@ import (
 // (labels first, lines as fallback). An ungated, non-displayed Close plot
 // carries the reference price for bias and level distances.
 var VPProSkill = &skill.Skill{
-	Name:     "vp-pro",
-	Synopsis: "Fixed-Range + Anchored Volume Profile — POC, VAH, VAL, value area",
-	PineID:   "USER;63108df4f6a04d7bb426bc74cab3b4ee",
+	Name:            "vp-pro",
+	Synopsis:        "Fixed-Range + Anchored Volume Profile — POC, VAH, VAL, value area",
+	PineID:          "USER;d496e2656da745a5b79f39140bde7c1f",
 	RequiresGraphic: true,
 	Inputs: []skill.InputDef{
 		{Name: "mode", TVInputID: "in_0", Type: "string", Default: "Fixed Range"},
