@@ -45,9 +45,17 @@ func RegisterAll(root *cli.Root, app *App) {
 	root.Add(&evalCmd{app: app})
 	root.Add(&cleanCmd{app: app})
 	root.Add(&checkAuthCmd{app: app})
+	root.Add(&layoutsCmd{app: app})
 	root.Add(&serveCmd{app: app})
 	root.Add(&agentCmd{app: app})
 	root.Add(&universalCmd{app: app})
+	root.Add(&screenshotCmd{app: app})
+	root.Add(&inputMapCmd{app: app})
+	root.Add(&visualCmd{app: app})
+	root.Add(&tfCmd{app: app})
+	root.Add(&symCmd{app: app})
+	root.Add(&studyCmd{app: app})
+	root.Add(&scanCmd{app: app})
 	RegisterSkills(root, app)
 }
 

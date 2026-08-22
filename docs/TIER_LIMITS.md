@@ -29,6 +29,10 @@ type TierLimits struct {
 | `premium`   | 8  | 25 | 50 | unlimited (`0`) | 40s |
 | `ultimate`  | 16 | 50 | 200 | unlimited (`0`) | 100s |
 
+> Note: the historical-bars column in the CLI model (`MaxBars`) is **minute-history
+> days**, NOT the API "historical bars" column (10K/10K/20K/40K). See
+> `DATA_LIMITS_ESSENTIAL_VS_PREMIUM.md` for the full data-depth matrix.
+
 Set the tier in `.env`:
 
 ```env
@@ -45,10 +49,14 @@ Annual billing prices shown (list price in parentheses).
 | Plan | Price (annual) | Charts | Ind./chart | Connections | Calc timeout | Hist. bars* | Min. history | Price alerts | Watchlist alerts |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
 | **Free** | $0 | 1 | 2 | 2 | **20s** | 5K | **180 days** | 3 | 0 |
-| **Essential** | **$12.95/mo** ($15.49) | 2 | 5 | 10 | **40s** | 10K | **365 days** | 20 | 0 |
-| Plus | $29.95/mo ($35.99) | 4 | 10 | 20 | 40s | 10K | All | 100 | 0 |
-| Premium | $59.95/mo ($71.99) | 8 | 25 | 50 | 40s | 20K | All | 400 | 2 |
-| Ultimate | $199.95/mo ($239.95) | 16 | 50 | 200 | **100s** | 40K | All | 1,000 | 15 |
+| **Essential** | **$12.95/mo** ($15.49) | 2 | 5 | 10 | **40s** | **10K** | **365 days** | 20 | 0 |
+| Plus | $29.95/mo ($35.99) | 4 | 10 | 20 | 40s | **10K** | All | 100 | 0 |
+| Premium | $59.95/mo ($71.99) | 8 | 25 | 50 | 40s | **20K** | All | 400 | 2 |
+| Ultimate | $199.95/mo ($239.99) | 16 | 50 | 200 | **100s** | **40K** | All | 1,000 | 15 |
+
+\* "Historical bars available" per chart — the API quote cap. See
+`DATA_LIMITS_ESSENTIAL_VS_PREMIUM.md` for the live Essential-vs-Premium
+comparison (including orderbook / DOM / tick / volume-footprint features).
 
 \* "Historical bars available" — a distinct column from minute-history days.
 

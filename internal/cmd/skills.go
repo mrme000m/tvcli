@@ -37,6 +37,7 @@ func (c *skillsCmd) Run(env *cli.Env) error {
 			KnownBroken string   `json:"knownBroken,omitempty"`
 			Inputs      int      `json:"inputs"`
 			Presets     []string `json:"presets,omitempty"`
+			ScriptType  string   `json:"scriptType"` // always "indicator" for skills
 		}
 		all := skill.All()
 		infos := make([]skillInfo, len(all))
@@ -55,6 +56,7 @@ func (c *skillsCmd) Run(env *cli.Env) error {
 				KnownBroken: s.KnownBroken,
 				Inputs:      len(s.Inputs),
 				Presets:     presets,
+				ScriptType:  "indicator",
 			}
 		}
 		b, _ := json.MarshalIndent(infos, "", "  ")
@@ -68,7 +70,8 @@ func (c *skillsCmd) Run(env *cli.Env) error {
 
 func printSkillsList(w io.Writer) {
 	all := skill.All()
-	fmt.Fprintf(w, "\nAvailable indicator skills (%d):\n\n", len(all))
+	fmt.Fprintf(w, "\nAvailable INDICATOR skills (%d):\n", len(all))
+	fmt.Fprintf(w, "(Strategies use 'tv analyze' - they emit signals via strategy report)\n\n")
 
 	for _, s := range all {
 		flag := ""

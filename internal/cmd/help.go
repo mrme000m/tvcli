@@ -87,6 +87,9 @@ Commands:
   check-auth                    Verify TradingView auth cookies and subscription tier
     --json                      JSON output (for agent consumption)
     Diagnoses expired cookies — the #1 cause of silent "study limit" errors.
+  layouts                       List the authenticated user's saved chart layouts
+    --limit N                   Max layouts (default: 20)
+    --json                      JSON output
   serve [--addr :8765]          Start HTTP server for AI agent integration
     --daemon / -d    Start in background (non-blocking)
     --stop           Stop background server
@@ -97,6 +100,65 @@ Commands:
     --raw                       Raw Pine input list (id/name/type/defval/options)
     No skill name → Pine-only view; skill name → side-by-side diff with status:
       ok | type-mismatch | missing-in-go | go-only/phantom
+  input-map <pineId>            Show Pine input ID mapping: Go client vs Browser (resolves in_N offset)
+    --browser-entity <id>       Study entity ID from bdg tv studies
+    --json                      JSON output
+  screenshot [output.png]       Capture chart screenshot via bdg CDP
+    --out FILE                  Output file (default: tv-screenshot-TIMESTAMP.png)
+    --full, --full-page         Full page capture (default: viewport)
+    --selector CSS              Capture specific element
+    --scroll SELECTOR           Scroll to element before capture
+    --format png|jpeg           Output format (default: png)
+    --quality N                 JPEG quality 1-100 (default: 90)
+    --no-resize                 Disable auto-resize for large pages
+  visual <name|pineId>          Add any Pine script to the LIVE chart with custom inputs, then screenshot it
+    --pine ID                   Pine id (USER;/PUB;) — adds any saved/public script
+    --inputs '<json>'           Custom input overrides, e.g. '{"in_15": 30, "length": 21}'
+    --out FILE                  Screenshot output (default: tv-visual-TIMESTAMP.png)
+    --settle MS                 Wait for graphics to render (default: 4000)
+    --full, --full-page         Full page capture (default: viewport)
+    --selector CSS              Capture a specific element
+    --keep                      Keep the study on the chart after capture (default: removed)
+    --verbose                   Show the underlying bdg commands
+  tf <timeframe>                Change the live chart's timeframe programmatically (model setInterval via bdg)
+    --verbose                   Show what is being called
+    Timeframes: 1m..45m, 1h..12h, 1D, 1W, 1M (or plain minutes: 15, 60, 240)
+  sym <symbol>                  Change the live chart's symbol programmatically (widget setSymbol via bdg)
+    --out FILE                  Also screenshot the new symbol to FILE
+    --full                      Full-page screenshot (with --out)
+    --verbose                   Show what is being called
+    Symbols: BTCUSDT, OANDA:XAUUSD, BINANCE:ETHUSDT, NASDAQ:AAPL, ...
+  study <list|inputs|report|set>  List studies on the live chart, read/set inputs, read strategy backtests
+    tv study list                          List studies (--json)
+    tv study inputs <entityId>             Read a study's input values (--json)
+    tv study report <entityId>             Read a STRATEGY's backtest report + buy/sell signals (--signals N, --json)
+    tv study set <entityId> --inputs '<json>' [--before a.png] [--after b.png]
+      Sends modify_study on the WS; server recomputes (du) and the pane redraws.
+      For strategies, combine set + report for parameter sweeps.
+  scan <query...>               Search public scripts classified strategy vs indicator (feed sweeps/input tests)
+    --type strategy|indicator|any   Filter by kind (default: any)
+    --limit N                       Max total results (default: 20)
+    --per-query N                   Max results per query (default: 20)
+    --verify                        Confirm kind via metaInfo pine.isStrategy + input/plot counts
+    --verify-max N                  Max scripts to verify (default: 10)
+    --json                          JSON output
+    Examples: tv scan RSI --type strategy | tv scan "RSI,MACD" --type indicator --verify
+  analyze <pineId>              Universal script analyzer - auto-analyze any Pine script
+    --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
+    --tf 5m                     Timeframe (default: 5m)
+    --bars 500                  Number of bars
+    --input.key=VALUE           Input overrides (e.g., --input.length=20)
+    --list-inputs               List available inputs from schema and exit
+    --validate-inputs           Validate inputs against schema before running
+    --settle 1500               Settle time in ms (default: 1500)
+    --timeout 120               Timeout in seconds
+    --force-schema              Re-fetch schema from TradingView
+    --json                      Output full JSON
+    --report                    Generate analysis report
+    --format markdown|html|marketing|text  Report format (default: markdown)
+    --title TITLE               Report title
+    --out FILE                  Save output to file
+    --verbose                   Verbose output
 
   Indicator Skills (run with tv <skill>):
     tv bsv          Buy/Sell Volume analysis

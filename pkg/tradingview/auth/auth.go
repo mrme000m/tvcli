@@ -5,6 +5,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -88,6 +89,59 @@ type AuthInfo struct {
 func FetchToken(session, signature, location, deviceT string, opts ...Option) (string, error) {
 	info := FetchAuthInfo(session, signature, location, deviceT, opts...)
 	return info.Token, info.Error
+}
+
+// MyChart is one saved chart layout from /my-charts/.
+type MyChart struct {
+	ID          int64  `json:"id"`
+	Name        string `json:"name"`
+	ShortName   string `json:"short_name"`
+	Symbol      string `json:"symbol"`
+	ShortSymbol string `json:"short_symbol"`
+	Resolution  string `json:"resolution"`
+	Interval    string `json:"interval"`
+	URL         string `json:"url"`
+	Created     string `json:"created"`
+	Modified    string `json:"modified"`
+	Favorite    bool   `json:"favorite"`
+}
+
+// FetchMyCharts lists the authenticated user's saved chart layouts from
+// https://www.tradingview.com/my-charts/. The web app loads its "Manage
+// layouts" dialog with this endpoint (GET /my-charts/?limit=N, XHR); it
+// needs the same session cookies as every other authenticated endpoint.
+func FetchMyCharts(session, signature, deviceT string, limit int, opts ...Option) ([]MyChart, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	u := fmt.Sprintf("https://www.tradingview.com/my-charts/?limit=%d", limit)
+
+	req, _ := http.NewRequest("GET", u, nil)
+	if cookie := GenCookies(session, signature, deviceT); cookie != "" {
+		req.Header.Set("Cookie", cookie)
+	}
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Origin", "https://www.tradingview.com")
+	req.Header.Set("Referer", "https://www.tradingview.com/chart/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := httpClient(opts...).Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("fetch my-charts: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("my-charts returned status %d", resp.StatusCode)
+	}
+
+	var charts []MyChart
+	if err := json.Unmarshal(body, &charts); err != nil {
+		return nil, fmt.Errorf("parse my-charts: %w", err)
+	}
+	return charts, nil
 }
 
 // FetchAuthInfo scrapes the TradingView chart page to determine the full

@@ -295,7 +295,7 @@ func parseXauScalp(periods []map[string]any, graphic map[string]map[string]any, 
 	return skill.SkillResult{
 		Status:        "ok",
 		Workflow:      "xauusd-scalping-confluence",
-		Market:        skill.MarketData{Bias: bias, LastPrice: price},
+		Market:        skill.MarketData{Bias: bias, LastPrice: price, LastBarTime: toFloat(last["$time"])},
 		Structure:     structure,
 		Opportunities: opp,
 		Narrative: skill.Narrative{

@@ -59,8 +59,9 @@ type SkillResult struct {
 }
 
 type MarketData struct {
-	LastPrice any    `json:"lastPrice,omitempty"`
-	Bias      string `json:"bias,omitempty"`
+	LastPrice   any    `json:"lastPrice,omitempty"`
+	Bias        string `json:"bias,omitempty"`
+	LastBarTime any    `json:"lastBarTime,omitempty"` // epoch s of the last bar in the feed (last CLOSED bar)
 }
 
 type Opportunity struct {

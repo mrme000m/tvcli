@@ -89,7 +89,12 @@ func (c *universalCmd) Run(env *cli.Env) error {
 		"list-inputs", "validate-inputs", "verbose", "help", "h", "input",
 		"force-cleanup", "cleanup",
 	}
-	inputs := collectInputs(flags, 1, univReserved)
+	// spinePos: 1 if pineId was positional, 0 if provided via --pine flag
+	spinePos := 0
+	if len(flags.Positional) > 0 && !flags.Has("pine") {
+		spinePos = 1
+	}
+	inputs := collectInputs(flags, spinePos, univReserved)
 
 	// Build analyzer config
 	forceCleanup := flags.Has("force-cleanup") || flags.Has("cleanup")

@@ -64,6 +64,7 @@ type MarketData struct {
 	PriceSource string // "plot", "graphic", "ohlcv"
 	BarCount    int
 	TimeRange   string
+	LastBarTime float64 // epoch (s) of the last bar in the feed = last CLOSED bar at fetch time
 }
 
 type GraphicAnalysis struct {
@@ -548,9 +549,16 @@ func (a *UniversalAnalyzer) Analyze(ctx context.Context, pineID string) (*Univer
 
 	duration := time.Since(start)
 
-	// 3. Extract signals using pipeline (schema-aware)
+	// 3. Extract signals using pipeline (schema-aware). The pipeline's
+	// resolveScriptType is the authoritative strategy/indicator detector: it
+	// prefers the metaInfo hint but ALSO falls back to a non-empty strategy
+	// report (trades/performance/settings), which catches strategies whose
+	// Pine Facade metaInfo lacks an explicit isStrategy flag.
 	var signals *pipeline.Signals
 	signals = pipeline.Extract(pineID, a.config.Symbol, a.config.Timeframe, res.Periods, res.Graphic, res.StrategyReport, isStrategy)
+	if signals.Meta.ScriptType == pipeline.ScriptTypeStrategy {
+		isStrategy = true
+	}
 
 	// 5. Analyze graphics deeply
 	graphicAnalysis := a.analyzeGraphics(res.Graphic, signals)
@@ -1054,10 +1062,16 @@ func (a *UniversalAnalyzer) buildMarketData(periods []map[string]any, graphic Gr
 	}
 
 	timeRange := ""
+	lastBarTime := 0.0
+	// Last CLOSED bar: periods[0] is the in-progress bar (mirrors parsers.latestClosed).
+	if len(periods) > 1 {
+		lastBarTime, _ = toFloat(periods[1]["$time"])
+	} else if len(periods) == 1 {
+		lastBarTime, _ = toFloat(periods[0]["$time"])
+	}
 	if len(periods) >= 2 {
 		first, _ := toFloat(periods[len(periods)-1]["$time"])
-		last, _ := toFloat(periods[0]["$time"])
-		timeRange = fmt.Sprintf("%d to %d", int64(first), int64(last))
+		timeRange = fmt.Sprintf("%d to %d", int64(first), int64(lastBarTime))
 	}
 
 	return MarketData{
@@ -1067,6 +1081,7 @@ func (a *UniversalAnalyzer) buildMarketData(periods []map[string]any, graphic Gr
 		PriceSource: source,
 		BarCount:    len(periods),
 		TimeRange:   timeRange,
+		LastBarTime: lastBarTime,
 	}
 }
 
@@ -1305,6 +1320,7 @@ func (a *UniversalAnalyzer) buildAgentEnvelope(signals *pipeline.Signals, graphi
 			"lastPrice":   market.LastPrice,
 			"priceSource": market.PriceSource,
 			"barCount":    market.BarCount,
+			"lastBarTime": market.LastBarTime, // epoch s of last bar in feed (0 when unavailable)
 		},
 	}
 

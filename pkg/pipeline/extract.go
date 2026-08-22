@@ -130,6 +130,17 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 		classifyGraphicsOnly(s.Classifications, graphic)
 		extractLastFromGraphics(s.Last, graphic)
 
+		// A script with no period data may still be a strategy: its trades/
+		// performance arrive in the strategy report (du frames), so resolve
+		// the script type from the report before deciding on enrichment.
+		s.Meta.ScriptType = resolveScriptType(len(isStrategy) > 0 && isStrategy[0], strategyReport)
+		if s.Meta.ScriptType == ScriptTypeStrategy {
+			s.Events = append(s.Events, strategyEvents(strategyReport)...)
+			if b := strategyBias(strategyReport); b != "" {
+				s.Bias = b
+			}
+		}
+
 		if len(s.Events) == 0 && len(s.Levels) == 0 {
 			s.Warnings = append(s.Warnings, "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy")
 		} else {

@@ -453,12 +453,21 @@ func FormatUniversal(result *UniversalResult) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 	sb.WriteString(strings.Repeat("=", 70) + "\n")
-	sb.WriteString("  UNIVERSAL PINE SCRIPT ANALYSIS\n")
+
+	// Prominent script type header
+	scriptType := "INDICATOR"
+	typeIcon := "📊"
+	if result.ScriptInfo.IsStrategy {
+		scriptType = "STRATEGY"
+		typeIcon = "🎯"
+	}
+	sb.WriteString(fmt.Sprintf("  %s  UNIVERSAL %s ANALYSIS  %s\n", typeIcon, scriptType, typeIcon))
 	sb.WriteString(strings.Repeat("=", 70) + "\n\n")
 
 	sb.WriteString(fmt.Sprintf("  Script:       %s (%s)\n", result.ScriptInfo.Name, result.ScriptInfo.PineID))
 	sb.WriteString(fmt.Sprintf("  Version:      %s\n", result.ScriptInfo.Version))
-	sb.WriteString(fmt.Sprintf("  Type:         %s | %s\n", boolStr(result.ScriptInfo.IsStrategy, "Strategy", "Indicator"), boolStr(result.ScriptInfo.IsOverlay, "Overlay", "Pane")))
+	sb.WriteString(fmt.Sprintf("  Type:         %s %s | %s\n",
+		typeIcon, scriptType, boolStr(result.ScriptInfo.IsOverlay, "Overlay", "Pane")))
 	sb.WriteString(fmt.Sprintf("  Schema:       %s\n", boolStr(result.ScriptInfo.HasSchema, "Available", "Not Available")))
 	sb.WriteString(fmt.Sprintf("  Plots:        %d\n", result.ScriptInfo.PlotCount))
 	sb.WriteString(fmt.Sprintf("  Inputs:       %d\n", result.ScriptInfo.InputCount))
