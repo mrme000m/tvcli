@@ -43,6 +43,7 @@ var ReservedFlags = map[string]bool{
 	"signals": true, "settle": true, "force-cleanup": true,
 	"persistent": true, "loop": true, "verbose": true, "preset": true,
 	"help": true, "h": true, "v": true,
+	"account": true, // global multi-account selector, resolved in main.go
 }
 
 // SkillResult is the common output from a skill's ParseOutput function.
@@ -128,6 +129,10 @@ type AgentContext struct {
 	Symbol       string `json:"symbol"`
 	Timeframe    string `json:"timeframe"`
 	HTFTimeframe string `json:"htfTimeframe,omitempty"`
+	// Account is the tvcli registry account that served this run when the
+	// server was started with an accounts.json sidecar (multi-account
+	// failover). Empty in legacy single-account mode.
+	Account string `json:"account,omitempty"`
 }
 
 // Skill defines a complete indicator CLI command.

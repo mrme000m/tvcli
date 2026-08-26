@@ -10,6 +10,7 @@ around the `tvcli` Go CLI. It is packaged for agent consumption two ways:
    |-------|-----------|
    | `tvcli` | Running any of the 19 built-in indicator skills (incl. `vp-pro`), `eval`/`run` of arbitrary Pine source, the async HTTP server (`serve --daemon`, `:8765`), free-tier limits, and progressive Pine Script v5 reference docs under `references/pinescript/`. |
    | `pine2tool` | Turning any `PUB;…`/`USER;…` ID or local `.pine` file into a reusable structured analysis tool + registrable skill stub. |
+   | `tv-usecases` | Discover, develop, and orchestrate all major TradingView strategy/indicator use cases for agentic usage. Bridges bdg (live-chart investigation) with tvcli (headless execution). Catalogs 12 use cases: scan, run, analyze, study management, parameter sweeps, symbol/timeframe, visual representation, protocol capture, chart model reading, pine2tool, consolidated engine, HTTP server. Includes DSH tv-investigator headless invocation. |
    | `openknowledge` | Reading/writing the `Wiki/` knowledge base via the `openknowledge` CLI. |
 
 2. **Pi package** — `package.json` at the root carries the `pi-package`

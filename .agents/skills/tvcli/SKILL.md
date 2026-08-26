@@ -6,7 +6,9 @@ description: >
   the Go tvcli binary. Includes 19 built-in indicator skills (SMC, EMA stack,
   SuperTrend, RSI, Squeeze Momentum, Ichimoku, Volume Profile, CVD, Camarilla,
   Choppiness, and a consolidated XAUUSD Scalping Confluence Engine), an async
-  HTTP server for agent integration, and progressive reference docs for Pine
+  HTTP server with a multi-account pool (~50 TradingView accounts, per-account
+  concurrency + round-robin failover) and a `POST /hunt` batch endpoint for
+  multi-symbol / multi-account sweeps, and progressive reference docs for Pine
   Script v5 development. Use when analyzing XAUUSD or any TradingView symbol
   for market structure, signals, support/resistance, order flow, or trend
   detection.
@@ -104,9 +106,13 @@ data, structure, opportunities, narrative, and conformance scoring.
 ./.agents/skills/pine2tool/bin/pine2tool.sh "PUB;abc123" --symbol OANDA:XAUUSD --tf 1H
 ```
 
-## Free Tier Limits
+## Free Tier Limits (per account)
 
-- **2 indicators per chart** (use `xau-scalp` consolidated script to avoid this)
+- **2 indicators per chart, per account** — the cap is *per TradingView account*,
+  not global. With the multi-account pool (~50 accounts) the engine analyzes
+  **N×cap symbols in parallel** by fanning symbols across accounts (see
+  `/hunt` below). The consolidated `xau-scalp` script avoids the cap on a single
+  account; the pool avoids it across the fleet.
 - **180 bars** (auto-capped by CLI)
 - **20s calc timeout** (the consolidated script runs well under it in practice)
 
@@ -163,14 +169,78 @@ Deep-dive documentation is in `references/`:
 
 ## HTTP Server Endpoints
 
+All endpoints require the server to be running (`tvcli serve --daemon`), default
+port `8765`. The server holds the authoritative **account pool** (~50 TradingView
+accounts; primary + up to `TV_FAILOVER_MAX` failover accounts, default 4) with a
+per-account concurrency semaphore (`MaxIndicators` concurrent studies per
+account, free tier = 2). Endpoints fan work across that pool with round-robin
+failover when an account hits a study/auth/connection limit.
+
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/health` | Status + auth + tier info |
 | GET | `/check-auth` | Auth cookie validation |
+| GET | `/skills` | List registered indicator skills |
+| GET | `/queue-stats` | Per-account slot/semaphore usage |
 | POST | `/compile` | Compile Pine source |
 | POST | `/fetch` | Fetch OHLCV data |
 | POST | `/run` | Compile + run Pine source |
+| POST | `/run-skill` | Run a registered skill on one symbol |
+| POST | `/hunt` | **Batch** skill run over many symbols (multi-account) |
 | POST | `/clean` | Clean chart sessions |
+
+### `POST /hunt` — multi-account / multi-symbol sweep
+
+Fans a symbol list across the account pool and runs one skill per symbol in
+parallel. N valid accounts analyze N symbols concurrently; each symbol
+round-robins to the next account on a failover error (up to `TV_FAILOVER_MAX`
+attempts). Worker count is auto-bounded by the pool's total slot capacity and
+`concurrencyCap`.
+
+Body:
+
+```json
+{
+  "skill": "squeeze",
+  "timeframe": "4H",
+  "bars": 180,
+  "symbols": ["BINANCE:BTCUSDT", "BINANCE:ETHUSDT"],
+  "inputs": { "length": "20" },
+  "maxAccounts": 0,
+  "concurrencyCap": 0,
+  "maxSymbolsPerAccount": 0
+}
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "skill": "squeeze",
+  "accountPool": 50,
+  "accountsUsed": ["acc1", "acc2"],
+  "completed": 118,
+  "failed": 2,
+  "total": 120,
+  "elapsedMs": 9123,
+  "symbols": {
+    "BINANCE:BTCUSDT": { "ok": true, "account": "acc3", "result": { "market": {}, "narrative": {}, "opportunities": [], "conformance": {"agenticScore": 72.5} } },
+    "BINANCE:XYZUSDT": { "ok": false, "error": "...", "account": "acc7" }
+  }
+}
+```
+
+Notes:
+
+- Private skills (`pinefacade.AccessFromPineID == "private"`) with no local
+  source are rejected — they only run on accounts that own them, so a pool-wide
+  fan-out would mostly fail.
+- Invalid symbols are reported as `failed`, not dropped.
+- The QD `HeartbeatHunter` (`backend/app/services/autonomy/hunter.py`) is the
+  reference client: `TvcliService.hunt()` → `POST /hunt`, then normalizes each
+  `result` into `direction` / `veto` / `confluence score` and ranks candidate
+  tokens. See `QuantDinger-src/backend/docs/tvcli-multiaccount-hunter.md`.
 
 ## Validation
 

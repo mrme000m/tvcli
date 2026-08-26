@@ -67,7 +67,7 @@ func (c *checkAuthCmd) Run(env *cli.Env) error {
 		// Check the configured tier vs the detected tier.
 		tier := config.GetTierLimits()
 		fmt.Fprintf(os.Stderr, "  Configured tier: %s (%d indicators/chart, %d bars)\n",
-			os.Getenv("TV_TIER"), tier.MaxIndicators, tier.MaxBars)
+			cfg.TierName(), tier.MaxIndicators, tier.MaxBars)
 
 		// Try a quick WS connection to verify the study limit.
 		fmt.Fprintf(os.Stderr, "\n  Testing WS connection...\n")

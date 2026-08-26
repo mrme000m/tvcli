@@ -1,11 +1,11 @@
 # Multi-Account Support
 
-tvcli supports multiple TradingView accounts at the **library level**:
-`pkg/account` models accounts as data, and every transport package
-(`pkg/tradingview`, `pkg/pinefacade`) already takes credentials as arguments
-instead of reading globals. Wiring a pool of accounts into the CLI/server is
-an **optional** follow-on — single-account mode remains the default and is
-unchanged.
+tvcli supports multiple TradingView accounts end-to-end: `pkg/account` models
+accounts as data, every transport package (`pkg/tradingview`,
+`pkg/pinefacade`) takes credentials as arguments, and the CLI ships an
+`account` command plus a global `--account` flag for storage and switching.
+Single-account mode (legacy `.env` `SESSION`/`SIGNATURE`/`DEVICE_T`) remains
+the default and is unchanged when no `accounts.json` sidecar exists.
 
 ## Why multiple accounts
 
@@ -73,6 +73,35 @@ CLI uses (`MaxCharts`, `MaxIndicators`, `MaxConnections`, `MaxBars`,
 `CalcTimeoutSecs`), resolved from `acct.Tier` instead of the global
 `TV_TIER`.
 
+## CLI storage + switching
+
+Accounts are stored in an `accounts.json` sidecar (0600; override the path
+with `TV_ACCOUNTS_FILE`). The `account` command manages it:
+
+```bash
+tv account add core --session <id> --signature <sig> --device-t <d> --user <u> --tier free --role core
+tv account add adhoc-1 --session <id> --signature <sig> --device-t <d> --tier free --role adhoc
+tv account list                     # names + roles + tiers, credentials masked
+tv account show core                # one account, masked
+tv account use core                 # set the default account
+tv account remove adhoc-1
+```
+
+Every command selects an account with the global `--account` flag (highest
+priority), the `TV_ACCOUNT` env var, or the registry `default` — resolved in
+`cmd/tvcli/main.go` before dispatch, which overrides the legacy `.env`
+credentials for that invocation:
+
+```bash
+tv run "PUB;…" --account core
+tv fetch --symbol BINANCE:BTCUSDT --account adhoc-1
+TV_ACCOUNT=adhoc-1 tv backtest "STD;RSI%1Strategy"
+```
+
+The active account's `tier` also drives `config.GetTierLimits()` (via the
+`activeTier` set by `Config.UseAccount`), so `run`/`backtest`/`eval`/skill
+commands honor per-account limits automatically.
+
 ## Per-account egress proxy
 
 Each account can carry its own `ProxyURL` (`ACCOUNT_N_PROXY` env key, `proxy`
@@ -110,3 +139,49 @@ Notes for that implementation:
 - Private (`USER;`) scripts are owned by one TradingView user; route
   `script:<name>` intents to the account whose `UserName` owns the script,
   or the ownership precheck will fail.
+
+## HTTP server failover
+
+`internal/server` builds the account failover loop on top of this registry
+so the QD backend's single `TVCLI_URL` keeps working when one account is
+exhausted. When `tvcli serve` starts with an `accounts.json` sidecar, the
+long-lived WS handlers rotate across accounts automatically:
+
+- `/run`, `/run-skill`, `/fetch` try the **active account first** (the one
+  `main.go` resolved at startup — the registry default, or `--account` /
+  `TV_ACCOUNT`), then every other authenticated registry account in sorted
+  order, up to `TV_FAILOVER_MAX` (default **4**).
+- A failure only triggers failover when it is **account-scoped**: expired
+  cookies, an auth rejection, a study/connection limit, or a WS dial
+  failure (`isFailoverError` in `internal/server/failover.go`). Request-
+  scoped errors (bad symbol, Pine syntax errors) stop the loop and return
+  the first failure — no account swap will fix them.
+- `/run-skill` **skips failover for private (`USER;`) skills** that the
+  active account does not own: ownership is per-account, so a different
+  account would fail the same ownership precheck. Public skills and skills
+  carrying raw `Source` run under any account and fail over normally.
+- Each attempt saves and deletes its own temp Pine script (`SaveNew` is
+  account-scoped), and the response carries the account that served it
+  (the `account` field on `/run` and `/fetch`, the `agentContext.account`
+  and `execution.attempts` fields on `/run-skill`).
+- `/health` reports `accounts` (registry size), `activeAccount`, and
+  `failoverMax`; the new `GET /accounts` endpoint lists the registry masked
+  (name/role/tier/username/hasAuth/hasProxy/default/active); `GET
+  /check-auth?account=NAME` probes a specific account's auth state.
+
+### Choosing the default account
+
+The active account is the registry `default`, so pick a **validated**
+account as the default — an expired primary adds a dead auth-precheck
+(~2-3s) to every request before the loop fails over. After importing the
+free accounts CSV, probe and pin a fresh one:
+
+```bash
+tv account import tv_free_accounts.csv           # 40 free adhoc accounts
+tv check-auth --account sunilsutar371 --json     # verify before pinning
+tv account use sunilsutar371                     # set a valid primary
+```
+
+The legacy `.env` `SESSION`/`SIGNATURE`/`DEVICE_T` account can be added as
+a `core` role and kept as a last-resort failover candidate even when its
+cookies are stale — the loop skips it after one dead precheck.

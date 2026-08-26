@@ -7,6 +7,8 @@ for working with the `tvcli` TradingView Pine pipeline.
 |-------|---------|
 | `tvcli` | TradingView Pine Script market analysis toolkit — 18 built-in indicator skills, consolidated XAUUSD Scalping Confluence Engine, async HTTP server, and progressive Pine Script reference docs. |
 | `pine2tool` | Turn ANY Pine script (Pine ID or local `.pine`) into a reusable, structured analysis tool — download source, introspect inputs, run with custom inputs, extract signals/levels/graphics, and emit a registrable skill stub. |
+| `tv-usecases` | Discover, develop, and orchestrate all major TradingView strategy/indicator use cases for agentic usage. Catalogs 12 use cases (scan, run, analyze, study management, sweeps, symbol/tf, visual, protocol capture, chart model, pine2tool, consolidated engine, HTTP server). Bridges bdg (live-chart) with tvcli (headless). Includes DSH tv-investigator headless invocation. |
+| `tv-scout` | Progressively scout, instrument, and drive the live TradingView web chart for visual representation + vision-model confluence. |
 | `openknowledge` | Work with the Open Knowledge knowledge base connected to this repository and capture durable insights. |
 
 ## Packaging

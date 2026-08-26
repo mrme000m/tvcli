@@ -21,6 +21,15 @@ func main() {
 
 	name := args[0]
 
+	// Resolve the active account before any auth-sensitive work: --account
+	// flag > TV_ACCOUNT env > registry default. Overrides cfg credentials so
+	// every command uses the selected account transparently.
+	if acctName := resolveAccountName(args, cfg); acctName != "" {
+		if err := cfg.UseAccount(acctName); err != nil {
+			fatal("%v", err)
+		}
+	}
+
 	if cfg.Debug {
 		fmt.Fprintf(os.Stderr, "[debug] auth: %s\n", cfg.AuthSummary())
 	}
@@ -50,4 +59,22 @@ func main() {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "Error: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// resolveAccountName returns the account to activate for this invocation, in
+// priority order: the --account flag, the TV_ACCOUNT env var, then the
+// registry's default account. Empty means "no explicit account" (single-
+// account legacy mode or no registry).
+func resolveAccountName(args []string, cfg *config.Config) string {
+	flags := cli.ParseFlags(args)
+	if name := flags.Get("account"); name != "" {
+		return name
+	}
+	if name := os.Getenv("TV_ACCOUNT"); name != "" {
+		return name
+	}
+	if cfg.Accounts != nil && len(cfg.Accounts.Accounts) > 0 {
+		return cfg.Accounts.Default
+	}
+	return ""
 }

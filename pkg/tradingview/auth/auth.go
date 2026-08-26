@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // Option configures an auth fetch. Options are variadic so existing callers
@@ -36,13 +37,18 @@ func httpClient(opts ...Option) *http.Client {
 	for _, fn := range opts {
 		fn(o)
 	}
+	// Always set a timeout: the page fetch runs on the request path and a
+	// stalled connection must not hang the goroutine (and its account slot)
+	// forever — especially under multi-account failover where each candidate
+	// account does its own fetch.
+	client := &http.Client{Timeout: 30 * time.Second}
 	if o.proxyURL == "" {
-		return http.DefaultClient
+		return client
 	}
 	if u, err := url.Parse(o.proxyURL); err == nil && u.Scheme != "" {
-		return &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(u)}}
+		client.Transport = &http.Transport{Proxy: http.ProxyURL(u)}
 	}
-	return http.DefaultClient
+	return client
 }
 
 // GenCookies builds the Cookie header value for TradingView API requests
@@ -93,14 +99,15 @@ func FetchToken(session, signature, location, deviceT string, opts ...Option) (s
 
 // MyChart is one saved chart layout from /my-charts/.
 type MyChart struct {
-	ID          int64  `json:"id"`
+	ID          int64  `json:"id"`        // numeric layout id (DB primary key)
+	ImageURL    string `json:"image_url"` // chart slug — the value in the chart URL (/chart/<image_url>/)
 	Name        string `json:"name"`
 	ShortName   string `json:"short_name"`
 	Symbol      string `json:"symbol"`
 	ShortSymbol string `json:"short_symbol"`
 	Resolution  string `json:"resolution"`
 	Interval    string `json:"interval"`
-	URL         string `json:"url"`
+	URL         string `json:"url"` // duplicate of image_url in the API response
 	Created     string `json:"created"`
 	Modified    string `json:"modified"`
 	Favorite    bool   `json:"favorite"`

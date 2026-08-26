@@ -33,7 +33,9 @@ Commands:
   fetch                         Fetch raw OHLCV data (no indicator needed)
     --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
     --tf 5m                     Timeframe (default: 5m)
-    --bars 180                  Number of bars (free tier: 180)
+    --bars N                    Number of most-recent bars (default: 180)
+    --deep N                    Fetch N total bars by backfilling older history
+    --all                       Fetch all available history (walks back via request_more_data)
     --dir <dir>                 Output directory (default: .)
     --json-out <file>           Custom JSON output path
     --csv-out <file>            Custom CSV output path
@@ -60,6 +62,21 @@ Commands:
     --force-cleanup             Aggressively retry when study limit hit (web UI indicators blocking)
     --persistent                Keep WS connection open across runs (no reconnect between runs)
     --loop <interval>           Re-run periodically (e.g. 30s, 5m, 1h). Implies --persistent.
+  backtest <pineId>              Run a STRATEGY with custom inputs, extract backtest results
+    --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
+    --tf 5m                     Timeframe (default: 5m)
+    --bars 500                  Number of bars (calc window)
+    --inputs '<json>'           Custom input overrides, e.g. '{"length": 20}'
+    --json                      JSON output (metrics + full trade list)
+    --out <file>                Write JSON to file
+  confirm                        Apply each script to the live chart, screenshot, report
+    --file builtin-indicators.json  Catalog of pine ids (default)
+    --type indicator|strategy|all   Filter by kind
+    --limit N                   Stop after N scripts
+    --out DIR                   Screenshot + report directory (default: shots/)
+    --settle MS                 Wait for Pine graphics (default: 2500)
+    --keep                      Keep studies on chart (default: removed)
+    --json                      Also print the JSON report to stdout
 
   Symbol formats:
     Forex:    OANDA:XAUUSD, OANDA:EURUSD, FXCM:GBPUSD
@@ -87,9 +104,19 @@ Commands:
   check-auth                    Verify TradingView auth cookies and subscription tier
     --json                      JSON output (for agent consumption)
     Diagnoses expired cookies — the #1 cause of silent "study limit" errors.
-  layouts                       List the authenticated user's saved chart layouts
-    --limit N                   Max layouts (default: 20)
-    --json                      JSON output
+  account                       Manage multiple TradingView accounts (accounts.json)
+    account list [--json]       List accounts (credentials masked)
+    account show [name]         Show one account
+    account add <name> --session <id> --signature <sig> --device-t <d> [--user --tier --role --proxy]
+    account use <name>          Set the default account
+    account remove <name>       Delete an account
+    --account <name>            Global flag: run any command as that account
+  layouts                       List/create/rename/delete saved chart layouts
+    layouts list [--limit N] [--json]   List layouts (default)
+    layouts show <name|chartSlug|id>    Show one layout
+    layouts create <name> --symbol E:S --tf 15   Create a new empty layout (HTTP)
+    layouts rename <newName>            Rename the current chart's layout (live browser)
+    layouts delete <chartSlug|id> [...] Delete layouts (HTTP)
   serve [--addr :8765]          Start HTTP server for AI agent integration
     --daemon / -d    Start in background (non-blocking)
     --stop           Stop background server

@@ -11,6 +11,12 @@ import (
 	"github.com/mrme000m/tvcli/pkg/tradingview/auth"
 )
 
+// maxHistoryBars is the sanity cap for raw OHLCV history requests. The
+// TradingView server itself caps a single create_series at ~5–6k bars and lets
+// request_more_data backfill reach the full available history; this is only an
+// upper bound to avoid pathological requests.
+const maxHistoryBars = 20000
+
 // PreCheckAuth verifies TradingView auth cookies before attempting to run a
 // study. Returns an error if cookies are expired, nil if authenticated or no
 // cookies are configured (anonymous mode — fetch works without auth).

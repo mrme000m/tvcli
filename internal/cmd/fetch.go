@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/mrme000m/tvcli/internal/cli"
-	"github.com/mrme000m/tvcli/internal/config"
 	"github.com/mrme000m/tvcli/internal/service"
 	"github.com/mrme000m/tvcli/pkg/pinefacade"
 )
@@ -43,23 +42,43 @@ func (c *fetchCmd) Run(env *cli.Env) error {
 	}
 	bars := flags.GetInt("bars", 180)
 
-	limits := config.GetTierLimits()
-	if limits.MaxBars > 0 && bars > limits.MaxBars {
-		fmt.Fprintf(env.Stderr, "Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
-		bars = limits.MaxBars
+	deepBars := flags.GetInt("deep", 0)
+	if flags.Has("all") {
+		deepBars = maxHistoryBars
 	}
 
-	fmt.Fprintf(env.Stderr, "Fetching OHLCV: %s @ %s, %d bars\n", symbol, tf, bars)
+	initial := bars
+	if initial > maxHistoryBars {
+		initial = maxHistoryBars
+	}
+	if deepBars > 0 && deepBars < initial {
+		initial = deepBars
+	}
+	if initial < 1 {
+		initial = 1
+	}
 
-	periods, err := service.FetchOHLCVBars(cfg, symbol, tf, bars)
+	var periods []service.OHLCVBar
+	if deepBars > initial {
+		fmt.Fprintf(env.Stderr, "Fetching OHLCV: %s @ %s, %d bars (backfilling to %d)\n", symbol, tf, initial, deepBars)
+		periods, err = service.FetchOHLCVBarsDeep(cfg, symbol, tf, initial, deepBars)
+	} else {
+		fmt.Fprintf(env.Stderr, "Fetching OHLCV: %s @ %s, %d bars\n", symbol, tf, initial)
+		periods, err = service.FetchOHLCVBars(cfg, symbol, tf, initial)
+	}
 	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
 
 	fmt.Fprintf(env.Stderr, "Received %d bars\n", len(periods))
 
+	requestedBars := initial
+	if deepBars > requestedBars {
+		requestedBars = deepBars
+	}
+
 	symbolClean := strings.ReplaceAll(symbol, ":", "_")
-	baseName := fmt.Sprintf("%s_%s_%dbars", symbolClean, tf, bars)
+	baseName := fmt.Sprintf("%s_%s_%dbars", symbolClean, tf, requestedBars)
 
 	outDir := flags.Get("dir")
 	if outDir == "" {
@@ -84,7 +103,7 @@ func (c *fetchCmd) Run(env *cli.Env) error {
 	jsonData := map[string]any{
 		"symbol":    symbol,
 		"timeframe": tf,
-		"bars":      bars,
+		"bars":      requestedBars,
 		"count":     len(rawPeriods),
 		"fetchedAt": time.Now().UTC().Format(time.RFC3339),
 		"data":      rawPeriods,

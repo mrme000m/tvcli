@@ -8,7 +8,15 @@ import (
 	"strings"
 
 	"github.com/joho/godotenv"
+
+	"github.com/mrme000m/tvcli/pkg/account"
 )
+
+// activeTier holds the tier of the account most recently activated via
+// UseAccount. It feeds GetTierLimits() so every existing call site respects
+// the selected account's tier without threading a Config through. Empty means
+// "fall back to the legacy TV_TIER env var".
+var activeTier string
 
 // Config holds all TradingView CLI configuration loaded from env vars / .env file.
 type Config struct {
@@ -25,6 +33,14 @@ type Config struct {
 	DeviceToken   string
 	ProxyURL      string
 	Debug         bool
+
+	// Multi-account support (pkg/account). Accounts is the loaded registry;
+	// nil means single-account legacy mode. ActiveAccount is the resolved
+	// account name after UseAccount(); Tier is the active account's tier.
+	Accounts      *account.Registry
+	ActiveAccount string
+	AccountsFile  string
+	Tier          string
 }
 
 // Load reads .env (if present) then populates Config from environment.
@@ -55,7 +71,66 @@ func Load() *Config {
 		ProxyURL:      os.Getenv("TV_PROXY"),
 		Debug:         os.Getenv("DEBUG") == "1" || os.Getenv("TW_DEBUG") == "1",
 	}
+
+	// Load the multi-account registry sidecar (accounts.json). A missing file
+	// is not an error — single-account legacy mode stays the default.
+	accountsFile := os.Getenv("TV_ACCOUNTS_FILE")
+	if accountsFile == "" {
+		accountsFile = "accounts.json"
+	}
+	c.AccountsFile = accountsFile
+	if reg, err := account.LoadFromJSON(accountsFile); err == nil {
+		c.Accounts = reg
+	}
+
 	return c
+}
+
+// UseAccount resolves an account by name from the loaded registry and
+// overrides the credential/tier fields with that account's values. Callers
+// then build clients from cfg exactly as in single-account mode.
+func (c *Config) UseAccount(name string) error {
+	if c.Accounts == nil {
+		return fmt.Errorf("no accounts registry loaded (missing %s?)", c.AccountsFile)
+	}
+	a, ok := c.Accounts.Get(name)
+	if !ok {
+		return fmt.Errorf("account %q not found (known: %v)", name, c.Accounts.Names())
+	}
+	c.ActiveAccount = name
+	activeTier = a.Tier
+	c.SessionID = a.SessionID
+	c.Signature = a.Signature
+	c.DeviceToken = a.DeviceToken
+	c.UserName = a.UserName
+	c.Cookies = a.Cookies
+	c.ExtraCookies = a.ExtraCookies
+	c.ProxyURL = a.ProxyURL
+	c.Tier = a.Tier
+	return nil
+}
+
+// TierName returns the active tier name for display: the account tier, else
+// the legacy TV_TIER env var, else "free".
+func (c *Config) TierName() string {
+	if c.Tier != "" {
+		return c.Tier
+	}
+	if t := os.Getenv("TV_TIER"); t != "" {
+		return t
+	}
+	return "free"
+}
+
+// Limits returns the active account's tier limits: the account tier, else the
+// legacy TV_TIER env var, else the free tier. Replaces config.GetTierLimits()
+// for callers that have a Config.
+func (c *Config) Limits() account.TierLimits {
+	tier := c.Tier
+	if tier == "" {
+		tier = os.Getenv("TV_TIER")
+	}
+	return account.LimitsForTier(tier)
 }
 
 // HasAuth returns true if session cookies are available.

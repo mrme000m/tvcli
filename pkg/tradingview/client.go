@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -50,9 +51,9 @@ type WSClient struct {
 	deviceToken    string
 	location       string
 	proxyURL       string
-	loggedIn       bool
-	connected      bool
-	mu             sync.Mutex
+	loggedIn       atomic.Bool
+	connected      atomic.Bool
+	mu             sync.Mutex // guards sessions, conn, and the callback slices
 	sessions       map[string]*sessionEntry
 	sendQueue      [][]byte
 	debug          bool
@@ -76,12 +77,12 @@ func NewClient(opts ...ClientOption) Client {
 
 type ClientOption func(*WSClient)
 
-func WithServer(s string) ClientOption    { return func(c *WSClient) { c.server = s } }
-func WithToken(t string) ClientOption     { return func(c *WSClient) { c.token = t } }
-func WithSignature(s string) ClientOption { return func(c *WSClient) { c.signature = s } }
+func WithServer(s string) ClientOption      { return func(c *WSClient) { c.server = s } }
+func WithToken(t string) ClientOption       { return func(c *WSClient) { c.token = t } }
+func WithSignature(s string) ClientOption   { return func(c *WSClient) { c.signature = s } }
 func WithDeviceToken(d string) ClientOption { return func(c *WSClient) { c.deviceToken = d } }
-func WithLocation(l string) ClientOption  { return func(c *WSClient) { c.location = l } }
-func WithDebug(d bool) ClientOption       { return func(c *WSClient) { c.debug = d } }
+func WithLocation(l string) ClientOption    { return func(c *WSClient) { c.location = l } }
+func WithDebug(d bool) ClientOption         { return func(c *WSClient) { c.debug = d } }
 
 // WithProxy routes the WebSocket connection (and the auth-token page fetch)
 // through the given proxy: "socks5://host:port", "socks5h://host:port",
@@ -111,9 +112,23 @@ func applyProxy(d *websocket.Dialer, proxyURL string) {
 	}
 }
 
-func (c *WSClient) OnConnected(fn func())    { c.onConnected = append(c.onConnected, fn) }
-func (c *WSClient) OnDisconnected(fn func()) { c.onDisconnected = append(c.onDisconnected, fn) }
-func (c *WSClient) OnError(fn func(error))   { c.onError = append(c.onError, fn) }
+func (c *WSClient) OnConnected(fn func()) {
+	c.mu.Lock()
+	c.onConnected = append(c.onConnected, fn)
+	c.mu.Unlock()
+}
+
+func (c *WSClient) OnDisconnected(fn func()) {
+	c.mu.Lock()
+	c.onDisconnected = append(c.onDisconnected, fn)
+	c.mu.Unlock()
+}
+
+func (c *WSClient) OnError(fn func(error)) {
+	c.mu.Lock()
+	c.onError = append(c.onError, fn)
+	c.mu.Unlock()
+}
 
 // Debug reports whether the client is in debug logging mode.
 func (c *WSClient) Debug() bool { return c.debug }
@@ -166,7 +181,7 @@ func (c *WSClient) Connect() error {
 	}
 
 	c.conn = conn
-	c.connected = true
+	c.connected.Store(true)
 
 	// Fetch auth token from TradingView page when cookies are present.
 	// Always report auth failures to stderr (not just in debug mode) so
@@ -200,8 +215,12 @@ func (c *WSClient) Connect() error {
 		"p": []any{authToken},
 	}))
 
-	c.loggedIn = true
-	for _, fn := range c.onConnected {
+	c.loggedIn.Store(true)
+
+	c.mu.Lock()
+	connectedHandlers := append([]func(){}, c.onConnected...)
+	c.mu.Unlock()
+	for _, fn := range connectedHandlers {
 		fn()
 	}
 
@@ -211,9 +230,12 @@ func (c *WSClient) Connect() error {
 
 func (c *WSClient) readLoop() {
 	defer func() {
-		c.connected = false
-		c.loggedIn = false
-		for _, fn := range c.onDisconnected {
+		c.connected.Store(false)
+		c.loggedIn.Store(false)
+		c.mu.Lock()
+		disconnectedHandlers := append([]func(){}, c.onDisconnected...)
+		c.mu.Unlock()
+		for _, fn := range disconnectedHandlers {
 			fn()
 		}
 	}()
@@ -249,7 +271,10 @@ func (c *WSClient) readLoop() {
 				p, _ := v["p"].([]any)
 
 				if m == "protocol_error" {
-					for _, fn := range c.onError {
+					c.mu.Lock()
+					errorHandlers := append([]func(error){}, c.onError...)
+					c.mu.Unlock()
+					for _, fn := range errorHandlers {
 						fn(fmt.Errorf("protocol error: %v", p))
 					}
 					continue
@@ -257,7 +282,10 @@ func (c *WSClient) readLoop() {
 
 				if len(p) > 0 {
 					sessionID, _ := p[0].(string)
-					if session, ok := c.sessions[sessionID]; ok {
+					c.mu.Lock()
+					session, ok := c.sessions[sessionID]
+					c.mu.Unlock()
+					if ok {
 						session.onData(map[string]any{
 							"type": m,
 							"data": p,
@@ -289,26 +317,45 @@ func truncateStr(s string, n int) string {
 }
 
 func (c *WSClient) sendRaw(data string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.conn == nil {
 		return
 	}
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.conn.WriteMessage(websocket.TextMessage, []byte(data))
+	// Bounded write: without a deadline a full TCP send buffer (slow proxy /
+	// stalled peer) blocks the writer — and therefore Close()'s delete
+	// messages — indefinitely. 15s is generous for these small frames.
+	_ = c.conn.SetWriteDeadline(time.Now().Add(15 * time.Second))
+	_ = c.conn.WriteMessage(websocket.TextMessage, []byte(data))
 }
 
 func (c *WSClient) Close() {
-	// Send delete messages for all active sessions before closing,
-	// so TradingView's server can release indicator slots.
+	// Snapshot the active sessions under the lock so readLoop can keep
+	// dispatching while we send deletes. The sessions map is shared between
+	// readLoop and this method; a concurrent map read+write is a fatal
+	// runtime panic — exactly what a multi-account hunt triggers.
+	type pendingDelete struct {
+		id  string
+		typ string
+	}
+	c.mu.Lock()
+	deletes := make([]pendingDelete, 0, len(c.sessions))
+	for id, entry := range c.sessions {
+		deletes = append(deletes, pendingDelete{id: id, typ: entry.typ})
+	}
+	c.mu.Unlock()
+
+	// Send delete messages for all active sessions before closing, so
+	// TradingView's server can release indicator slots.
 	// Matches JS tv-optimized end() behavior.
-	for sessionID, entry := range c.sessions {
-		switch entry.typ {
+	for _, d := range deletes {
+		switch d.typ {
 		case "chart":
-			c.Send("chart_delete_session", []any{sessionID})
+			c.Send("chart_delete_session", []any{d.id})
 		case "replay":
-			c.Send("replay_delete_session", []any{sessionID})
+			c.Send("replay_delete_session", []any{d.id})
 		case "quote":
-			c.Send("quote_delete_session", []any{sessionID})
+			c.Send("quote_delete_session", []any{d.id})
 		}
 	}
 
@@ -319,26 +366,27 @@ func (c *WSClient) Close() {
 	// stale sessions from a closed connection can block new ones.
 	time.Sleep(500 * time.Millisecond)
 
+	c.mu.Lock()
 	c.sessions = make(map[string]*sessionEntry)
+	conn := c.conn
+	c.connected.Store(false)
+	c.loggedIn.Store(false)
+	c.mu.Unlock()
 
-	if c.conn != nil {
-		c.conn.Close()
+	if conn != nil {
+		_ = conn.Close()
 	}
-	c.connected = false
-	c.loggedIn = false
 }
 
 // IsConnected returns true if the WebSocket connection is alive and authenticated.
 func (c *WSClient) IsConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.connected && c.loggedIn
+	return c.connected.Load() && c.loggedIn.Load()
 }
 
 func (c *WSClient) WaitForConnected(timeout time.Duration) bool {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		if c.connected && c.loggedIn {
+		if c.connected.Load() && c.loggedIn.Load() {
 			return true
 		}
 		time.Sleep(50 * time.Millisecond)

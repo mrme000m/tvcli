@@ -10,8 +10,13 @@ import (
 // canonical definition lives in pkg/account so external programs share it.
 type TierLimits = account.TierLimits
 
-// GetTierLimits returns the TierLimits for the TV_TIER env var, defaulting to
-// "free". Legacy single-account behavior is unchanged: the tier is global.
+// GetTierLimits returns the TierLimits for the active account's tier (set by
+// Config.UseAccount), falling back to the TV_TIER env var, then "free".
+// Single-account legacy behavior is unchanged when no account is activated.
 func GetTierLimits() TierLimits {
-	return account.LimitsForTier(os.Getenv("TV_TIER"))
+	tier := activeTier
+	if tier == "" {
+		tier = os.Getenv("TV_TIER")
+	}
+	return account.LimitsForTier(tier)
 }

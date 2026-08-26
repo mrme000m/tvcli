@@ -11,16 +11,22 @@ import (
 )
 
 type ChartStudy struct {
-	session        *ChartSession
-	studyID        string
-	indicator      any
-	periods        map[float64]map[string]any
-	periodsMu      sync.RWMutex
+	session   *ChartSession
+	studyID   string
+	indicator any
+	periods   map[float64]map[string]any
+	periodsMu sync.RWMutex
+	// graphicMu guards graphic + strategyReport (written by the WS readLoop,
+	// read by the request goroutine after the study settle window).
+	graphicMu      sync.RWMutex
 	graphic        map[string]map[string]any
 	strategyReport map[string]any
-	onUpdate       []func()
-	onError        []func(error)
-	onReady        []func()
+	// mu guards the callback slices (readLoop dispatch vs request-goroutine
+	// registration).
+	mu       sync.Mutex
+	onUpdate []func()
+	onError  []func(error)
+	onReady  []func()
 }
 
 func NewChartStudy(session *ChartSession, indicator any) *ChartStudy {
@@ -32,7 +38,7 @@ func NewChartStudy(session *ChartSession, indicator any) *ChartStudy {
 		graphic:   make(map[string]map[string]any),
 	}
 
-	session.studyListeners[cs.studyID] = cs.onData
+	session.registerStudy(cs.studyID, cs.onData)
 
 	inputs := cs.getInputs()
 	session.Send("create_study", []any{
@@ -85,19 +91,33 @@ func (cs *ChartStudy) onData(packet map[string]any) {
 
 	switch msgType {
 	case "study_completed":
-		for _, fn := range cs.onReady {
+		for _, fn := range cs.snapshotReady() {
 			fn()
 		}
 
 	case "timescale_update", "du":
 		if len(data) > 1 {
 			if dataMap, ok := data[1].(map[string]any); ok {
+				if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
+					keys := make([]string, 0, len(dataMap))
+					for k := range dataMap {
+						keys = append(keys, k)
+					}
+					log.Printf("[DEBUG] du keys: %v (study=%s)", keys, cs.studyID)
+				}
 				if studyData, ok := dataMap[cs.studyID].(map[string]any); ok {
+					if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
+						skeys := make([]string, 0, len(studyData))
+						for k := range studyData {
+							skeys = append(skeys, k)
+						}
+						log.Printf("[DEBUG] study %s entry keys: %v", cs.studyID, skeys)
+					}
 					cs.processStudyData(studyData)
 				}
 			}
 		}
-		for _, fn := range cs.onUpdate {
+		for _, fn := range cs.snapshotUpdate() {
 			fn()
 		}
 
@@ -111,7 +131,7 @@ func (cs *ChartStudy) onData(packet map[string]any) {
 		if len(data) > 4 {
 			errMsg = fmt.Sprintf("%s (details: %v)", errMsg, data[4])
 		}
-		for _, fn := range cs.onError {
+		for _, fn := range cs.snapshotError() {
 			fn(fmt.Errorf(errMsg))
 		}
 	}
@@ -182,7 +202,19 @@ func (cs *ChartStudy) processStudyData(studyData map[string]any) {
 				// dataCompressed at the top level of the parsed `d` JSON (strategy reports).
 				if dataComp, ok := inlineParsed["dataCompressed"].(string); ok && dataComp != "" {
 					if decomp, err := parseCompressed(dataComp); err == nil {
+						if cs.session != nil && cs.session.client != nil && cs.session.client.Debug() {
+							dkeys := make([]string, 0, len(decomp))
+							for k := range decomp {
+								dkeys = append(dkeys, k)
+							}
+							log.Printf("[DEBUG] study %s decompressed keys: %v", cs.studyID, dkeys)
+						}
 						cs.mergeStrategyReport(decomp["report"])
+						// Some payloads decompress to the report directly (no
+						// "report" wrapper): performance/trades at the top level.
+						if _, hasPerf := decomp["performance"]; hasPerf {
+							cs.mergeStrategyReport(decomp)
+						}
 						if graphicsCmds, ok := decomp["graphicsCmds"].(map[string]any); ok {
 							cs.processGraphics(graphicsCmds)
 						}
@@ -229,6 +261,8 @@ func (cs *ChartStudy) mergeStrategyReport(report any) {
 	if !ok || r == nil {
 		return
 	}
+	cs.graphicMu.Lock()
+	defer cs.graphicMu.Unlock()
 	if cs.strategyReport == nil {
 		cs.strategyReport = map[string]any{}
 	}
@@ -251,6 +285,9 @@ func (cs *ChartStudy) mergeStrategyReport(report any) {
 }
 
 func (cs *ChartStudy) processGraphics(cmds map[string]any) {
+	cs.graphicMu.Lock()
+	defer cs.graphicMu.Unlock()
+
 	if erase, ok := cmds["erase"].([]any); ok {
 		for _, instr := range erase {
 			if instrMap, ok := instr.(map[string]any); ok {
@@ -325,28 +362,77 @@ func (cs *ChartStudy) Periods() []map[string]any {
 }
 
 func (cs *ChartStudy) Graphic() map[string]map[string]any {
-	return cs.graphic
+	cs.graphicMu.RLock()
+	defer cs.graphicMu.RUnlock()
+	if cs.graphic == nil {
+		return nil
+	}
+	out := make(map[string]map[string]any, len(cs.graphic))
+	for k, v := range cs.graphic {
+		inner := make(map[string]any, len(v))
+		for id, item := range v {
+			inner[id] = item
+		}
+		out[k] = inner
+	}
+	return out
 }
 
 func (cs *ChartStudy) StrategyReport() map[string]any {
-	return cs.strategyReport
+	cs.graphicMu.RLock()
+	defer cs.graphicMu.RUnlock()
+	if cs.strategyReport == nil {
+		return nil
+	}
+	out := make(map[string]any, len(cs.strategyReport))
+	for k, v := range cs.strategyReport {
+		out[k] = v
+	}
+	return out
 }
 
 func (cs *ChartStudy) OnUpdate(fn func()) {
+	cs.mu.Lock()
 	cs.onUpdate = append(cs.onUpdate, fn)
+	cs.mu.Unlock()
 }
 
 func (cs *ChartStudy) OnError(fn func(error)) {
+	cs.mu.Lock()
 	cs.onError = append(cs.onError, fn)
+	cs.mu.Unlock()
 }
 
 func (cs *ChartStudy) OnReady(fn func()) {
+	cs.mu.Lock()
 	cs.onReady = append(cs.onReady, fn)
+	cs.mu.Unlock()
+}
+
+func (cs *ChartStudy) snapshotReady() []func() {
+	cs.mu.Lock()
+	out := append([]func(){}, cs.onReady...)
+	cs.mu.Unlock()
+	return out
+}
+
+func (cs *ChartStudy) snapshotUpdate() []func() {
+	cs.mu.Lock()
+	out := append([]func(){}, cs.onUpdate...)
+	cs.mu.Unlock()
+	return out
+}
+
+func (cs *ChartStudy) snapshotError() []func(error) {
+	cs.mu.Lock()
+	out := append([]func(error){}, cs.onError...)
+	cs.mu.Unlock()
+	return out
 }
 
 func (cs *ChartStudy) Remove() {
 	cs.session.Send("remove_study", []any{cs.session.sessionID, cs.studyID})
-	delete(cs.session.studyListeners, cs.studyID)
+	cs.session.unregisterStudy(cs.studyID)
 	// 100ms flush so the server processes the removal before the caller
 	// proceeds to chart cleanup or connection close.
 	time.Sleep(100 * time.Millisecond)

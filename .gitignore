@@ -65,3 +65,7 @@ skill_work/
 # Background server state
 .tvcli-server.pid
 .tvcli-server.log
+
+# Local build artifacts / screenshots
+/bulk_validate
+/shots/

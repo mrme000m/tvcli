@@ -74,7 +74,7 @@ func (c *runCmd) Run(env *cli.Env) error {
 	}
 
 	fmt.Fprintf(env.Stderr, "Tier: %s (max %d charts, %d indicators/chart, %ds calc)\n",
-		os.Getenv("TV_TIER"), limits.MaxCharts, limits.MaxIndicators, limits.CalcTimeoutSecs)
+		cfg.TierName(), limits.MaxCharts, limits.MaxIndicators, limits.CalcTimeoutSecs)
 	if forceCleanup {
 		fmt.Fprintln(env.Stderr, "⚠ Force cleanup mode: will aggressively try to free studies")
 	}

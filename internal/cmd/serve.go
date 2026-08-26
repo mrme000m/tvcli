@@ -248,12 +248,17 @@ func queryServerHealth(addr string) map[string]any {
 // printEndpoints prints the server endpoint summary to the writer.
 func (c *serveCmd) printEndpoints(w io.Writer, addr string) {
 	fmt.Fprintf(w, "tvcli server endpoints:\n")
-	fmt.Fprintf(w, "  GET  /health      — status check (includes auth + tier info)\n")
-	fmt.Fprintf(w, "  GET  /check-auth  — verify auth cookies & subscription tier\n")
-	fmt.Fprintf(w, "  POST /compile     — compile Pine script source\n")
-	fmt.Fprintf(w, "  POST /fetch       — fetch OHLCV data\n")
-	fmt.Fprintf(w, "  POST /clean       — clean chart sessions\n")
-	fmt.Fprintf(w, "  POST /run         — compile + run Pine script\n")
+	fmt.Fprintf(w, "  GET  /health       — status check (auth + tier + account pool + failover)\n")
+	fmt.Fprintf(w, "  GET  /check-auth   — verify auth cookies & subscription tier (?account=NAME)\n")
+	fmt.Fprintf(w, "  GET  /skills       — registered Pine indicator skills\n")
+	fmt.Fprintf(w, "  GET  /accounts     — account registry (masked)\n")
+	fmt.Fprintf(w, "  GET  /queue-stats  — per-account concurrency usage\n")
+	fmt.Fprintf(w, "  POST /compile      — compile Pine script source\n")
+	fmt.Fprintf(w, "  POST /fetch        — fetch OHLCV data (account failover)\n")
+	fmt.Fprintf(w, "  POST /clean        — clean chart sessions\n")
+	fmt.Fprintf(w, "  POST /run          — compile + run Pine script (account failover)\n")
+	fmt.Fprintf(w, "  POST /run-skill    — run a registered skill by name (account failover)\n")
+	fmt.Fprintf(w, "  POST /hunt         — batch skill run across many symbols (account pool)\n")
 	fmt.Fprintf(w, "\n")
 }
 

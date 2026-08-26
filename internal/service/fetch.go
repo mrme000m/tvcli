@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/mrme000m/tvcli/internal/config"
@@ -114,13 +113,12 @@ func MergeOHLCV(existing, fresh []OHLCVBar) []OHLCVBar {
 	return merged
 }
 
-// FetchOHLCVBars connects via WS, fetches raw OHLCV bars, and returns them
-// sorted ascending.
-func FetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]OHLCVBar, error) {
+// connectFetchClient dials a fresh TradingView WS client for an OHLCV fetch.
+func connectFetchClient(cfg *config.Config) (tradingview.Client, error) {
 	client := tradingview.NewClient(
 		tradingview.WithToken(cfg.SessionID),
 		tradingview.WithSignature(cfg.Signature),
-			tradingview.WithDeviceToken(cfg.DeviceToken),
+		tradingview.WithDeviceToken(cfg.DeviceToken),
 		tradingview.WithProxy(cfg.ProxyURL),
 		tradingview.WithDebug(cfg.Debug),
 	)
@@ -131,46 +129,74 @@ func FetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]OHLCVBar
 		client.Close()
 		return nil, fmt.Errorf("ws timeout")
 	}
+	return client, nil
+}
+
+// FetchOHLCVBars connects via WS, fetches raw OHLCV bars, and returns them
+// sorted ascending.
+func FetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]OHLCVBar, error) {
+	client, err := connectFetchClient(cfg)
+	if err != nil {
+		return nil, err
+	}
 	defer client.Close()
 
 	return FetchOHLCVBarsWithClient(client, symbol, tf, bars)
 }
 
-// FetchOHLCVBarsWithClient fetches OHLCV using an existing WS client
-// (for persistent/loop connections).
-func FetchOHLCVBarsWithClient(client tradingview.Client, symbol, tf string, bars int) ([]OHLCVBar, error) {
+// FetchOHLCVBarsDeep connects via WS and fetches up to totalBars bars by
+// loading the initial window then backfilling older bars via request_more_data.
+func FetchOHLCVBarsDeep(cfg *config.Config, symbol, tf string, initialBars, totalBars int) ([]OHLCVBar, error) {
+	client, err := connectFetchClient(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer client.Close()
+
+	return FetchOHLCVBarsDeepWithClient(client, symbol, tf, initialBars, totalBars)
+}
+
+// newHistoryChart creates a chart session tuned for OHLCV fetching: it wires a
+// series-completion channel (the server emits one series_completed per
+// create_series load and per request_more_data backfill) and performs the
+// initial SetMarket + symbol-resolve wait. The returned waitSeries blocks
+// until the next series load finishes or the timeout elapses.
+func newHistoryChart(client tradingview.Client, symbol, tf string, initialBars int) (*tradingview.ChartSession, func(time.Duration) bool, error) {
 	ch := tradingview.NewChartSession(client)
 	ch.OnError(func(err error) {
 		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
 	})
 
-	done := make(chan struct{})
-	once := sync.Once{}
-	ch.OnUpdate(func() {
-		once.Do(func() { close(done) })
+	seriesCompleted := make(chan struct{}, 128)
+	ch.OnSeriesCompleted(func() {
+		select {
+		case seriesCompleted <- struct{}{}:
+		default:
+		}
 	})
+	waitSeries := func(timeout time.Duration) bool {
+		select {
+		case <-seriesCompleted:
+			return true
+		case <-time.After(timeout):
+			return false
+		}
+	}
 
 	ch.SetMarket(symbol, map[string]any{
 		"timeframe": pinefacade.NormalizeTimeframe(tf),
-		"range":     bars,
+		"range":     initialBars,
 	})
 
 	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
-		return nil, fmt.Errorf("symbol load: %w", err)
+		return nil, nil, fmt.Errorf("symbol load: %w", err)
 	}
+	return ch, waitSeries, nil
+}
 
-	select {
-	case <-done:
-	case <-time.After(30 * time.Second):
-		return nil, fmt.Errorf("timeout waiting for OHLCV data")
-	}
-	time.Sleep(800 * time.Millisecond)
-
-	periods := ch.Periods()
-	if len(periods) == 0 {
-		return nil, fmt.Errorf("no OHLCV data received")
-	}
-
+// barsFromPeriods converts raw price-series periods into sorted-ascending
+// OHLCV bars.
+func barsFromPeriods(periods []map[string]any) []OHLCVBar {
 	out := make([]OHLCVBar, 0, len(periods))
 	for _, p := range periods {
 		out = append(out, OHLCVBar{
@@ -187,7 +213,73 @@ func FetchOHLCVBarsWithClient(client tradingview.Client, symbol, tf string, bars
 		return out[i].Time < out[j].Time
 	})
 
-	return out, nil
+	return out
+}
+
+// FetchOHLCVBarsWithClient fetches OHLCV using an existing WS client
+// (for persistent/loop connections).
+func FetchOHLCVBarsWithClient(client tradingview.Client, symbol, tf string, bars int) ([]OHLCVBar, error) {
+	ch, waitSeries, err := newHistoryChart(client, symbol, tf, bars)
+	if err != nil {
+		return nil, err
+	}
+
+	if !waitSeries(30 * time.Second) {
+		// Fallback: series_completed never arrived — settle briefly and use
+		// whatever bars did stream in. Keeps single-shot fetches resilient on
+		// reconnects where the completion frame is dropped.
+		time.Sleep(800 * time.Millisecond)
+	}
+
+	periods := ch.Periods()
+	if len(periods) == 0 {
+		return nil, fmt.Errorf("no OHLCV data received")
+	}
+
+	return barsFromPeriods(periods), nil
+}
+
+// FetchOHLCVBarsDeepWithClient fetches up to totalBars bars of history by
+// loading the initial window then repeatedly backfilling older bars with
+// request_more_data until the target count is reached or the server reports no
+// more data.
+func FetchOHLCVBarsDeepWithClient(client tradingview.Client, symbol, tf string, initialBars, totalBars int) ([]OHLCVBar, error) {
+	if totalBars <= initialBars {
+		return FetchOHLCVBarsWithClient(client, symbol, tf, totalBars)
+	}
+
+	ch, waitSeries, err := newHistoryChart(client, symbol, tf, initialBars)
+	if err != nil {
+		return nil, err
+	}
+
+	if !waitSeries(30 * time.Second) {
+		return nil, fmt.Errorf("timeout waiting for initial OHLCV data")
+	}
+
+	batch := initialBars
+	if batch < 100 {
+		batch = 100
+	}
+
+	lastCount := len(ch.Periods())
+	for lastCount < totalBars {
+		want := totalBars - lastCount
+		if want < batch {
+			batch = want
+		}
+		ch.RequestMoreData(batch)
+		if !waitSeries(20 * time.Second) {
+			break // server stopped answering — return what we have
+		}
+		cur := len(ch.Periods())
+		if cur <= lastCount {
+			break // end of history: no additional bars arrived
+		}
+		lastCount = cur
+	}
+
+	return barsFromPeriods(ch.Periods()), nil
 }
 
 // TimeframeSeconds returns the approximate seconds per bar for a timeframe string.

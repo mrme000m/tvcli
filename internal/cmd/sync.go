@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/mrme000m/tvcli/internal/cli"
-	"github.com/mrme000m/tvcli/internal/config"
 	"github.com/mrme000m/tvcli/internal/service"
 	"github.com/mrme000m/tvcli/pkg/pinefacade"
 	"github.com/mrme000m/tvcli/pkg/runner"
@@ -44,10 +43,9 @@ func (c *syncCmd) Run(env *cli.Env) error {
 	}
 	bars := flags.GetInt("bars", 5000)
 
-	limits := config.GetTierLimits()
-	if limits.MaxBars > 0 && bars > limits.MaxBars {
-		fmt.Fprintf(env.Stderr, "Capping bars from %d to %d (tier limit)\n", bars, limits.MaxBars)
-		bars = limits.MaxBars
+	if bars > maxHistoryBars {
+		fmt.Fprintf(env.Stderr, "Capping bars from %d to %d (history cap)\n", bars, maxHistoryBars)
+		bars = maxHistoryBars
 	}
 
 	symbolClean := strings.ReplaceAll(symbol, ":", "_")
