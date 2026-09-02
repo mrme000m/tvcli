@@ -19,6 +19,6 @@
       }
     }
   },
-  "postCreateCommand": "go build -o tvcli ./cmd/tvcli",
+  "postCreateCommand": "go build -o tvcli ./cmd/tvcli && curl -fsSL https://opencode.ai/install | bash && printf 'export PATH=\"$HOME/.opencode/bin:$PATH\"\\n' >> ~/.profile",
   "remoteUser": "vscode"
 }
