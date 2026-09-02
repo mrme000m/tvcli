@@ -1,0 +1,30 @@
+# Example inventory for the TV browser-debug dependency playbook.
+# Copy to inventory.yml (or inventory/) and edit the connection vars.
+
+all:
+  children:
+    linux:
+      hosts:
+        tv-linux:
+          ansible_host: 127.0.0.1          # Linux server IP / codespace ssh host
+          ansible_user: root
+          tv_workspace: /opt/tv/minimal-mjs
+          # install_guacamole: true
+          # install_kasm: true
+          # kasm_installer_path: /path/to/kasm_release_x.y.z
+    darwin:
+      hosts:
+        tv-mac:
+          ansible_host: 127.0.0.1          # workstation IP
+          ansible_user: "{{ lookup('env', 'USER') }}"
+          ansible_connection: local
+          tv_workspace: /Volumes/ExMac/code/tradingview/minimal-mjs
+          install_xvfb: false
+          install_x11vnc: false
+
+  vars:
+    # Provision secrets from your vault / env — NEVER commit them.
+    # socks5_providers:
+    #   - name: ipvanish_nyc
+    #     proxy: "{{ lookup('env', 'IPVANISH_NYC_PROXY') }}"
+    # guacamole_postgres_password: "{{ lookup('env', 'GUACAMOLE_PG_PASSWORD') }}"

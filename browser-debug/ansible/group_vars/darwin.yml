@@ -1,0 +1,8 @@
+---
+# macOS workstation defaults (darwin arm64/x64).
+# launch.mjs launches the browser through a GUI-domain LaunchAgent, so no
+# Xvfb/x11vnc — the window renders on the real Aqua display.
+
+install_xvfb: false
+install_x11vnc: false
+install_guacamole: false

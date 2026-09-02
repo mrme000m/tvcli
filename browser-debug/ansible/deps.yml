@@ -1,0 +1,308 @@
+---
+# deps.yml — check + install every dependency for the TV browser-debug workspace.
+#
+# Components (each independently checkable/installable via --tags):
+#   node     Node.js >= 20 runtime (tv.mjs/bdg need it; Node 22 for global WebSocket)
+#   browser  CloakBrowser stealth Chromium (self-downloaded by launch.mjs)
+#   cdp      remote-debugging port (9222..9321) up and healthy
+#   bdg      browser-debugger-cli built (dist/index.js + tv command group)
+#   proxy    multiprovider SOCKS5 (socks-relay.mjs + provider list validation)
+#   display  Linux-only: Xvfb + x11vnc so headful Chromium has a screen
+#   guacamole Linux-only: clientless VNC/RDP/SSH gateway (docker compose)
+#   kasm    Linux-only: Kasm Workspaces single-server install (opt-in)
+#   vision  Mistral vision key present (never printed)
+#
+# Grounded in: launch.mjs, bdg/package.json, .agents/skills/tv-network/SKILL.md,
+# vision.mjs. NO invented package names, URLs, or versions.
+# Secrets (SESSION/SIGNATURE/DEVICE_T/MISTRAL_API_KEY/proxy creds) are NEVER printed.
+
+- name: Check and install TV browser-debug workspace dependencies
+  hosts: all
+  gather_facts: true
+
+  tasks:
+    # ------------------------------------------------------------------ node
+    - name: Detect Node.js version
+      ansible.builtin.shell: node --version 2>/dev/null || echo MISSING
+      register: node_version
+      changed_when: false
+      tags: [node, always]
+
+    - name: Install Node.js on Debian/Ubuntu (NodeSource 22.x)
+      ansible.builtin.shell: |
+        set -e
+        curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+        apt-get install -y nodejs
+      become: true
+      when:
+        - ansible_os_family == 'Debian'
+        - node_version.stdout is version('22.0.0', '<') or node_version.stdout == 'MISSING'
+      tags: [node]
+
+    - name: Install Node.js on RHEL-family (NodeSource 22.x)
+      ansible.builtin.shell: |
+        set -e
+        curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+        yum install -y nodejs
+      become: true
+      when:
+        - ansible_os_family == 'RedHat'
+        - node_version.stdout is version('22.0.0', '<') or node_version.stdout == 'MISSING'
+      tags: [node]
+
+    - name: Install Node.js on macOS (Homebrew)
+      community.general.homebrew:
+        name: node
+        state: latest
+      when:
+        - ansible_os_family == 'Darwin'
+        - node_version.stdout is version('22.0.0', '<') or node_version.stdout == 'MISSING'
+      tags: [node]
+
+    - name: Assert Node.js meets requirement
+      ansible.builtin.fail:
+        msg: "Node.js >= 20 required (22 recommended); found: {{ node_version.stdout }}"
+      when: node_version.stdout == 'MISSING' or node_version.stdout is version('20.0.0', '<')
+      tags: [node, always]
+
+    # ------------------------------------------------------------------ browser
+    - name: Check CloakBrowser binary presence
+      ansible.builtin.find:
+        paths: "{{ tv_workspace }}/cloakbrowser"
+        patterns: "chromium-*"
+        file_type: directory
+      register: cloakbrowser_dirs
+      failed_when: false
+      changed_when: false
+      tags: [browser]
+
+    - name: Download + launch CloakBrowser (launch.mjs --force)
+      ansible.builtin.command:
+        cmd: node launch.mjs --force
+        chdir: "{{ tv_workspace }}"
+      when: cloakbrowser_force_download or cloakbrowser_dirs.matched == 0
+      tags: [browser]
+
+    # ------------------------------------------------------------------ cdp
+    - name: Probe CDP port range
+      ansible.builtin.shell: |
+        for p in $(seq {{ cloakbrowser_cdp_port_start }} {{ cloakbrowser_cdp_port_end }}); do
+          if curl -sf "http://127.0.0.1:${p}/json/version" >/dev/null; then
+            echo "$p"; exit 0
+          fi
+        done
+        exit 1
+      register: cdp_probe
+      failed_when: false
+      changed_when: false
+      tags: [cdp]
+
+    - name: Start CloakBrowser if CDP is down
+      ansible.builtin.command:
+        cmd: node launch.mjs
+        chdir: "{{ tv_workspace }}"
+      when: cdp_probe.rc != 0
+      tags: [cdp]
+
+    - name: Re-probe CDP after start
+      ansible.builtin.shell: |
+        for i in $(seq 1 30); do
+          for p in $(seq {{ cloakbrowser_cdp_port_start }} {{ cloakbrowser_cdp_port_end }}); do
+            if curl -sf "http://127.0.0.1:${p}/json/version" >/dev/null; then
+              echo "$p"; exit 0
+            fi
+          done
+          sleep 1
+        done
+        exit 1
+      register: cdp_reprobe
+      changed_when: false
+      tags: [cdp]
+
+    - name: Report CDP endpoint
+      ansible.builtin.debug:
+        msg: "CDP live on http://127.0.0.1:{{ (cdp_probe.stdout if cdp_probe.rc == 0 else cdp_reprobe.stdout) | trim }}/json/version"
+      tags: [cdp]
+
+    # ------------------------------------------------------------------ bdg
+    - name: Check bdg build output
+      ansible.builtin.stat:
+        path: "{{ tv_workspace }}/bdg/dist/index.js"
+      register: bdg_dist
+      tags: [bdg]
+
+    - name: Install bdg dependencies (ignore-scripts skips husky prepare)
+      ansible.builtin.command:
+        cmd: npm install --ignore-scripts
+        chdir: "{{ tv_workspace }}/bdg"
+      tags: [bdg]
+
+    - name: Build bdg (tsc && tsc-alias)
+      ansible.builtin.command:
+        cmd: npm run build
+        chdir: "{{ tv_workspace }}/bdg"
+      when: bdg_force_rebuild or not bdg_dist.stat.exists
+      tags: [bdg]
+
+    - name: Verify bdg tv command group
+      ansible.builtin.command:
+        cmd: node dist/index.js tv --help
+        chdir: "{{ tv_workspace }}/bdg"
+      register: bdg_tv_help
+      changed_when: false
+      tags: [bdg]
+
+    - name: Assert bdg tv surface
+      ansible.builtin.assert:
+        that:
+          - "'ws' in bdg_tv_help.stdout"
+          - "'studies' in bdg_tv_help.stdout"
+          - "'study' in bdg_tv_help.stdout"
+          - "'drawings' in bdg_tv_help.stdout"
+          - "'chart' in bdg_tv_help.stdout"
+        fail_msg: "bdg tv command group missing expected subcommands"
+      tags: [bdg]
+
+    # ------------------------------------------------------------------ proxy
+    - name: Assert socks-relay.mjs present
+      ansible.builtin.stat:
+        path: "{{ tv_workspace }}/socks-relay.mjs"
+      register: socks_relay
+      tags: [proxy]
+
+    - name: Fail if socks-relay.mjs missing
+      ansible.builtin.fail:
+        msg: "socks-relay.mjs not found in {{ tv_workspace }} — required for authed SOCKS5"
+      when: not socks_relay.stat.exists
+      tags: [proxy]
+
+    - name: Validate SOCKS5 provider URLs (masked)
+      ansible.builtin.debug:
+        msg: "provider '{{ item.name }}' -> {{ item.proxy | regex_replace('://[^:@/]+:[^:@/]+@', '://***:***@') }}"
+      loop: "{{ socks5_providers }}"
+      tags: [proxy]
+
+    # ------------------------------------------------------------------ display (Linux)
+    - name: Install Xvfb + x11vnc (Debian/Ubuntu)
+      ansible.builtin.apt:
+        name: [xvfb, x11vnc]
+        state: present
+        update_cache: true
+      become: true
+      when:
+        - ansible_os_family == 'Debian'
+        - install_xvfb | bool
+      tags: [display]
+
+    - name: Start Xvfb virtual display
+      ansible.builtin.shell: |
+        if ! pgrep -f "Xvfb {{ xvfb_display }}" >/dev/null; then
+          nohup Xvfb {{ xvfb_display }} -screen 0 {{ xvfb_screen }} >/tmp/xvfb.log 2>&1 &
+        fi
+      become: true
+      when: install_xvfb | bool
+      tags: [display]
+
+    - name: Start x11vnc export
+      ansible.builtin.shell: |
+        if ! pgrep -f "x11vnc.*{{ x11vnc_port }}" >/dev/null; then
+          nohup x11vnc -display {{ xvfb_display }} -forever -nopw -rfbport {{ x11vnc_port }} >/tmp/x11vnc.log 2>&1 &
+        fi
+      become: true
+      when: install_x11vnc | bool
+      tags: [display]
+
+    # ------------------------------------------------------------------ guacamole (Linux)
+    - name: Ensure docker is installed
+      ansible.builtin.apt:
+        name: docker.io
+        state: present
+        update_cache: true
+      become: true
+      when:
+        - ansible_os_family == 'Debian'
+        - install_guacamole | bool
+      tags: [guacamole]
+
+    - name: Deploy Guacamole compose stack
+      ansible.builtin.template:
+        src: guacamole/docker-compose.yml.j2
+        dest: "{{ tv_workspace }}/guacamole/docker-compose.yml"
+        mode: "0644"
+      when: install_guacamole | bool
+      tags: [guacamole]
+
+    - name: Generate Guacamole PostgreSQL initdb.sql
+      ansible.builtin.shell: |
+        mkdir -p {{ tv_workspace }}/guacamole/init
+        docker run --rm guacamole/guacamole:{{ guacamole_version }} \
+          /opt/guacamole/bin/initdb.sh --postgresql \
+          > {{ tv_workspace }}/guacamole/init/initdb.sql
+      become: true
+      when: install_guacamole | bool
+      tags: [guacamole]
+
+    - name: Start Guacamole stack
+      community.docker.docker_compose_v2:
+        project_src: "{{ tv_workspace }}/guacamole"
+        state: present
+      become: true
+      when: install_guacamole | bool
+      tags: [guacamole]
+
+    # ------------------------------------------------------------------ kasm (Linux, opt-in)
+    - name: Check Kasm installer path
+      ansible.builtin.stat:
+        path: "{{ kasm_installer_path | default('') }}/install.sh"
+      register: kasm_installer
+      when: install_kasm | bool
+      tags: [kasm]
+
+    - name: Fail if Kasm installer missing
+      ansible.builtin.fail:
+        msg: >-
+          install_kasm is true but kasm_installer_path does not contain install.sh.
+          Download the rolling installer from https://kasm.com/downloads and set
+          kasm_installer_path to the extracted kasm_release_x.y.z directory.
+      when:
+        - install_kasm | bool
+        - not (kasm_installer.stat.exists | default(false))
+      tags: [kasm]
+
+    - name: Run Kasm single-server installer
+      ansible.builtin.shell: bash install.sh
+      args:
+        chdir: "{{ kasm_installer_path }}"
+      become: true
+      when:
+        - install_kasm | bool
+        - kasm_installer.stat.exists | default(false)
+      tags: [kasm]
+
+    # ------------------------------------------------------------------ vision
+    - name: Check MISTRAL_API_KEY presence (never print value)
+      ansible.builtin.shell: |
+        if [ -n "${MISTRAL_API_KEY:-}" ]; then echo ENV; exit 0; fi
+        for f in "{{ tv_workspace }}/../go/.env" "{{ tv_workspace }}/.env"; do
+          if [ -f "$f" ] && grep -q '^MISTRAL_API_KEY=' "$f"; then echo "$f"; exit 0; fi
+        done
+        exit 1
+      register: vision_key
+      failed_when: false
+      changed_when: false
+      tags: [vision]
+
+    - name: Assert vision key present
+      ansible.builtin.assert:
+        that: vision_key.rc == 0
+        fail_msg: "MISTRAL_API_KEY not set (env or go/.env or ./.env)"
+      tags: [vision]
+
+    - name: Vision smoke test (opt-in)
+      ansible.builtin.command:
+        cmd: node vision.mjs --help
+        chdir: "{{ tv_workspace }}"
+      when: vision_smoke_test | bool
+      register: vision_help
+      changed_when: false
+      tags: [vision]

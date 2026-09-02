@@ -1,0 +1,10 @@
+---
+# Linux target defaults (Debian/Ubuntu primary; Kasm/Guacamole/VNC are Linux-native).
+ansible_python_interpreter: /usr/bin/python3
+
+# Headful Chromium on a headless server needs a virtual display.
+install_xvfb: true
+install_x11vnc: true
+
+# Guacamole (clientless VNC/SSH/RDP gateway) — Linux-only in this playbook.
+install_guacamole: false

@@ -1,0 +1,70 @@
+---
+# Shared vars for the TV browser-debug dependency playbook.
+# Grounded in launch.mjs / bdg/package.json / tv-network SKILL.md / vision.mjs.
+
+# Workspace root on the target host (overridden per-host in inventory).
+# macOS workstation: /Volumes/ExMac/code/tradingview/minimal-mjs
+# Linux checkout:   /home/<user>/tradingview/minimal-mjs
+tv_workspace: /opt/tv/minimal-mjs
+
+# ------------------------------------------------------------------ CloakBrowser
+# launch.mjs self-downloads the stealth Chromium (CloakHQ releases) — there is
+# NO distro/npm package. Presence check = a chromium-<version>/ dir under
+# <tv_workspace>/cloakbrowser/. `--force` re-downloads (and launches).
+cloakbrowser_force_download: false
+
+# CDP debugging port range (launch.mjs scans 9222..9321, default 9222).
+cloakbrowser_cdp_port_start: 9222
+cloakbrowser_cdp_port_end: 9321
+
+# ------------------------------------------------------------------ SOCKS5 proxy
+# Multiprovider list. launch.mjs consumes these via `--proxy <url>` or CB_PROXY.
+# Authed socks5:// (inline user:pass) is relayed through socks-relay.mjs on the
+# first free port in socks5_relay range; unauthed/other schemes pass verbatim.
+# Credentials are secrets — the playbook only ever prints masked upstreams.
+socks5_providers: []
+# Example entries (uncomment + fill real creds from your vault):
+#   - name: ipvanish_nyc
+#     proxy: socks5://user:pass@nyc.socks.ipvanish.com:1080
+#   - name: ipvanish_la
+#     proxy: socks5://user:pass@lax.socks.ipvanish.com:1080
+
+socks5_relay_port_start: 11080
+socks5_relay_port_end: 11179
+
+# ------------------------------------------------------------------ bdg
+# Vendored bdg has no .git -> `npm install --ignore-scripts` (skips husky
+# prepare), then `npm run build` (tsc && tsc-alias). engines: node >= 20.
+bdg_force_rebuild: false
+
+# ------------------------------------------------------------------ Vision
+# vision.mjs reads MISTRAL_API_KEY from env, else ../go/.env, else ./.env.
+vision_default_model: mistral-small-2506
+# Costing smoke test hits the Mistral API; off by default.
+vision_smoke_test: false
+
+# ------------------------------------------------------------------ Linux VNC/remote
+# Xvfb virtual display + x11vnc export so the headful Chromium has a display on
+# a headless Linux server. Conventional display :99 / VNC :5900.
+xvfb_display: ":99"
+xvfb_screen: "1600x1000x24"
+x11vnc_port: 5900
+
+# ------------------------------------------------------------------ Guacamole
+# Clientless gateway (clientless VNC/RDP/SSH). Grounded on the official images
+# guacamole/guacd:1.6.0 + guacamole/guacamole:1.6.0 + postgres:15.2-alpine.
+guacamole_version: "1.6.0"
+guacamole_postgres_image: "postgres:15.2-alpine"
+# Guacamole web UI listens on :8080/guacamole (no nginx TLS in this minimal set).
+guacamole_http_port: 8080
+guacamole_postgres_user: guacamole_user
+guacamole_postgres_db: guacamole_db
+# Change this before first start; default creds are guacadmin/guacadmin.
+guacamole_postgres_password: "ChangeMeBeforeFirstStart1234"
+
+# ------------------------------------------------------------------ Kasm
+# Single-server install runs install.sh from a downloaded installer tarball.
+# The download URL is a rotating "latest rolling build" (kasm.com/downloads),
+# so it is NOT pinned here: set kasm_installer_path to the extracted dir.
+# kasm_installer_path: /path/to/kasm_release_x.y.z
+install_kasm: false
