@@ -61,6 +61,7 @@ BINANCE_*.json
 # working artifacts from agent runs
 skill_work/
 *.json
+!.devcontainer/devcontainer.json
 
 # Background server state
 .tvcli-server.pid
