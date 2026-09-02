@@ -229,7 +229,27 @@ func (cs *ChartSession) SetMarket(symbol string, opts map[string]any) {
 		"=" + toJSON(symbolInit),
 	})
 
-	cs.setSeries(timeframe, rangeVal, nil)
+	// Optional historical anchor: opts["to"] = unix seconds. When set, the
+	// chart window ends at that moment instead of "now", so studies and
+	// OHLCV fetches reflect the market at a past timestamp (bar replay
+	// semantics without the replay session). Zero/absent → live window.
+	var toAny any
+	switch v := opts["to"].(type) {
+	case int:
+		if v != 0 {
+			toAny = v
+		}
+	case int64:
+		if v != 0 {
+			toAny = v
+		}
+	case float64:
+		if v != 0 {
+			toAny = int64(v)
+		}
+	}
+
+	cs.setSeries(timeframe, rangeVal, toAny)
 }
 
 func (cs *ChartSession) setSeries(timeframe string, rangeVal int, to any) {

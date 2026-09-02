@@ -135,6 +135,7 @@ type fetchRequest struct {
 	Symbol    string `json:"symbol"`
 	Timeframe string `json:"timeframe"`
 	Bars      int    `json:"bars"`
+	To        int64  `json:"to"` // unix seconds: window ends here (0 = live)
 }
 
 type cleanRequest struct {
@@ -148,6 +149,7 @@ type runRequest struct {
 	Symbol     string            `json:"symbol"`
 	Timeframe  string            `json:"timeframe"`
 	Bars       int               `json:"bars"`
+	To         int64             `json:"to"` // unix seconds: window ends here (0 = live)
 	Inputs     map[string]string `json:"inputs"`
 	ForceClean bool              `json:"forceCleanup"`
 }
@@ -320,10 +322,14 @@ func (s *Server) handleFetch(w http.ResponseWriter, r *http.Request) {
 			once.Do(func() { close(done) })
 		})
 
-		chart.SetMarket(symbol, map[string]any{
+		marketOpts := map[string]any{
 			"timeframe": pinefacade.NormalizeTimeframe(req.Timeframe),
 			"range":     bars,
-		})
+		}
+		if req.To != 0 {
+			marketOpts["to"] = req.To
+		}
+		chart.SetMarket(symbol, marketOpts)
 		if err := chart.WaitForSymbol(15 * time.Second); err != nil {
 			client.Close()
 			s.releaseAccountSlot(name)
@@ -549,8 +555,9 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			Symbol:       symbol,
 			Timeframe:    tf,
 			Bars:         bars,
+			ToTime:       req.To,
 			Inputs:       req.Inputs,
-			ReservedKeys: []string{"source", "symbol", "timeframe", "bars", "inputs", "forceCleanup"},
+			ReservedKeys: []string{"source", "symbol", "timeframe", "bars", "to", "inputs", "forceCleanup"},
 			SettleMs:     1500,
 			ForceCleanup: req.ForceClean,
 			CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
@@ -638,6 +645,7 @@ type runSkillRequest struct {
 	Symbol    string            `json:"symbol"`
 	Timeframe string            `json:"timeframe"`
 	Bars      int               `json:"bars"`
+	To        int64             `json:"to"` // unix seconds: window ends here (0 = live)
 	Inputs    map[string]string `json:"inputs"`
 }
 
@@ -777,6 +785,7 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 			Symbol:       symbol,
 			Timeframe:    tf,
 			Bars:         accountBars,
+			ToTime:       req.To,
 			Inputs:       inputs,
 			ReservedKeys: nil,
 			SettleMs:     1500,
@@ -826,7 +835,9 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if result.Status == "ok" && lastPriceMissing(result.Market.LastPrice) {
-			if ohlcvBars, ferr := service.FetchOHLCVBars(accCfg, symbol, tf, 2); ferr == nil && len(ohlcvBars) > 0 {
+			// Anchor the fallback price fetch to the same window: a to-anchored
+			// historical run must never report the live price as its last bar.
+			if ohlcvBars, ferr := service.FetchOHLCVBarsToTime(accCfg, symbol, tf, 2, req.To); ferr == nil && len(ohlcvBars) > 0 {
 				result.Market.LastPrice = roundPrice(ohlcvBars[len(ohlcvBars)-1].Close)
 			}
 		}
@@ -850,7 +861,7 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 // writing and does not acquire/release the account slot — callers own the slot
 // so the same logic can serve both the single-symbol /run-skill endpoint and
 // the multi-symbol /hunt batch endpoint.
-func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]string, skillName string, symbol, tf string, bars int) (skill.AgentResult, error) {
+func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]string, skillName string, symbol, tf string, bars int, to int64) (skill.AgentResult, error) {
 	limits := accCfg.Limits()
 	accountBars := bars
 	if limits.MaxBars > 0 && accountBars > limits.MaxBars {
@@ -873,6 +884,7 @@ func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]s
 		Symbol:       symbol,
 		Timeframe:    tf,
 		Bars:         accountBars,
+		ToTime:       to,
 		Inputs:       merged,
 		ReservedKeys: nil,
 		SettleMs:     1500,
@@ -900,7 +912,8 @@ func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]s
 	}
 
 	if result.Status == "ok" && lastPriceMissing(result.Market.LastPrice) {
-		if ohlcvBars, ferr := service.FetchOHLCVBars(accCfg, symbol, tf, 2); ferr == nil && len(ohlcvBars) > 0 {
+		// Keep the fallback price anchored to the run's window (to=0 → live).
+		if ohlcvBars, ferr := service.FetchOHLCVBarsToTime(accCfg, symbol, tf, 2, to); ferr == nil && len(ohlcvBars) > 0 {
 			result.Market.LastPrice = roundPrice(ohlcvBars[len(ohlcvBars)-1].Close)
 		}
 	}
@@ -914,7 +927,7 @@ func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]s
 func (s *Server) runSkillWithAccount(w http.ResponseWriter, sk *skill.Skill, req runSkillRequest, symbol, tf string, bars int, name string, accCfg *config.Config) {
 	defer s.releaseAccountSlot(name)
 
-	agentOut, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars)
+	agentOut, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars, req.To)
 	if err != nil {
 		msg := err.Error()
 		code := "generic"
@@ -950,7 +963,8 @@ type huntRequest struct {
 	Symbols        []string          `json:"symbols"`
 	Inputs         map[string]string `json:"inputs"`
 	MaxAccounts    int               `json:"maxAccounts"`    // 0 = all candidate accounts
-	ConcurrencyCap int               `json:"concurrencyCap"` // hard cap on total in-flight workers (0 = auto)
+	ConcurrencyCap int               `json:"concurrencyCap"`  // hard cap on total in-flight workers (0 = auto)
+	AccountRole    string            `json:"accountRole"`    // prefer accounts with this role (adhoc/script/signal/core); "" = no preference
 }
 
 // huntSymbolResult is one symbol's outcome inside the /hunt response.
@@ -1066,6 +1080,30 @@ func (s *Server) handleHunt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	accounts := candidateAccounts(s.cfg)
+	// Role-based filtering: when accountRole is set, prefer accounts with
+	// that role. If any accounts match the role, use only those; otherwise
+	// fall back to the full pool (the role is a hint, not a hard gate).
+	if req.AccountRole != "" && s.cfg.Accounts != nil {
+		roleAccounts := s.cfg.Accounts.AccountsForRole(req.AccountRole)
+		if len(roleAccounts) > 0 {
+			// Keep the active account first if it has the requested role.
+			activeFirst := []string{}
+			if s.cfg.ActiveAccount != "" {
+				for _, n := range roleAccounts {
+					if n == s.cfg.ActiveAccount {
+						activeFirst = append(activeFirst, n)
+					}
+				}
+			}
+			rest := []string{}
+			for _, n := range roleAccounts {
+				if n != s.cfg.ActiveAccount {
+					rest = append(rest, n)
+				}
+			}
+			accounts = append(activeFirst, rest...)
+		}
+	}
 	if req.MaxAccounts > 0 && req.MaxAccounts < len(accounts) {
 		accounts = accounts[:req.MaxAccounts]
 	}
@@ -1134,7 +1172,7 @@ func (s *Server) handleHunt(w http.ResponseWriter, r *http.Request) {
 				continue // at cap → rotate; contention is transient
 			}
 			accCfg := cfgForAccount(s.cfg, name)
-			res, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars)
+			res, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars, 0)
 			s.releaseAccountSlot(name)
 			if err != nil {
 				lastErr = err

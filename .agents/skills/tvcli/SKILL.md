@@ -189,6 +189,16 @@ failover when an account hits a study/auth/connection limit.
 | POST | `/hunt` | **Batch** skill run over many symbols (multi-account) |
 | POST | `/clean` | Clean chart sessions |
 
+### Historical anchor (`to`) — point-in-time analysis
+
+`/fetch`, `/run`, and `/run-skill` accept an optional `"to"` field (unix
+seconds). The chart window **ends at that moment**: the last bar closes at
+`to`, and studies compute over the anchored window — the market read at a
+past timestamp with no lookahead (bar-replay semantics without the replay
+session). CLI equivalent: `tvcli fetch --to <unix-seconds|RFC3339>`. Use it
+for "what did the market look like when X happened" work: signal
+verification, event studies, backtest context at a decision time.
+
 ### `POST /hunt` — multi-account / multi-symbol sweep
 
 Fans a symbol list across the account pool and runs one skill per symbol in

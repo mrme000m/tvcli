@@ -19,6 +19,9 @@ EOF
 # 3. Fetch live OHLCV (no auth needed for public data)
 ./tvcli fetch --symbol BINANCE:BTCUSDT --tf 1H --bars 50 --json-out bars.json
 
+# 3b. Fetch a point-in-time window: bars ENDING at a past moment (no lookahead)
+./tvcli fetch --symbol OANDA:XAUUSD --tf 15 --bars 150 --to 2026-08-28T14:30:00Z
+
 # 4. Run any Pine Script from source
 ./tvcli eval script.pine --signals --json --symbol BINANCE:BTCUSDT --tf 1H
 
@@ -114,7 +117,7 @@ See [docs/MULTI_ACCOUNT.md](docs/MULTI_ACCOUNT.md).
 
 | Command | Purpose | Auth |
 |---------|---------|------|
-| `fetch` | Fetch raw OHLCV data (CSV + JSON) | None |
+| `fetch` | Fetch raw OHLCV data (CSV + JSON); `--to` anchors the window at a past moment | None |
 | `sync` | Fetch + compress OHLCV to .json.gz | None |
 | `eval` | Run arbitrary Pine Script source (compile → save → run → delete) | SESSION+SIGNATURE+DEVICE_T |
 | `run` | Run a pre-published script by Pine ID | SESSION+SIGNATURE |
@@ -268,6 +271,12 @@ for the full, current subscription feature/price matrix (scraped from
 | `/clean` | POST | Clean chart sessions |
 | `/check-auth` | GET | Verify auth cookies & subscription tier |
 | `/run` | POST | Compile + run Pine Script |
+
+All data endpoints (`/fetch`, `/run`, `/run-skill`) accept an optional
+`"to": <unix-seconds>` field that anchors the chart window at a **past
+moment**: the window's last bar closes at `to`, and studies compute over
+the anchored (historical) window — a point-in-time market read with no
+lookahead, the headless equivalent of bar replay.
 
 ## Development
 

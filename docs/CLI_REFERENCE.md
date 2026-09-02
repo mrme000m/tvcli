@@ -27,6 +27,7 @@ tvcli fetch [options]
 | `--symbol <SYM>` | `OANDA:XAUUSD` | Market symbol (e.g., `BINANCE:BTCUSDT`) |
 | `--tf <TF>` | `5m` | Timeframe (`1m`, `5m`, `15m`, `1H`, `4H`, `1D`, `1W`) |
 | `--bars <N>` | `180` | Number of bars (free tier capped at 180) |
+| `--to <ts>` | — | Anchor the window at a past moment (unix seconds or RFC3339). The last bar **closes** at `to` — no lookahead |
 | `--dir <dir>` | `.` | Output directory |
 | `--json-out <file>` | auto | Custom JSON output path |
 | `--csv-out <file>` | auto | Custom CSV output path |
@@ -35,6 +36,8 @@ tvcli fetch [options]
 ```bash
 ./tvcli fetch --symbol BINANCE:BTCUSDT --tf 1H --bars 100
 ./tvcli fetch --symbol OANDA:XAUUSD --tf 15m --json-out gold.json
+# point-in-time: 150 M15 bars ending at 2026-08-28 14:30 UTC
+./tvcli fetch --symbol OANDA:XAUUSD --tf 15 --bars 150 --to 2026-08-28T14:30:00Z
 ```
 
 **Output:** CSV and JSON files with `{time, open, high, low, close, volume}` per bar.
@@ -376,9 +379,16 @@ tvcli serve [--addr :8765]
 |----------|--------|------|---------|
 | `/health` | GET | — | Status check |
 | `/compile` | POST | `{"source":"..."}` | Compile Pine Script |
-| `/fetch` | POST | `{"symbol":"...","tf":"...","bars":N}` | Fetch OHLCV |
+| `/fetch` | POST | `{"symbol":"...","tf":"...","bars":N,"to":unix?}` | Fetch OHLCV (optionally ending at a past moment) |
 | `/clean` | POST | `{}` | Clean chart sessions |
-| `/run` | POST | `{"source":"...","symbol":"...","tf":"..."}` | Compile + run script |
+| `/run` | POST | `{"source":"...","symbol":"...","tf":"...","to":unix?}` | Compile + run script |
+| `/run-skill` | POST | `{"skill":"...","symbol":"...","tf":"...","to":unix?}` | Run a registered skill |
+
+**Historical anchor (`to`):** `/fetch`, `/run`, and `/run-skill` accept an
+optional `"to"` field (unix seconds). The chart window ends at that
+moment — the last bar closes at `to` and studies compute over the
+anchored window, giving a point-in-time market read with no lookahead
+(bar-replay semantics without the replay session).
 
 ---
 

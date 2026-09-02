@@ -19,6 +19,7 @@ type RunRequest struct {
 	Symbol       string // already normalized via pinefacade.ValidateSymbol
 	Timeframe    string
 	Bars         int
+	ToTime       int64          // unix seconds: anchor the chart window at this past moment (0 = live)
 	Inputs       map[string]string // applied to the indicator via SetOption
 	ReservedKeys []string          // keys in Inputs to skip (reserved flag names)
 	SettleMs     int               // 0 → 1500
@@ -219,10 +220,14 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		ch.OnError(func(err error) {
 			fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
 		})
-		ch.SetMarket(req.Symbol, map[string]any{
+		marketOpts := map[string]any{
 			"timeframe": pinefacade.NormalizeTimeframe(req.Timeframe),
 			"range":     req.Bars,
-		})
+		}
+		if req.ToTime != 0 {
+			marketOpts["to"] = req.ToTime
+		}
+		ch.SetMarket(req.Symbol, marketOpts)
 		if err := ch.WaitForSymbol(15 * time.Second); err != nil {
 			return nil, fmt.Errorf("symbol load: %w", err)
 		}

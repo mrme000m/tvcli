@@ -135,13 +135,19 @@ func connectFetchClient(cfg *config.Config) (tradingview.Client, error) {
 // FetchOHLCVBars connects via WS, fetches raw OHLCV bars, and returns them
 // sorted ascending.
 func FetchOHLCVBars(cfg *config.Config, symbol, tf string, bars int) ([]OHLCVBar, error) {
+	return FetchOHLCVBarsToTime(cfg, symbol, tf, bars, 0)
+}
+
+// FetchOHLCVBarsToTime fetches `bars` OHLCV bars ENDING at unix timestamp
+// `to` (0 = live window). Used for point-in-time market snapshots.
+func FetchOHLCVBarsToTime(cfg *config.Config, symbol, tf string, bars int, to int64) ([]OHLCVBar, error) {
 	client, err := connectFetchClient(cfg)
 	if err != nil {
 		return nil, err
 	}
 	defer client.Close()
 
-	return FetchOHLCVBarsWithClient(client, symbol, tf, bars)
+	return FetchOHLCVBarsToTimeWithClient(client, symbol, tf, bars, to)
 }
 
 // FetchOHLCVBarsDeep connects via WS and fetches up to totalBars bars by
@@ -160,8 +166,9 @@ func FetchOHLCVBarsDeep(cfg *config.Config, symbol, tf string, initialBars, tota
 // series-completion channel (the server emits one series_completed per
 // create_series load and per request_more_data backfill) and performs the
 // initial SetMarket + symbol-resolve wait. The returned waitSeries blocks
-// until the next series load finishes or the timeout elapses.
-func newHistoryChart(client tradingview.Client, symbol, tf string, initialBars int) (*tradingview.ChartSession, func(time.Duration) bool, error) {
+// until the next series load finishes or the timeout elapses. A non-zero
+// `to` (unix seconds) anchors the window at that past moment.
+func newHistoryChart(client tradingview.Client, symbol, tf string, initialBars int, to int64) (*tradingview.ChartSession, func(time.Duration) bool, error) {
 	ch := tradingview.NewChartSession(client)
 	ch.OnError(func(err error) {
 		fmt.Fprintf(os.Stderr, "Chart error: %v\n", err)
@@ -183,10 +190,14 @@ func newHistoryChart(client tradingview.Client, symbol, tf string, initialBars i
 		}
 	}
 
-	ch.SetMarket(symbol, map[string]any{
+	marketOpts := map[string]any{
 		"timeframe": pinefacade.NormalizeTimeframe(tf),
 		"range":     initialBars,
-	})
+	}
+	if to != 0 {
+		marketOpts["to"] = to
+	}
+	ch.SetMarket(symbol, marketOpts)
 
 	if err := ch.WaitForSymbol(15 * time.Second); err != nil {
 		return nil, nil, fmt.Errorf("symbol load: %w", err)
@@ -219,7 +230,13 @@ func barsFromPeriods(periods []map[string]any) []OHLCVBar {
 // FetchOHLCVBarsWithClient fetches OHLCV using an existing WS client
 // (for persistent/loop connections).
 func FetchOHLCVBarsWithClient(client tradingview.Client, symbol, tf string, bars int) ([]OHLCVBar, error) {
-	ch, waitSeries, err := newHistoryChart(client, symbol, tf, bars)
+	return FetchOHLCVBarsToTimeWithClient(client, symbol, tf, bars, 0)
+}
+
+// FetchOHLCVBarsToTimeWithClient fetches `bars` OHLCV bars ending at unix
+// timestamp `to` (0 = live) using an existing WS client.
+func FetchOHLCVBarsToTimeWithClient(client tradingview.Client, symbol, tf string, bars int, to int64) ([]OHLCVBar, error) {
+	ch, waitSeries, err := newHistoryChart(client, symbol, tf, bars, to)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +265,7 @@ func FetchOHLCVBarsDeepWithClient(client tradingview.Client, symbol, tf string, 
 		return FetchOHLCVBarsWithClient(client, symbol, tf, totalBars)
 	}
 
-	ch, waitSeries, err := newHistoryChart(client, symbol, tf, initialBars)
+	ch, waitSeries, err := newHistoryChart(client, symbol, tf, initialBars, 0)
 	if err != nil {
 		return nil, err
 	}

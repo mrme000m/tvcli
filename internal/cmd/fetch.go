@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,7 +60,25 @@ func (c *fetchCmd) Run(env *cli.Env) error {
 	}
 
 	var periods []service.OHLCVBar
-	if deepBars > initial {
+	// Optional historical anchor: --to <unix-seconds|RFC3339> loads `bars`
+	// bars ENDING at that moment (point-in-time snapshot).
+	var toUnix int64
+	if toStr := flags.Get("to"); toStr != "" {
+		if n, err := strconv.ParseInt(toStr, 10, 64); err == nil {
+			toUnix = n
+		} else {
+			t, err := time.Parse(time.RFC3339, toStr)
+			if err != nil {
+				return fmt.Errorf("--to: want unix seconds or RFC3339, got %q", toStr)
+			}
+			toUnix = t.Unix()
+		}
+	}
+	if toUnix != 0 {
+		fmt.Fprintf(env.Stderr, "Fetching OHLCV: %s @ %s, %d bars ending at %d (%s)\n",
+			symbol, tf, initial, toUnix, time.Unix(toUnix, 0).UTC().Format(time.RFC3339))
+		periods, err = service.FetchOHLCVBarsToTime(cfg, symbol, tf, initial, toUnix)
+	} else if deepBars > initial {
 		fmt.Fprintf(env.Stderr, "Fetching OHLCV: %s @ %s, %d bars (backfilling to %d)\n", symbol, tf, initial, deepBars)
 		periods, err = service.FetchOHLCVBarsDeep(cfg, symbol, tf, initial, deepBars)
 	} else {
