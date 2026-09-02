@@ -1,0 +1,53 @@
+#!/bin/bash
+# Wrapper for bdg that sets BDG_SESSION_DIR per-repo
+#
+# This wrapper isolates browser sessions by git repository, preventing
+# conflicts when running bdg in multiple repos simultaneously.
+#
+# Installation:
+#   Option 1: Symlink to PATH
+#     ln -s /path/to/browser-debugger-cli/bin/bdg-wrapper ~/.local/bin/bdg
+#
+#   Option 2: Add to PATH
+#     export PATH="/path/to/browser-debugger-cli/bin:$PATH"
+#     alias bdg=bdg-wrapper
+#
+# Session directories are created at: /tmp/bdg-sessions/<repo-name>/
+
+set -euo pipefail
+
+# Find the actual bdg binary relative to this script (resolve symlinks)
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+while [[ -L "$SCRIPT_PATH" ]]; do
+    SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+    SCRIPT_PATH="$(readlink "$SCRIPT_PATH")"
+    [[ "$SCRIPT_PATH" != /* ]] && SCRIPT_PATH="$SCRIPT_DIR/$SCRIPT_PATH"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
+BDG_BIN="${SCRIPT_DIR}/../dist/index.js"
+
+# Fallback: try to find bdg in common locations
+if [[ ! -x "$BDG_BIN" ]]; then
+    # Try npm global install location
+    if command -v bdg &>/dev/null; then
+        BDG_BIN="$(command -v bdg)"
+    else
+        echo "Error: Cannot find bdg binary" >&2
+        echo "Expected at: ${SCRIPT_DIR}/../dist/index.js" >&2
+        exit 1
+    fi
+fi
+
+# Get repo name from current directory (or "default" if not in a repo)
+if git rev-parse --show-toplevel &>/dev/null; then
+    REPO_NAME=$(basename "$(git rev-parse --show-toplevel)")
+else
+    REPO_NAME="default"
+fi
+
+# Set session dir per-repo to isolate browser sessions
+export BDG_SESSION_DIR="/tmp/bdg-sessions/${REPO_NAME}"
+mkdir -p "$BDG_SESSION_DIR"
+
+# Run the actual bdg
+exec "$BDG_BIN" "$@"

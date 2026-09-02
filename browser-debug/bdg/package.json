@@ -1,0 +1,123 @@
+{
+  "name": "browser-debugger-cli",
+  "version": "0.7.2",
+  "description": "DevTools telemetry in your terminal. For humans and agents. Direct WebSocket to Chrome's debugging port.",
+  "type": "module",
+  "bin": {
+    "bdg": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc && tsc-alias",
+    "postbuild": "node -e \"require('fs').chmodSync('dist/index.js', 0o755)\" && node -e \"const fs = require('fs'); const path = require('path'); const src = 'src/__tests__/fixtures'; const dest = 'dist/__tests__/fixtures'; if (fs.existsSync(src)) { fs.mkdirSync(dest, { recursive: true }); fs.readdirSync(src).filter(f => f.endsWith('.json')).forEach(f => fs.copyFileSync(path.join(src, f), path.join(dest, f))); console.log('✅ Copied test fixtures'); }\"",
+    "dev": "tsc && tsc-alias && node dist/index.js",
+    "watch": "concurrently \"npm:watch:tsc\" \"npm:watch:alias\"",
+    "watch:tsc": "tsc --watch",
+    "watch:alias": "tsc-alias --watch",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts",
+    "lint:fix": "eslint src --ext .ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"*.{js,json}\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"*.{js,json}\"",
+    "knip": "knip",
+    "knip:production": "knip --production",
+    "clean": "rm -rf dist",
+    "rebuild": "npm run clean && npm run build",
+    "lint:imports": "echo '✓ Import paths checked by main lint'",
+    "validate:module-type": "node -e \"const pkg = require('./package.json'); if (pkg.type !== 'module') { console.error('Package must have type: module'); process.exit(1); } else { console.log('✅ Package type is module'); }\"",
+    "validate:ts-version": "node -e \"const ts = require('typescript'); const v = ts.version.split('.'); if (parseInt(v[0]) < 5 || (parseInt(v[0]) === 5 && parseInt(v[1]) < 6)) { console.error('Requires TypeScript 5.6+, found:', ts.version); process.exit(1); } else { console.log('✅ TypeScript version:', ts.version); }\"",
+    "check": "npm run format:check && npm run type-check && npm run lint",
+    "check:enhanced": "npm run format:check && npm run type-check && npm run lint && npm run validate:module-type && npm run validate:ts-version",
+    "test": "tsx --test src/**/__tests__/*.test.ts src/**/__tests__/*.unit.test.ts src/**/__tests__/*.contract.test.ts src/__tests__/integration/*.test.ts",
+    "test:watch": "tsx --test --watch src/**/__tests__/*.test.ts src/**/__tests__/*.unit.test.ts src/**/__tests__/*.contract.test.ts src/__tests__/integration/*.test.ts",
+    "test:coverage": "c8 npm test",
+    "test:smoke": "tsx --test --test-concurrency=1 src/__tests__/smoke/*.test.ts",
+    "prepublishOnly": "npm run build",
+    "prepare": "husky"
+  },
+  "keywords": [
+    "cdp",
+    "chrome-devtools-protocol",
+    "browser",
+    "telemetry",
+    "cli",
+    "devtools"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "chrome-launcher": "^1.2.1",
+    "commander": "^14.0.2",
+    "devtools-protocol": "^0.0.1581282",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^25.2.2",
+    "@types/ws": "^8.5.10",
+    "@typescript-eslint/eslint-plugin": "^8.57.0",
+    "@typescript-eslint/parser": "^8.57.0",
+    "c8": "^11.0.0",
+    "concurrently": "^9.2.1",
+    "eslint": "^9.39.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-no-relative-import-paths": "^1.6.1",
+    "eslint-plugin-tsdoc": "^0.5.0",
+    "eslint-plugin-unused-imports": "^4.3.0",
+    "globals": "^17.3.0",
+    "husky": "^9.1.7",
+    "knip": "^6.4.1",
+    "lint-staged": "^16.2.6",
+    "prettier": "^3.7.3",
+    "tsc-alias": "^1.8.9",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "author": {
+    "name": "Kumak",
+    "email": "szymon@kumak.dev"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/szymdzum/browser-debugger-cli.git"
+  },
+  "homepage": "https://github.com/szymdzum/browser-debugger-cli#readme",
+  "bugs": {
+    "url": "https://github.com/szymdzum/browser-debugger-cli/issues"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "lint-staged": {
+    "src/**/*.ts": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{js,json}": [
+      "prettier --write"
+    ]
+  },
+  "c8": {
+    "reporter": [
+      "text",
+      "lcov",
+      "html"
+    ],
+    "exclude": [
+      "**/*.test.ts",
+      "**/*.contract.test.ts",
+      "tests/**",
+      "**/mocks/**",
+      "**/fixtures/**",
+      "**/__tests__/**",
+      "**/__testfixtures__/**",
+      "**/__testutils__/**"
+    ],
+    "all": true,
+    "check-coverage": false
+  }
+}

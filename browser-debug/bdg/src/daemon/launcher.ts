@@ -1,0 +1,162 @@
+/**
+ * Daemon Launcher - Spawns and manages the daemon process
+ *
+ * This module handles:
+ * - Spawning the daemon worker process
+ * - Waiting for the handshake to complete
+ * - Capturing daemon logs
+ * - Ensuring only one daemon runs at a time
+ */
+
+import { spawn } from 'child_process';
+import fs from 'fs';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
+
+import type { ChildProcess } from 'child_process';
+
+import { DaemonStartupError } from '@/daemon/errors.js';
+import { cleanupBeforeDaemonStart } from '@/session/cleanup/preStart.js';
+import { acquireDaemonLock, releaseDaemonLock } from '@/session/lock.js';
+import { ensureSessionDir, getSessionDir, getSessionFilePath } from '@/session/paths.js';
+import { createLogger } from '@/ui/logging/index.js';
+import { delay } from '@/utils/async.js';
+import { getErrorMessage } from '@/utils/errors.js';
+import { EXIT_CODES } from '@/utils/exitCodes.js';
+import { isProcessAlive } from '@/utils/process.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+const log = createLogger('launcher');
+
+/**
+ * Launch the daemon worker process.
+ *
+ * This function:
+ * 1. Acquires daemon lock atomically (prevents concurrent daemon starts)
+ * 2. Cleans up any stale session files
+ * 3. Checks if a daemon is already running
+ * 4. Spawns the daemon worker
+ * 5. Waits for it to become ready
+ *
+ * @returns The spawned child process
+ * @throws Error if daemon fails to start or is already running
+ */
+export async function launchDaemon(): Promise<ChildProcess> {
+  log.debug('Acquiring daemon lock...');
+  if (!acquireDaemonLock()) {
+    const error = new Error(
+      'Daemon startup already in progress. Wait a moment and try again.'
+    ) as Error & { code: string; exitCode: number };
+    error.code = 'DAEMON_STARTUP_IN_PROGRESS';
+    error.exitCode = EXIT_CODES.DAEMON_ALREADY_RUNNING;
+    throw error;
+  }
+
+  try {
+    log.debug('Checking for stale session files...');
+    const cleaned = cleanupBeforeDaemonStart();
+    if (cleaned) {
+      log.debug('Cleaned up stale session files');
+    }
+
+    const daemonPidPath = getSessionFilePath('DAEMON_PID');
+    if (fs.existsSync(daemonPidPath)) {
+      try {
+        const pidStr = fs.readFileSync(daemonPidPath, 'utf-8').trim();
+        const pid = parseInt(pidStr, 10);
+
+        if (!isNaN(pid) && isProcessAlive(pid)) {
+          const error = new Error(
+            `Daemon already running (PID ${pid}). Use 'bdg stop' to stop it.`
+          ) as Error & { code: string; exitCode: number };
+          error.code = 'DAEMON_ALREADY_RUNNING';
+          error.exitCode = EXIT_CODES.DAEMON_ALREADY_RUNNING;
+          throw error;
+        }
+      } catch (error: unknown) {
+        if (
+          error instanceof Error &&
+          'code' in error &&
+          (error as Error & { code?: string }).code === 'DAEMON_ALREADY_RUNNING'
+        ) {
+          throw error;
+        }
+      }
+    }
+
+    const daemonScriptPath = join(__dirname, '..', 'daemon.js');
+
+    if (!fs.existsSync(daemonScriptPath)) {
+      throw new DaemonStartupError(
+        `Daemon script not found at ${daemonScriptPath}. Did you run 'npm run build'?`,
+        'DAEMON_SCRIPT_NOT_FOUND'
+      );
+    }
+
+    log.debug(`Starting daemon: ${daemonScriptPath}`);
+
+    // Ensure session directory exists and create log file for daemon output
+    ensureSessionDir();
+    const logPath = join(getSessionDir(), 'daemon.log');
+    const logFd = fs.openSync(logPath, 'a');
+
+    const daemon = spawn(process.execPath, [daemonScriptPath], {
+      detached: true,
+      stdio: ['ignore', logFd, logFd], // Redirect stdout/stderr to log file
+      env: {
+        ...process.env,
+        BDG_DAEMON: '1', // Mark as daemon worker
+      },
+    });
+
+    // Close the fd in the parent process (child has its own copy)
+    fs.closeSync(logFd);
+
+    daemon.unref();
+
+    log.debug('Waiting for daemon to be ready...');
+    const socketPath = getSessionFilePath('DAEMON_SOCKET');
+    const maxWaitMs = 5000;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitMs) {
+      if (fs.existsSync(socketPath)) {
+        log.debug('Daemon is ready');
+        return daemon;
+      }
+
+      await delay(100);
+    }
+
+    daemon.kill();
+    throw new DaemonStartupError('Daemon failed to start within 5 seconds', 'DAEMON_START_TIMEOUT');
+  } catch (error) {
+    releaseDaemonLock();
+    throw error;
+  }
+}
+
+/**
+ * Check if the daemon is currently running.
+ *
+ * @returns True if daemon is running, false otherwise
+ */
+export function isDaemonRunning(): boolean {
+  const daemonPidPath = getSessionFilePath('DAEMON_PID');
+
+  if (!fs.existsSync(daemonPidPath)) {
+    return false;
+  }
+
+  try {
+    const pidStr = fs.readFileSync(daemonPidPath, 'utf-8').trim();
+    const pid = parseInt(pidStr, 10);
+
+    return !isNaN(pid) && isProcessAlive(pid);
+  } catch (error) {
+    log.debug(`Failed to read daemon PID file: ${getErrorMessage(error)}`);
+    return false;
+  }
+}

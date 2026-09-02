@@ -1,0 +1,155 @@
+/**
+ * Session lifecycle smoke tests.
+ *
+ * Tests the complete user flow: start → collect data → peek → stop.
+ * WHY: Highest-risk path with 0% coverage despite being critical user flow.
+ */
+
+import * as assert from 'node:assert/strict';
+import { describe, it, beforeEach, afterEach } from 'node:test';
+
+import { runCommand, runCommandJSON } from '@/__testutils__/commandRunner.js';
+import {
+  cleanupAllSessions,
+  isDaemonRunning,
+  isSessionActive,
+  waitForDaemon,
+} from '@/__testutils__/daemonHelpers.js';
+import type { BdgOutput } from '@/types.js';
+
+void describe('Session Lifecycle Smoke Tests', () => {
+  let allocatedPort: number;
+
+  beforeEach(() => {
+    const basePort = 9222;
+    const portOffset = Math.floor(Math.random() * 100);
+    allocatedPort = basePort + portOffset;
+  });
+
+  afterEach(async () => {
+    await cleanupAllSessions();
+  });
+
+  void it('should start session and create daemon', async () => {
+    const result = await runCommand(
+      'http://example.com',
+      ['--port', allocatedPort.toString(), '--headless'],
+      {
+        timeout: 60000,
+      }
+    );
+
+    // Should succeed
+    assert.equal(result.exitCode, 0, `Start failed: ${result.stderr}`);
+
+    // Daemon should be running
+    assert.equal(isDaemonRunning(), true);
+
+    // Session should be active
+    assert.equal(isSessionActive(), true);
+  });
+
+  void it('should collect data during session', async () => {
+    const startResult = await runCommand(
+      'http://example.com',
+      ['--port', allocatedPort.toString(), '--headless'],
+      {
+        timeout: 60000,
+      }
+    );
+    assert.equal(startResult.exitCode, 0, `Session start failed: ${startResult.stderr}`);
+
+    // Wait for daemon to be ready
+    await waitForDaemon(5000);
+
+    // Give Chrome time to navigate and collect some data
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    // Peek at collected data
+    const peekResult = await runCommandJSON<BdgOutput>('peek', ['--json']);
+
+    // Should have collected some data
+    assert.ok(peekResult);
+    assert.ok(typeof peekResult === 'object');
+    assert.ok('version' in peekResult);
+    assert.ok('data' in peekResult);
+
+    // Stop session to clean up
+    const stopResult = await runCommand('stop', [], { timeout: 60000 });
+    assert.equal(stopResult.exitCode, 0, `Stop failed: ${stopResult.stderr}`);
+  });
+
+  void it('should provide data via peek before stop', async () => {
+    const startResult = await runCommand(
+      'http://example.com',
+      ['--port', allocatedPort.toString(), '--headless'],
+      {
+        timeout: 60000,
+      }
+    );
+    assert.equal(startResult.exitCode, 0, `Session start failed: ${startResult.stderr}`);
+    await waitForDaemon(5000);
+
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    const peekResult = await runCommandJSON<BdgOutput>('peek', ['--json']);
+    assert.ok(peekResult, 'Peek should return data before stop');
+    assert.ok('version' in peekResult);
+    assert.ok('data' in peekResult);
+
+    const stopResult = await runCommand('stop', [], { timeout: 60000 });
+    assert.equal(stopResult.exitCode, 0, `Stop failed: ${stopResult.stderr}`);
+  });
+
+  void it('should cleanup daemon on stop', async () => {
+    // Start session with unique port
+    await runCommand('http://example.com', ['--port', allocatedPort.toString(), '--headless'], {
+      timeout: 60000,
+    });
+    await waitForDaemon(5000);
+
+    // Stop session
+    await runCommand('stop', [], { timeout: 60000 });
+
+    // Wait for cleanup
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    // Daemon should no longer be running
+    assert.equal(isDaemonRunning(), false);
+
+    // Session should no longer be active
+    assert.equal(isSessionActive(), false);
+  });
+
+  void it('should handle concurrent session attempts gracefully', async () => {
+    // Start first session with unique port
+    const firstResult = await runCommand(
+      'http://example.com',
+      ['--port', allocatedPort.toString(), '--headless'],
+      {
+        timeout: 60000,
+      }
+    );
+    assert.equal(firstResult.exitCode, 0, `First session start failed: ${firstResult.stderr}`);
+    await waitForDaemon(5000);
+
+    // Try to start second session (should fail)
+    const secondResult = await runCommand(
+      'http://another.com',
+      ['--port', allocatedPort.toString(), '--headless'],
+      {
+        timeout: 60000,
+      }
+    );
+
+    // Should fail with daemon already running error
+    assert.notEqual(secondResult.exitCode, 0);
+    assert.ok(
+      secondResult.stderr.includes('daemon') || secondResult.stderr.includes('already'),
+      `Expected error about daemon, got: ${secondResult.stderr}`
+    );
+
+    // First session should still be running
+    assert.equal(isDaemonRunning(), true);
+  });
+});

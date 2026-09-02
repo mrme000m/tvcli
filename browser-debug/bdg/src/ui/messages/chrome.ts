@@ -1,0 +1,462 @@
+/**
+ * Chrome-related user-facing messages.
+ *
+ * Centralized location for Chrome diagnostics, launch errors, and troubleshooting messages.
+ */
+
+import { getChromeDiagnostics, type ChromeDiagnostics } from '@/connection/diagnostics.js';
+import type { IssueDetails } from '@/errors/issues.js';
+import type { ChromeNoticeCode, NoticeDetails } from '@/errors/notices.js';
+import { pluralize, joinLines } from '@/ui/formatting.js';
+
+/**
+ * Format a structured Chrome-related notice into a user-facing log line.
+ *
+ * Counterpart to {@link formatChromeIssue} for happy-path events. Wire a
+ * NoticeSink that does `log.info(formatChromeNotice(notice))` at the
+ * boundary so core modules stay free of UI imports.
+ */
+export function formatChromeNotice(notice: NoticeDetails<ChromeNoticeCode>): string {
+  const ctx = notice.context ?? {};
+  switch (notice.code) {
+    case 'EXTERNAL_CHROME_CONNECTING':
+      return chromeExternalConnectionMessage();
+    case 'EXTERNAL_CHROME_WS_URL':
+      return chromeExternalWebSocketMessage(ctx['wsUrl'] as string);
+    case 'EXTERNAL_CHROME_NO_PID':
+      return chromeExternalNoPidMessage();
+    case 'EXTERNAL_CHROME_SKIP_TERMINATION':
+      return chromeExternalSkipTerminationMessage();
+  }
+}
+
+/**
+ * Format a structured Chrome-related issue into a user-facing message.
+ *
+ * Called at the UI boundary when a ChromeLaunchError with `issue` details
+ * reaches a CLI or daemon log sink. Core modules produce the IssueDetails;
+ * this function is the only place wording is assembled.
+ */
+export function formatChromeIssue(issue: IssueDetails): string {
+  const ctx = issue.context ?? {};
+  switch (issue.code) {
+    case 'PORT_IN_USE':
+      return portInUseError(ctx['port'] as number);
+    case 'INVALID_PORT':
+      return invalidPortError(ctx['port'] as number);
+    case 'USER_DATA_DIR_CREATE_FAILED':
+      return userDataDirError(ctx['userDataDir'] as string, (ctx['reason'] as string) ?? '');
+    case 'CHROME_LAUNCH_FAILED':
+    case 'CHROME_DIED_AFTER_LAUNCH': {
+      const port = ctx['port'] as number;
+      const reason = ctx['reason'] as string | undefined;
+      const pid = typeof ctx['pid'] === 'number' ? ctx['pid'] : 'unknown';
+      const header =
+        issue.code === 'CHROME_DIED_AFTER_LAUNCH'
+          ? `Chrome died immediately after launch (PID: ${pid})`
+          : reason
+            ? chromeLaunchFailedError(reason)
+            : `Chrome failed to launch`;
+      const diagnostics = getFormattedDiagnostics();
+      return joinLines(
+        header,
+        '',
+        'Possible causes:',
+        `  - Port ${port} conflict (check: lsof -ti:${port})`,
+        `  - Chrome binary not found`,
+        `  - Insufficient permissions`,
+        `  - Chrome crashed on startup`,
+        '',
+        ...diagnostics,
+        '',
+        'Try:',
+        `  - bdg cleanup`,
+        `  - Kill conflicting process: kill $(lsof -ti:${port})`,
+        `  - Use different port: bdg <url> --port ${port + 1}`
+      );
+    }
+    case 'NO_PAGE_TARGET_FOUND':
+      return noPageTargetFoundError(
+        ctx['port'] as number,
+        ctx['availableTargets'] as string | null
+      );
+    case 'CHROME_BINARY_NOT_FOUND': {
+      const diagnostics = getFormattedDiagnostics();
+      return joinLines(
+        chromeBinaryOverrideNotFound(ctx['chromePath'] as string, ctx['source'] as string),
+        '',
+        ...diagnostics
+      );
+    }
+    case 'CHROME_BINARY_IS_DIRECTORY':
+      return chromeBinaryOverrideIsDirectory(ctx['chromePath'] as string, ctx['source'] as string);
+    case 'CHROME_BINARY_NOT_EXECUTABLE': {
+      const reason = ctx['reason'] as string | undefined;
+      const base = chromeBinaryOverrideNotExecutable(
+        ctx['chromePath'] as string,
+        ctx['source'] as string
+      );
+      return reason ? `${base}\n\n${reason}` : base;
+    }
+    case 'PREFS_FILE_NOT_FOUND':
+      return prefsFileNotFoundError(ctx['file'] as string);
+    case 'PREFS_INVALID_FORMAT':
+      return invalidPrefsFormatError(ctx['file'] as string, ctx['actualType'] as string);
+    case 'PREFS_LOAD_FAILED':
+      return prefsLoadError(ctx['file'] as string, (ctx['reason'] as string) ?? '');
+    case 'PREFS_NOT_JSON_SERIALIZABLE':
+      return `Chrome preferences must be JSON-serializable: ${(ctx['reason'] as string) ?? 'unknown error'}`;
+  }
+}
+
+/**
+ * Retrieve Chrome diagnostics and format for error messages.
+ *
+ * @returns Array of formatted diagnostic strings
+ */
+export function getFormattedDiagnostics(): string[] {
+  return formatDiagnosticsForError(getChromeDiagnostics());
+}
+
+/**
+ * Format Chrome diagnostics for error reporting when Chrome launch fails.
+ *
+ * @param diagnostics - Chrome diagnostics information
+ * @returns Formatted error message lines with troubleshooting steps
+ *
+ * @example
+ * ```typescript
+ * const diagnostics = getChromeDiagnostics();
+ * const errorLines = formatDiagnosticsForError(diagnostics);
+ * console.error(errorLines.join('\n'));
+ * ```
+ */
+export function formatDiagnosticsForError(diagnostics: ChromeDiagnostics): string[] {
+  const lines: string[] = [];
+
+  if (diagnostics.installationCount === 0) {
+    lines.push('Error: No Chrome installations detected\n');
+    lines.push('Install Chrome from:');
+    lines.push('   https://www.google.com/chrome/\n');
+  } else {
+    lines.push(`Found ${pluralize(diagnostics.installationCount, 'Chrome installation')}:\n`);
+    diagnostics.installations.forEach((path, index) => {
+      lines.push(`  ${index + 1}. ${path}`);
+    });
+    lines.push('');
+
+    if (diagnostics.defaultPath) {
+      lines.push(`Default binary: ${diagnostics.defaultPath}\n`);
+    } else {
+      lines.push('Default binary: Could not determine\n');
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Format Chrome diagnostics for verbose status output (bdg status --verbose).
+ *
+ * @param diagnostics - Chrome diagnostics information
+ * @returns Array of formatted status lines
+ *
+ * @example
+ * ```typescript
+ * const diagnostics = getChromeDiagnostics();
+ * const statusLines = formatDiagnosticsForStatus(diagnostics);
+ * console.log(statusLines.join('\n'));
+ * ```
+ */
+export function formatDiagnosticsForStatus(diagnostics: ChromeDiagnostics): string[] {
+  const lines: string[] = [];
+
+  if (diagnostics.defaultPath) {
+    lines.push(`Binary:           ${diagnostics.defaultPath}`);
+  } else {
+    lines.push('Binary:           Could not determine');
+  }
+
+  lines.push(`Installations:    ${diagnostics.installationCount} found`);
+  if (diagnostics.installationCount > 0 && diagnostics.installationCount <= 3) {
+    diagnostics.installations.forEach((path, index) => {
+      lines.push(`  ${index + 1}. ${path}`);
+    });
+  } else if (diagnostics.installationCount > 3) {
+    lines.push(`  (Use 'bdg cleanup --aggressive' to see all)`);
+  }
+
+  return lines;
+}
+
+/**
+ * Generate invalid port error message.
+ *
+ * @param port - Invalid port number
+ * @returns Formatted error message
+ */
+export function invalidPortError(port: number): string {
+  return `Invalid port number: ${port}. Port must be between 1 and 65535.`;
+}
+
+/**
+ * Generate user data directory creation error.
+ *
+ * @param dir - Directory path that failed
+ * @param error - Error message
+ * @returns Formatted error message
+ */
+export function userDataDirError(dir: string, error: string): string {
+  return `Failed to create user data directory at ${dir}: ${error}`;
+}
+
+/**
+ * Generate external Chrome connection message.
+ *
+ * @returns Formatted message
+ */
+export function chromeExternalConnectionMessage(): string {
+  return 'Connecting to existing Chrome instance...';
+}
+
+/**
+ * Generate external Chrome WebSocket URL message.
+ *
+ * @param wsUrl - WebSocket URL
+ * @returns Formatted message
+ */
+export function chromeExternalWebSocketMessage(wsUrl: string): string {
+  return `WebSocket URL: ${wsUrl}`;
+}
+
+/**
+ * Generate external Chrome no PID message.
+ *
+ * @returns Formatted message
+ */
+export function chromeExternalNoPidMessage(): string {
+  return 'Using external Chrome (no PID - not managed by bdg)';
+}
+
+/**
+ * Generate external Chrome skip termination message.
+ *
+ * @returns Formatted message
+ */
+export function chromeExternalSkipTerminationMessage(): string {
+  return 'Using external Chrome - skipping termination (not managed by bdg)';
+}
+
+/**
+ * Generate error message when no page target is found after Chrome launch.
+ *
+ * @param port - CDP port number
+ * @param availableTargets - Formatted list of available targets (or null if none)
+ * @returns Formatted error message with diagnostics and troubleshooting steps
+ */
+export function noPageTargetFoundError(port: number, availableTargets: string | null): string {
+  return joinLines(
+    'No page target found after Chrome launch\n',
+    'Possible causes:',
+    `  1. Port conflict (${port})`,
+    `     → Check: lsof -ti:${port}`,
+    `     → Kill: pkill -f "chrome.*${port}"`,
+    '  2. Chrome failed to create default target',
+    '  3. Stale session',
+    '     → Fix: bdg cleanup && bdg <url>\n',
+    `Available Chrome targets:\n${availableTargets ?? '  (none)'}\n`,
+    'Try:',
+    '  - Clean up and retry: bdg cleanup && bdg <url>',
+    `  - Use different port: bdg <url> --port ${port + 1}`
+  );
+}
+
+/**
+ * Generate preferences file not found error.
+ *
+ * @param file - Preferences file path
+ * @returns Formatted error message
+ */
+export function prefsFileNotFoundError(file: string): string {
+  return `Chrome preferences file not found: ${file}`;
+}
+
+/**
+ * Generate invalid preferences format error.
+ *
+ * @param file - Preferences file path
+ * @param type - Actual type found
+ * @returns Formatted error message
+ */
+export function invalidPrefsFormatError(file: string, type: string): string {
+  return `Invalid Chrome preferences format in ${file}: expected object, got ${type}`;
+}
+
+/**
+ * Generate preferences load error.
+ *
+ * @param file - Preferences file path
+ * @param error - Error message
+ * @returns Formatted error message
+ */
+export function prefsLoadError(file: string, error: string): string {
+  return `Failed to load Chrome preferences from ${file}: ${error}`;
+}
+
+/**
+ * Generate generic Chrome launch error.
+ *
+ * @param error - Error message
+ * @returns Formatted error message
+ */
+export function chromeLaunchFailedError(error: string): string {
+  return `Failed to launch Chrome: ${error}`;
+}
+
+/**
+ * Generate error for invalid Chrome binary override path.
+ *
+ * @param path - Path that was provided via env/option
+ * @param source - Human-readable source label (e.g. CHROME_PATH)
+ * @returns Formatted error message
+ */
+export function chromeBinaryOverrideNotFound(path: string, source: string): string {
+  return `Chrome binary override (${source}) points to "${path}", but that file does not exist.`;
+}
+
+/**
+ * Generate error when Chrome binary override is not executable.
+ *
+ * @param path - Provided Chrome binary path
+ * @param source - Human-readable source label (e.g. CHROME_PATH)
+ * @returns Formatted error message with remediation guidance
+ */
+export function chromeBinaryOverrideNotExecutable(path: string, source: string): string {
+  return (
+    `Chrome binary override (${source}) points to "${path}", but it is not an executable file.\n` +
+    'Update the path to the Chrome binary (e.g. /Applications/Google Chrome.app/Contents/MacOS/Google Chrome) or unset the override to let bdg auto-detect Chrome.'
+  );
+}
+
+/**
+ * Generate error when Chrome binary override points to a directory.
+ *
+ * @param path - Provided Chrome binary path
+ * @param source - Human-readable source label (e.g. CHROME_PATH)
+ * @returns Formatted error message
+ */
+export function chromeBinaryOverrideIsDirectory(path: string, source: string): string {
+  return `Chrome binary override (${source}) points to "${path}", which is a directory, not an executable file.`;
+}
+
+/**
+ * Generate error when CDP port is already in use.
+ *
+ * @param port - Port number that is in use
+ * @returns Multi-line formatted error message with troubleshooting steps
+ */
+export function portInUseError(port: number): string {
+  return joinLines(
+    `Port ${port} is already in use.\n`,
+    'This usually means Chrome is still running from a previous session.\n',
+    'Try:',
+    `  - bdg cleanup --aggressive  (kills all Chrome processes)`,
+    `  - bdg cleanup --force       (removes session files + kills Chrome on port ${port})`,
+    `  - lsof -ti:${port} | xargs kill -9  (force kill process on port)`,
+    `  - Use different port: bdg <url> --port ${port + 1}`
+  );
+}
+
+/**
+ * Generate message for starting Chrome cleanup process.
+ *
+ * @returns Formatted message
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromeAttemptingMessage());
+ * ```
+ */
+export function cleanupChromeAttemptingMessage(): string {
+  return '\nAttempting to kill stale Chrome processes...';
+}
+
+/**
+ * Generate warning message when Chrome PID is not found in cache.
+ *
+ * @returns Multi-line formatted warning message
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromePidNotFoundMessage());
+ * ```
+ */
+export function cleanupChromePidNotFoundMessage(): string {
+  return joinLines(
+    'Warning: No Chrome PID found in cache',
+    '   Either Chrome was already running, or no Chrome was launched by bdg\n'
+  );
+}
+
+/**
+ * Generate message indicating Chrome process is being killed.
+ *
+ * @param pid - Chrome process ID
+ * @returns Formatted message
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromeKillingMessage(12345));
+ * // Output: "Killing Chrome process (PID: 12345)..."
+ * ```
+ */
+export function cleanupChromeKillingMessage(pid: number): string {
+  return `Killing Chrome process (PID: ${pid})...`;
+}
+
+/**
+ * Generate success message after Chrome process is killed.
+ *
+ * @returns Formatted success message
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromeSuccessMessage());
+ * ```
+ */
+export function cleanupChromeSuccessMessage(): string {
+  return 'Chrome process killed successfully';
+}
+
+/**
+ * Generate error message when Chrome cleanup fails.
+ *
+ * @param error - Error message
+ * @returns Multi-line formatted error message with troubleshooting
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromeFailedMessage('Process not found'));
+ * ```
+ */
+export function cleanupChromeFailedMessage(error: string): string {
+  return joinLines(
+    `Error: Failed to kill Chrome process: ${error}`,
+    '   Try manually killing Chrome processes if issues persist\n'
+  );
+}
+
+/**
+ * Generate generic error message for Chrome cleanup process failure.
+ *
+ * @param error - Error message
+ * @returns Formatted error message
+ *
+ * @example
+ * ```typescript
+ * console.error(cleanupChromeProcessFailedMessage('Cannot read PID file'));
+ * ```
+ */
+export function cleanupChromeProcessFailedMessage(error: string): string {
+  return `Error: Failed to cleanup Chrome processes: ${error}\n`;
+}

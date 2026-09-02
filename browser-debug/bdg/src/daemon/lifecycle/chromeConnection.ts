@@ -1,0 +1,121 @@
+/**
+ * Chrome Connection Setup
+ *
+ * Handles Chrome launch or connection to existing Chrome instance.
+ * Finds the appropriate CDP target for the session.
+ */
+
+import { ChromeLaunchError } from '@/connection/errors.js';
+import { launchChrome } from '@/connection/launcher.js';
+import { ConfigError } from '@/daemon/errors.js';
+import type { TelemetryStore } from '@/daemon/worker/TelemetryStore.js';
+import type { WorkerConfig } from '@/daemon/worker/types.js';
+import type { ChromeNoticeCode, NoticeSink } from '@/errors/notices.js';
+import { writeChromePid } from '@/session/chrome.js';
+import type { LaunchedChrome } from '@/types';
+import type { Logger } from '@/ui/logging/index.js';
+import { fetchCDPTargets } from '@/utils/http.js';
+import { filterDefined } from '@/utils/objects.js';
+
+/**
+ * Setup Chrome connection - either launch new instance or connect to existing.
+ *
+ * @returns Launched Chrome instance (null if connecting to external Chrome)
+ */
+export async function setupChromeConnection(
+  config: WorkerConfig,
+  telemetryStore: TelemetryStore,
+  log: Logger,
+  notify: NoticeSink<ChromeNoticeCode>
+): Promise<LaunchedChrome | null> {
+  if (config.chromeWsUrl) {
+    return setupExternalChrome(config, telemetryStore, notify);
+  } else {
+    return setupLaunchedChrome(config, telemetryStore, log);
+  }
+}
+
+/**
+ * Connect to existing external Chrome instance.
+ */
+function setupExternalChrome(
+  config: WorkerConfig,
+  telemetryStore: TelemetryStore,
+  notify: NoticeSink<ChromeNoticeCode>
+): null {
+  const wsUrl = config.chromeWsUrl;
+  if (!wsUrl) {
+    throw new ConfigError(
+      'chromeWsUrl is required for external Chrome connection',
+      'MISSING_WS_URL'
+    );
+  }
+
+  notify({ code: 'EXTERNAL_CHROME_CONNECTING' });
+  notify({ code: 'EXTERNAL_CHROME_WS_URL', context: { wsUrl } });
+
+  const targetId = wsUrl.split('/').pop() ?? 'external';
+
+  telemetryStore.setTargetInfo({
+    id: targetId,
+    type: 'page',
+    title: 'External Chrome',
+    url: config.url,
+    webSocketDebuggerUrl: wsUrl,
+  });
+
+  notify({ code: 'EXTERNAL_CHROME_NO_PID' });
+
+  return null;
+}
+
+/**
+ * Launch new Chrome instance and find page target.
+ */
+async function setupLaunchedChrome(
+  config: WorkerConfig,
+  telemetryStore: TelemetryStore,
+  log: Logger
+): Promise<LaunchedChrome> {
+  const chrome = await launchChrome({
+    port: config.port,
+    logger: log,
+    ...filterDefined({
+      userDataDir: config.userDataDir,
+      headless: config.headless,
+      chromeFlags: config.chromeFlags,
+    }),
+  });
+
+  log.info(`Chrome launched (PID ${chrome.pid})`);
+
+  writeChromePid(chrome.pid);
+  log.debug(`[worker] Chrome PID ${chrome.pid} cached for emergency cleanup`);
+
+  console.error(`[worker] Connecting to Chrome via CDP...`);
+  const targets = await fetchCDPTargets(config.port, log);
+  const foundTarget = targets.find((t) => t.type === 'page');
+
+  if (!foundTarget) {
+    const availableTargets = targets.length
+      ? targets
+          .map(
+            (t, i) =>
+              `  ${i + 1}. ${t.title || '(no title)'}\n     URL: ${t.url}\n     Type: ${t.type}`
+          )
+          .join('\n')
+      : null;
+
+    throw new ChromeLaunchError('No page target found after Chrome launch', {
+      issue: {
+        code: 'NO_PAGE_TARGET_FOUND',
+        context: { port: config.port, availableTargets },
+      },
+    });
+  }
+
+  telemetryStore.setTargetInfo(foundTarget);
+  console.error(`[worker] Found target: ${foundTarget.title} (${foundTarget.url})`);
+
+  return chrome;
+}

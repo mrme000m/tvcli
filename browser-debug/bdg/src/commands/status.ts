@@ -1,0 +1,145 @@
+import type { Command } from 'commander';
+
+import { runCommand } from '@/commands/shared/CommandRunner.js';
+import type { StatusCommandOptions } from '@/commands/shared/optionTypes.js';
+import type { StatusResult } from '@/commands/types.js';
+import { isDaemonConnectionError } from '@/errors/index.js';
+import { invalidResponseError, daemonNotRunningError } from '@/errors/messages.js';
+import { getStatus } from '@/ipc/client.js';
+import type { SessionActivity, PageState } from '@/ipc/index.js';
+import { cleanupStaleDaemonArtifacts } from '@/session/cleanup/preStart.js';
+import type { SessionMetadata } from '@/session/metadata.js';
+import {
+  formatSessionStatus,
+  formatStatusAsJson,
+  formatNoSessionMessage,
+  type StatusData,
+} from '@/ui/formatters/status.js';
+import { getErrorMessage } from '@/utils/errors.js';
+import { EXIT_CODES } from '@/utils/exitCodes.js';
+
+/**
+ * Register status command
+ *
+ * @param program - Commander.js Command instance to register commands on
+ * @returns void
+ */
+export function registerStatusCommand(program: Command): void {
+  program
+    .command('status')
+    .description('Show active session status and collection statistics')
+    .option('-j, --json', 'Output as JSON', false)
+    .option('-v, --verbose', 'Show detailed Chrome diagnostics', false)
+    .action(async (options: StatusCommandOptions) => {
+      let latestMetadata: SessionMetadata | undefined;
+      let latestSessionPid: number | undefined;
+      let latestActivity: SessionActivity | undefined;
+      let latestPageState: PageState | undefined;
+
+      await runCommand<StatusCommandOptions, StatusResult>(
+        async () => {
+          try {
+            const response = await getStatus();
+            if (response.status === 'error') {
+              return {
+                success: false,
+                error: `Daemon error: ${response.error ?? 'Unknown error'}`,
+                exitCode: EXIT_CODES.SOFTWARE_ERROR,
+                errorContext: {
+                  suggestion: 'Try: bdg cleanup --force && bdg <url>',
+                },
+              };
+            }
+
+            const data = response.data;
+            if (!data) {
+              return {
+                success: false,
+                error: invalidResponseError('missing data'),
+                exitCode: EXIT_CODES.SOFTWARE_ERROR,
+                errorContext: {
+                  suggestion: 'This is unexpected. Try: bdg cleanup --force && bdg <url>',
+                },
+              };
+            }
+
+            latestActivity = data.activity;
+            latestPageState = data.pageState;
+
+            if (!data.sessionPid || !data.sessionMetadata) {
+              latestMetadata = undefined;
+              latestSessionPid = undefined;
+              const jsonOutput = formatStatusAsJson(null, null);
+              if (data.activity) {
+                jsonOutput.activity = data.activity;
+              }
+              if (data.pageState) {
+                jsonOutput.pageState = data.pageState;
+              }
+              return { success: true, data: jsonOutput };
+            }
+
+            const metadata: SessionMetadata = {
+              bdgPid: data.sessionMetadata.bdgPid,
+              chromePid: data.sessionMetadata.chromePid,
+              startTime: data.sessionMetadata.startTime,
+              port: data.sessionMetadata.port,
+              targetId: data.sessionMetadata.targetId,
+              webSocketDebuggerUrl: data.sessionMetadata.webSocketDebuggerUrl,
+              activeTelemetry: data.sessionMetadata.activeTelemetry,
+            };
+
+            latestMetadata = metadata;
+            latestSessionPid = data.sessionPid;
+
+            const jsonOutput = formatStatusAsJson(metadata, data.sessionPid);
+            if (data.activity) {
+              jsonOutput.activity = data.activity;
+            }
+            if (data.pageState) {
+              jsonOutput.pageState = data.pageState;
+            }
+
+            return { success: true, data: jsonOutput };
+          } catch (error) {
+            const errorMessage = getErrorMessage(error);
+            if (isDaemonConnectionError(error)) {
+              const cleaned = cleanupStaleDaemonArtifacts();
+              return {
+                success: false,
+                error: daemonNotRunningError({ staleCleanedUp: cleaned }),
+                exitCode: EXIT_CODES.RESOURCE_NOT_FOUND,
+              };
+            }
+
+            return {
+              success: false,
+              error: `Error checking status: ${errorMessage}`,
+              exitCode: EXIT_CODES.SOFTWARE_ERROR,
+              errorContext: {
+                suggestion: 'Try: bdg cleanup --force to reset session state',
+              },
+            };
+          }
+        },
+        options,
+        (data: StatusData) => {
+          if (!data.active) {
+            return formatNoSessionMessage();
+          }
+
+          if (!latestMetadata || latestSessionPid === undefined) {
+            return formatNoSessionMessage();
+          }
+
+          return formatSessionStatus(
+            latestMetadata,
+            latestSessionPid,
+            latestActivity,
+            latestPageState,
+            options.verbose ?? false
+          );
+        }
+      );
+    });
+}

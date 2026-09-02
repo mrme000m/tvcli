@@ -1,0 +1,74 @@
+import type ProtocolMapping from 'devtools-protocol/types/protocol-mapping';
+
+import type { CDPConnection } from '@/connection/cdp.js';
+import type { EventParams, TypedCDPConnection } from '@/connection/typed-cdp.js';
+
+/**
+ * Registry for managing CDP event handlers with automatic cleanup.
+ *
+ * Provides a centralized way to register and clean up CDP event handlers,
+ * eliminating the boilerplate code repeated across all telemetry modules.
+ *
+ * Supports both legacy untyped usage and new type-safe usage with TypedCDPConnection.
+ */
+export class CDPHandlerRegistry {
+  private cleanupFunctions: Array<() => void> = [];
+
+  /**
+   * Register a CDP event handler and track it for cleanup (legacy API).
+   *
+   * @param cdp - CDP connection instance
+   * @param event - CDP event name (e.g., 'Network.requestWillBeSent')
+   * @param handler - Event handler function
+   *
+   * @deprecated Since v0.5.0. Use registerTyped() with TypedCDPConnection for type safety. Will be removed in v1.0.0.
+   */
+  register<T>(cdp: CDPConnection, event: string, handler: (params: T) => void): void {
+    const cleanup = cdp.on(event, handler);
+    this.cleanupFunctions.push(cleanup);
+  }
+
+  /**
+   * Register a type-safe CDP event handler and track it for cleanup.
+   *
+   * @param typed - Typed CDP connection instance
+   * @param event - CDP event name (autocomplete available)
+   * @param handler - Event handler with type-safe parameters
+   *
+   * @example
+   * ```typescript
+   * const registry = new CDPHandlerRegistry();
+   * const typed = new TypedCDPConnection(cdp);
+   *
+   * registry.registerTyped(typed, 'Network.requestWillBeSent', (event) => {
+   *   // event is typed as Protocol.Network.RequestWillBeSentEvent
+   *   console.log(event.request.url);
+   * });
+   * ```
+   */
+  registerTyped<T extends keyof ProtocolMapping.Events>(
+    typed: TypedCDPConnection,
+    event: T,
+    handler: (params: EventParams<T>) => void
+  ): void {
+    const cleanup = typed.on(event, handler);
+    this.cleanupFunctions.push(cleanup);
+  }
+
+  /**
+   * Remove all registered event handlers and clear the registry.
+   */
+  cleanup(): void {
+    this.cleanupFunctions.forEach((cleanup) => cleanup());
+    this.cleanupFunctions.length = 0;
+  }
+
+  /**
+   * Get the number of registered handlers.
+   *
+   * @returns Number of active handlers
+   */
+  size(): number {
+    return this.cleanupFunctions.length;
+  }
+}

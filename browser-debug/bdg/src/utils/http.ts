@@ -1,0 +1,112 @@
+import { DEFAULT_CDP_PORT, HTTP_LOCALHOST } from '@/constants.js';
+import type { CDPTarget } from '@/types';
+import type { Logger } from '@/ui/logging/index.js';
+
+/**
+ * Timeout for CDP HTTP requests in milliseconds.
+ *
+ * Chrome's HTTP API should respond quickly when running.
+ * A 5-second timeout helps detect when Chrome is not responding.
+ */
+const CDP_HTTP_TIMEOUT_MS = 5000;
+
+/**
+ * Options for CDP HTTP target fetch.
+ */
+export interface FetchCDPTargetsOptions {
+  /** Host to reach Chrome on (defaults to HTTP_LOCALHOST). */
+  host?: string;
+  /** Request timeout in milliseconds (defaults to CDP_HTTP_TIMEOUT_MS). */
+  timeoutMs?: number;
+}
+
+/**
+ * Fetch CDP targets from Chrome's HTTP API.
+ *
+ * Uses centralized constants for host and default port to ensure consistency
+ * across all CDP target operations. This replaces duplicate HTTP endpoint logic
+ * scattered across the codebase.
+ *
+ * @param port - Chrome debugging port (defaults to centralized DEFAULT_CDP_PORT)
+ * @param logger - Optional logger for debug output
+ * @param options - Optional host override and custom timeout (for liveness probes against remote Chrome)
+ * @returns Promise resolving to array of CDP targets, or empty array on error
+ *
+ * @remarks
+ * - Uses HTTP_LOCALHOST constant by default for host addressing
+ * - Returns empty array on HTTP errors, but logs details for debugging
+ * - Default 5-second timeout; override via `options.timeoutMs` for fast probes
+ * - Network errors are logged to help diagnose Chrome connectivity issues
+ */
+export async function fetchCDPTargets(
+  port: number = DEFAULT_CDP_PORT,
+  logger?: Logger,
+  options?: FetchCDPTargetsOptions
+): Promise<CDPTarget[]> {
+  const host = options?.host ?? HTTP_LOCALHOST;
+  const timeoutMs = options?.timeoutMs ?? CDP_HTTP_TIMEOUT_MS;
+  const url = `http://${host}:${port}/json/list`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        logger?.debug(
+          `CDP HTTP request failed: ${response.status} ${response.statusText} (${url})`
+        );
+        return [];
+      }
+
+      const data: unknown = await response.json();
+
+      if (!Array.isArray(data)) {
+        logger?.debug(`CDP HTTP response is not an array (${url})`);
+        return [];
+      }
+
+      return data as CDPTarget[];
+    } finally {
+      clearTimeout(timeoutId);
+    }
+  } catch (error) {
+    if (error instanceof Error) {
+      if (error.name === 'AbortError') {
+        logger?.debug(`CDP HTTP request timeout after ${timeoutMs}ms (${url})`);
+      } else {
+        logger?.debug(`CDP HTTP request error: ${error.message} (${url})`);
+      }
+    }
+    return [];
+  }
+}
+
+/**
+ * Fetch specific CDP target by ID from Chrome's HTTP API.
+ *
+ * Convenience wrapper around fetchCDPTargets that filters for a specific target ID.
+ * Uses centralized constants and shared HTTP logic for consistency.
+ *
+ * @param targetId - Target ID to search for
+ * @param port - Chrome debugging port (defaults to centralized DEFAULT_CDP_PORT)
+ * @param logger - Optional logger for debug output
+ * @returns Promise resolving to matching target, or null if not found/error
+ *
+ * @remarks
+ * - Returns null rather than throwing on errors for easier consumption
+ * - Searches all targets returned by Chrome's /json/list endpoint
+ * - Uses shared fetchCDPTargets helper to avoid code duplication
+ * - Inherits timeout and error logging from fetchCDPTargets
+ */
+export async function fetchCDPTargetById(
+  targetId: string,
+  port: number = DEFAULT_CDP_PORT,
+  logger?: Logger
+): Promise<CDPTarget | null> {
+  const targets = await fetchCDPTargets(port, logger);
+  return targets.find((t) => t.id === targetId) ?? null;
+}

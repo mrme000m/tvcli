@@ -1,0 +1,151 @@
+/**
+ * Logging utilities for consistent formatted output with log level support.
+ *
+ * WHY: Centralizes log formatting and enables debug mode for verbose logging.
+ * By default, only 'info' level logs are shown. Set BDG_DEBUG=1 or use --debug
+ * flag to enable verbose 'debug' level logs.
+ */
+
+import { getErrorMessage } from '@/utils/errors.js';
+
+let debugEnabled = false;
+
+/**
+ * Enable debug logging globally.
+ *
+ * This is typically called during CLI initialization when --debug flag is detected.
+ * Debug mode shows all logs including verbose internal state changes and tracing.
+ */
+export function enableDebugLogging(): void {
+  debugEnabled = true;
+}
+
+/**
+ * Check if debug logging is currently enabled.
+ *
+ * @returns True if debug mode is active
+ */
+export function isDebugEnabled(): boolean {
+  return debugEnabled || process.env['BDG_DEBUG'] === '1';
+}
+
+/**
+ * Log level determines visibility of log messages.
+ *
+ * - 'info': Always shown (important user-facing messages, errors, key milestones)
+ * - 'debug': Only shown in debug mode (verbose internal state, IPC traces, progress updates)
+ */
+export type LogLevel = 'info' | 'debug';
+
+/**
+ * Log contexts for different components.
+ * Used to prefix log messages with component name.
+ */
+export type LogContext =
+  | 'bdg'
+  | 'launcher'
+  | 'daemon'
+  | 'worker'
+  | 'client'
+  | 'cleanup'
+  | 'session'
+  | 'chrome'
+  | 'cdp'
+  | 'ipc'
+  | 'http'
+  | 'dialogs'
+  | 'navigation'
+  | 'console'
+  | 'dom'
+  | 'network'
+  | 'diagnostics'
+  | 'readiness'
+  | 'atomic-file'
+  | 'object-expander'
+  | 'fetcher';
+
+/**
+ * Logger instance with support for different log levels.
+ */
+export interface Logger {
+  /**
+   * Log an info message (always shown).
+   * Use for important user-facing messages and key milestones.
+   */
+  info: (message: string) => void;
+
+  /**
+   * Log a debug message (only shown in debug mode).
+   * Use for verbose internal state, progress updates, and traces.
+   */
+  debug: (message: string) => void;
+
+  /**
+   * Log a message (defaults to info level).
+   * Provided for backward compatibility.
+   */
+  (message: string): void;
+}
+
+/**
+ * Create a logger instance for a specific context.
+ *
+ * WHY: Provides consistent log formatting with context prefix and level support.
+ * 'info' logs are always shown, while 'debug' logs are only shown when the
+ * --debug flag is used or BDG_DEBUG=1 is set.
+ *
+ * @param context - Component context for log prefix
+ * @returns Logger instance with info/debug methods
+ *
+ * @example
+ * ```typescript
+ * const log = createLogger('cleanup');
+ *
+ * // Always shown (even without --debug)
+ * log.info('Cleaned up stale session files');
+ *
+ * // Only shown in debug mode (--debug or BDG_DEBUG=1)
+ * log.debug('Checking PID file at ~/.bdg/daemon.pid');
+ *
+ * // Backward compatible (treated as debug - only shown in debug mode)
+ * log('Daemon started successfully');
+ * ```
+ */
+export function createLogger(context: LogContext): Logger {
+  const logMessage = (message: string, level: LogLevel = 'debug'): void => {
+    if (level === 'debug' && !isDebugEnabled()) {
+      return;
+    }
+    console.error(`[${context}] ${message}`);
+  };
+
+  const logger = ((message: string) => logMessage(message, 'debug')) as Logger;
+  logger.info = (message: string) => logMessage(message, 'info');
+  logger.debug = (message: string) => logMessage(message, 'debug');
+
+  return logger;
+}
+
+/**
+ * Log an error with context using debug level.
+ *
+ * Convenience function that combines error message extraction with debug logging.
+ *
+ * @param log - Logger instance to use
+ * @param context - Human-readable description of what failed
+ * @param error - The caught error (unknown type from catch block)
+ *
+ * @example
+ * ```typescript
+ * const log = createLogger('cleanup');
+ * try {
+ *   fs.rmSync(filePath);
+ * } catch (error) {
+ *   logDebugError(log, 'remove session file', error);
+ * }
+ * // Logs: [cleanup] Failed to remove session file: ENOENT: no such file
+ * ```
+ */
+export function logDebugError(log: Logger, context: string, error: unknown): void {
+  log.debug(`Failed to ${context}: ${getErrorMessage(error)}`);
+}

@@ -1,0 +1,873 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+<!-- Empty for now - add here as you work -->
+
+## [0.7.2] - 2025-12-17
+
+### Fixed
+
+- **Wrapper symlink resolution** - Fix infinite recursion when bdg-wrapper invoked via symlink (#152)
+  - Resolves symlinks before determining script directory
+  - Enables documented installation method: `ln -s /path/to/bdg-wrapper ~/.local/bin/bdg`
+  - Handles relative and absolute symlink targets
+  - Supports symlink chains across directories
+  - Thank you @sfc-gh-mochen for this contribution!
+
+### Changed
+
+- Updated development dependencies to latest versions
+  - @typescript-eslint/eslint-plugin: 8.48.1 → 8.49.0
+  - @typescript-eslint/parser: 8.48.1 → 8.49.0
+  - @eslint/js: 9.39.1 → 9.39.2
+  - eslint: 9.39.1 → 9.39.2
+  - knip: 5.72.0 → 5.73.4
+  - @types/node: 24.10.1 → 25.0.2
+  - devtools-protocol: 0.0.1551306 → 0.0.1558402
+
+## [0.7.1] - 2025-12-14
+
+### Added
+
+- **DOM scroll command** (`bdg dom scroll`) - Agent-friendly page navigation (#135)
+  - Scroll to elements by CSS selector: `bdg dom scroll "footer"`
+  - Scroll by pixel amount: `bdg dom scroll --down 500`
+  - Scroll to page positions: `bdg dom scroll --top`, `bdg dom scroll --bottom`
+  - Smooth scrolling with configurable behavior
+  - Works with cached query indices from previous `bdg dom query` results
+  - Thank you @felores for this contribution!
+- **Custom Chrome flags support** - Configure Chrome launch behavior (#143)
+  - CLI option: `bdg <url> --chrome-flags="--flag1,--flag2"`
+  - Environment variable: `export BDG_CHROME_FLAGS="--flag1,--flag2"`
+  - Useful for proxy configuration, custom user agents, and advanced Chrome settings
+  - Centralized flag parsing in start command
+  - Thank you @3dyuval for this contribution!
+- **Agent experience improvements** - Better Claude Code integration (#144)
+  - Auto-detect headless mode based on display availability (X11/Wayland on Linux, headless in CI)
+  - Block raw CDP screenshot commands with helpful suggestions to use `bdg dom screenshot`
+  - Consolidated skill documentation in `.claude/skills/bdg/SKILL.md`
+  - Per-repo session isolation with wrapper script support
+  - Auto-allocate ports for concurrent session support
+  - Persistent sessions survive HMR (Hot Module Reload) during development
+  - Thank you @sfc-gh-mochen for this contribution!
+
+### Changed
+
+- **Headless mode default** - Now auto-detected based on environment instead of always true
+- **Chrome launch logging** - Removed duplicate log messages and fixed misleading cleanup message
+
+### Documentation
+
+- Added `--chrome-flags` examples to consolidated SKILL.md
+- Expanded WebSocket and Shell migration details
+- Clarified persistent sessions and HMR workflow in skill documentation
+
+## [0.7.0] - 2025-12-01
+
+### Added
+
+- **Form discovery command** (`bdg dom form`) - Agent-friendly form inspection (#130)
+  - Auto-discovers forms with semantic labels, current values, and validation state
+  - Suggests ready-to-use commands: `bdg dom fill 0 "<value>"`
+  - Form type inference: Login, Registration, Search, Address, Contact, Payment
+  - Relevance scoring auto-selects the most important form on multi-form pages
+  - `--all` flag to show all forms expanded
+  - `--brief` flag for quick scan (field names, types, required status only)
+  - Validation detection via native HTML5, aria-invalid, sibling errors, and error classes
+- **Shell quote damage detection** (#127) - Better agent error recovery
+  - Detects when shell interpretation damages quoted arguments
+  - Provides specific recovery suggestions for common patterns
+  - Helps agents retry with correct quoting
+
+## [0.6.11] - 2025-11-27
+
+### Added
+
+- **Screenshot auto-resize for Claude Vision** (#118) - Inspired by [community feedback](https://www.reddit.com/r/ClaudeCode/comments/1p74cx6/comment/nqzkk44/) that avoiding screenshots lets agents run 100+ tool calls
+  - Auto-resize to 1568px max edge (~1,600 tokens optimal for Claude Vision)
+  - Fall back to viewport capture for tall pages (aspect ratio > 3:1)
+  - Force `deviceScaleFactor=1` during capture (fixes 4x token bloat on Retina displays)
+  - `--no-resize` flag for full resolution capture (archiving/debugging)
+  - `--scroll <selector>` option to scroll element into view before capture
+  - Resize metadata in JSON output (original/final dimensions, token estimates, capture mode)
+- **Exit code registry in help** (#114) - `bdg --help --json` now includes all 17 exit codes for agent introspection
+- **Typo detection with suggestions** (#114) - Levenshtein distance matching for `--preset` and `--type` options
+
+### Changed
+
+- **Agent-friendly consistency refactor** (#114)
+  - Added `BdgResponse<T>` type with type guards for stable JSON API contract
+  - Extracted shared utilities: `delay()`, `suggestions.ts`, `dataFetcher.ts`
+  - Standardized logging with `createLogger()` instead of raw console
+  - Consolidated error builders to single `buildJsonError` pattern
+  - 57 files changed, -177 net lines (cleaner, more consistent code)
+
+### Fixed
+
+- **Screenshot DPR race condition** (#118) - Re-scroll after DPR override to prevent position drift
+- **Screenshot clip coordinates** (#118) - Use scroll position in clip (document origin fix)
+- **Screenshot scroll restoration** (#118) - Save/restore scroll position after capture
+- **Validation error handling** (#114) - Validation errors now return exit 81 (was showing stack traces)
+- **JSON output pollution** (#114) - Suppressed daemon logs and "Chrome killed" message when `--json` flag used
+- **Documentation accuracy** - Fixed misleading token claims (Claude rejects >20MB images, doesn't charge 376k tokens)
+
+## [0.6.10] - 2025-11-26
+
+### Added
+
+- **Element-level screenshots** (`bdg dom screenshot --selector`) - Capture specific elements instead of full page (#108)
+  - `--selector <css>` for CSS selector-based element capture
+  - `--index <n>` for cached element index from previous query
+  - Uses CDP `DOM.getBoxModel` for precise element bounds
+  - JSON output includes element bounds metadata
+- **Screenshot sequences** (`bdg dom screenshot --follow`) - Continuous capture for monitoring (#108)
+  - `--follow` enables capture to directory at intervals
+  - `--interval <ms>` controls capture frequency (default: 1000ms)
+  - `--limit <n>` stops after N frames
+  - Supports element-level sequences (`--follow` + `--selector`)
+  - Auto-creates directory if missing
+- **Auto-refresh stale cache** - DOM commands "just work" after navigation (#110)
+  - Automatically re-runs original query when cache is stale
+  - Debug logging: `Cache stale, auto-refreshing query "..."`
+  - Commands succeed transparently without manual re-query
+- **DOM.documentUpdated tracking** - Detect SPA re-renders and document replacements (#110)
+  - Complements existing `Page.frameNavigated` tracking
+  - Catches React/Vue/Angular full re-renders
+- **STALE_CACHE exit code (87)** - Clear signal for unrecoverable cache staleness (#110)
+  - Returned when auto-refresh succeeds but index is out of range
+  - Distinguishes from INVALID_ARGUMENTS (81)
+- **WebSocket message capture in HAR export** - Full WebSocket frame data (#106)
+  - Captures sent and received messages with timestamps
+  - Includes opcode and payload data
+
+### Changed
+
+- **Screenshot output format** - Enhanced metadata for element screenshots (#108)
+  - Shows "Element screenshot captured" vs "Screenshot captured"
+  - Includes selector/index and bounds in JSON output
+- **DomElementResolver** - Centralized auto-refresh logic (#110)
+  - `resolveTarget()`, `getNodeIdForIndex()`, `getElementCount()` all auto-refresh
+  - Stores original selector in cache for refresh capability
+
+### Fixed
+
+- **Package-lock.json sync** - Fixed dependency mismatch causing CI failures
+  - Added missing @typescript-eslint packages at 8.46.4
+
+### Dependencies
+
+- Bump devtools-protocol from 0.0.1543509 to 0.0.1548823
+- Bump @types/node from 22.19.0 to 24.10.1
+- Bump @typescript-eslint/parser from 8.46.3 to 8.47.0
+- Bump @typescript-eslint/eslint-plugin from 8.46.3 to 8.47.0
+- Bump eslint-plugin-tsdoc from 0.4.0 to 0.5.0
+- Bump knip from 5.68.0 to 5.70.1
+- Bump lint-staged from 16.2.6 to 16.2.7
+
+## [0.6.9] - 2025-11-24
+
+### Added
+
+- **DevTools-compatible network filter DSL** (`bdg network list`) - Chrome DevTools Network panel filter syntax (#91)
+  - 10 filter types: domain, status-code, method, mime-type, resource-type, larger-than, has-response-header, is, scheme
+  - Comparison operators for numeric filters (>=, <=, >, <, =)
+  - Wildcard support for domain matching (e.g., `domain:*.example.com`)
+  - Negation with `-` or `!` prefix (e.g., `-domain:cdn.*`, `!method:POST`)
+  - 8 presets: errors, api, large, cached, documents, media, scripts, pending
+  - Combined filters with AND logic
+  - Follow mode for live streaming (`--follow`)
+  - HAR export with filtering (`bdg network har --filter`)
+- **Console object expansion** - Rich nested object display in console messages (#92)
+  - Objects automatically expanded: `{user: {name: "John", id: 123}}` instead of `{user: Object}`
+  - Arrays show contents: `[1, 2, 3]` instead of `Array(3)`
+  - Special types formatted: Date, RegExp, Error, Map, Set
+  - Large objects truncated with `…` indicator
+  - Async expansion via `Runtime.getProperties` when CDP preview is incomplete
+  - Messages maintain timestamp order even with async expansion
+  - Configurable via `OBJECT_EXPANSION_MAX_DEPTH` and `OBJECT_EXPANSION_MAX_PROPERTIES` constants
+- **Console level filtering** - `--level` option for filtering by severity (#105)
+  - Filter by error, warning, info, or debug levels
+  - Complements existing `--filter` option for type-based filtering
+- **Quiet mode** - `-q`/`--quiet` flag for minimal session start output (#105)
+  - Ideal for AI agents that parse JSON output
+  - Suppresses progress messages and tips
+- **Benchmark v3.1 specification** - Comprehensive debugging-focused benchmark comparing bdg vs MCP
+  - 5 tests: Basic Error, Multiple Errors, SPA Debugging, Form Validation, Memory Leak
+  - Detailed scoring rubrics for Discovery, Analysis, and Workflow
+  - Token efficiency metrics and comparative analysis
+  - Results: bdg 77/100 vs MCP 60/100 (+28% score advantage, +33% TES advantage)
+  - Full documentation in `docs/benchmarks/BENCHMARK_DEVTOOLS_DEBUGGING_V3.1.md`
+  - Test results in `docs/benchmarks/BENCHMARK_RESULTS_2025-11-24.md`
+
+### Changed
+
+- **Refactored network commands** - Modular structure in `src/commands/network/` directory (#91)
+  - Centralized messages in `networkMessages.ts`
+  - Filter DSL parser with validation and helpful error suggestions
+  - Deprecation warning for `bdg peek --network` (use `bdg network list`)
+- **Refactored telemetry modules** - Improved code organization (#92)
+  - New `remoteObjectUtils.ts` with shared predicates and formatters
+  - New `objectExpander.ts` for async CDP-based expansion
+  - Failure tracking with threshold warning for CDP connection issues
+- **Enhanced console timestamps** - Millisecond precision in list view (#105)
+  - Format: `HH:MM:SS.mmm` instead of `HH:MM:SS`
+  - Better alignment with DevTools console timestamps
+- **Improved source location formatting** - Handle inline/eval code gracefully (#105)
+  - Shows `<inline>` or `<eval>` instead of empty string for dynamically evaluated code
+- **Consolidated console level types** - Single source of truth (#105)
+  - Removed duplicate `LEVEL_MAP` in favor of `ConsoleLevel` type
+  - Fixed `ConsoleFormatOptions.level` type (`string` → `ConsoleLevel`)
+
+### Fixed
+
+- **Console buffer size** - IPC layer now passes client's `lastN` parameter (#105)
+  - Console command requests all messages (`lastN=0`) instead of hardcoded 10
+  - Fixes missing messages when more than 10 console logs exist
+- **Memory profiling timeouts** - Increased IPC timeout from 10s to 30s (#105)
+  - Matches CDP timeout for HeapProfiler/Memory domain operations
+  - Fixes timeouts when taking heap snapshots
+- **Network error details** - Capture comprehensive failure information (#105)
+  - Added `errorText`, `canceled`, `blocked`, and `blockedReason` from `loadingFailed` events
+  - Better debugging for SSL/TLS errors, CORS failures, and blocked requests
+- **Commander.js option passing** - Fixed `--json` flag not propagating to subcommands (#88)
+  - Convert `jsonOption` from shared constant to factory function
+  - Add `.enablePositionalOptions()` to parent commands (dom, a11y)
+  - Add `runJsonCommand` helper for consistent early JSON exit pattern
+- **React/Vue form compatibility** - Add synthetic keyboard events for framework detection (#88)
+  - `dispatchSyntheticKeyEvents()` fires `keypress`, `input`, `change`, `submit` events
+  - Fixes form validation not triggering in React/Vue apps
+- **A11y command routing** - CSS selector detection for smart routing (#88)
+  - Properly handles `bdg dom a11y describe <selector>` vs index-based access
+  - Better error handling for JSON output mode
+
+### Documentation
+
+- Added comparative analysis sections for each benchmark test explaining performance differences
+- Added token usage metrics showing bdg's efficiency advantages in most scenarios
+- Documented architectural differences (CDP access, batch operations, memory profiling)
+- Removed outdated roadmap documentation (IMPLEMENTATION_STATUS.md, ROADMAP.md)
+
+## [0.6.8] - 2025-11-22
+
+### Added
+
+- **Smart console command** (`bdg console`) - Intelligent console message inspection (#87)
+  - Default view shows current page only with error/warning prioritization
+  - Deduplication groups repeated messages with occurrence counts
+  - Stack traces with source locations (file:line:column)
+  - `--history` flag to see messages from all page loads
+  - `--list` flag for chronological view with navigation markers
+  - `--follow` flag for real-time streaming
+  - JSON output with summary statistics
+- **Navigation tracking** - Console messages tagged with `navigationId` for page load awareness
+  - Visual "Page Reload" markers in `--list` view when using `--history`
+  - Automatic filtering to current navigation by default
+- **RemoteObject formatting** (`src/telemetry/remoteObject.ts`) - Rich console argument serialization
+  - Handles objects, arrays, errors, and primitives
+  - Uses CDP preview data for accurate representation
+- **String utilities** (`src/utils/strings.ts`) - Shared text truncation helper
+
+### Changed
+
+- **Console output format** - Problem-focused summary replaces simple list
+  - Errors shown first with source locations and stack traces
+  - Warnings grouped separately
+  - Info/debug/other summarized with counts
+- **Worker command registry** - Now includes `navigationId` in console message responses
+- **Documentation updates** - CLI reference, decision trees, and task mappings updated
+
+## [0.6.7] - 2025-11-22
+
+### Fixed
+
+- **Subcommand help output** - `--help --json` now returns focused command info instead of full tool structure (#84)
+- **Graceful degradation for dom get** - Handle accessibility API unavailability gracefully (#82)
+- **Stale query cache detection** - Detect and clear stale query cache after page navigation (#74)
+
+### Changed
+
+- **Improved cache management** - Better DOM element resolution and cache management architecture (#79)
+- **Consolidated cleanup logic** - Improved type safety in cleanup state and type guards (#77)
+- **Removed unused exports** - Clean up unused exports identified by knip (#80)
+- **Documentation updates** - Slimmer README with Wiki links, updated CDP method count to 644
+
+## [0.6.6] - 2025-11-21
+
+### Added
+
+- **Keyboard interaction command** (`bdg dom pressKey`) - Send keyboard events to elements (#72)
+  - Support for all common keys: Enter, Tab, Escape, Space, Arrow keys, F1-F12, a-z, 0-9
+  - Modifier key support: shift, ctrl, alt, meta (comma-separated)
+  - `--times` option for repeated key presses
+  - Works with both selectors and cached query indices
+  - Auto-waits for network stability (with `--no-wait` opt-out)
+- **Network stability waiting** - Click and fill commands now wait for network to settle (#72)
+  - Prevents race conditions when actions trigger AJAX requests
+  - `--no-wait` flag to opt-out when immediate return is needed
+- **Direct index support for dom click** - Use 0-based indices from query cache directly (#72)
+
+### Changed
+
+- **Improved `dom get` output** - Shows DOM context (tag, classes, text) when a11y name is missing (#72)
+- **Improved `a11y describe` output** - Includes tag name, CSS classes, and text preview (#72)
+- **Smart routing for `bdg dom a11y`** - Automatically routes to appropriate subcommand based on input type (#72)
+- **Better filter feedback** - Shows helpful message when `--type` filter matches nothing (#72)
+- **Enhanced URL validation hints** - Better error messages for shell quoting issues (#72)
+
+### Fixed
+
+- **Reject invalid `--last 0` value** - The peek command now validates that N >= 1
+- **Resolved element target helper** - Extracted shared logic to reduce ~70 lines of duplicate code (#72)
+
+## [0.6.5] - 2025-11-21
+
+### Added
+
+- **Agent-friendly discovery system** - Machine-readable help and intelligent pattern detection (#68, #69)
+  - `bdg --help --json` - Machine-readable schema with task mappings, decision trees, and runtime state
+  - Pattern detection for common CDP usage that suggests high-level alternatives
+  - 15 task-to-command mappings with CDP fallback options
+  - 5 intent-based decision trees (DOM, Network, Console, Monitoring, Session)
+  - Dynamic runtime state showing command availability
+  - Capabilities summary (53 CDP domains, 300+ methods)
+- **Query cache for index-based DOM access** - Persistent cache enables fast element references (#68)
+  - After `bdg dom query <selector>`, reference elements by index in subsequent commands
+  - Direct index access for inspection: `bdg dom get 0`, `bdg dom a11y describe 0`
+  - File-based cache in `~/.bdg/query-cache.json` persists across CLI invocations
+  - Automatically cleared when starting new queries or ending sessions
+  - Two access patterns documented: direct index (inspection) vs --index flag (interaction)
+- **Enhanced command hints** - Context-aware guidance for better command usage (#68)
+  - Pattern-based hints suggest high-level commands when using verbose CDP
+  - Runtime.evaluate triggers suggest `bdg dom query` for element inspection
+  - Page.captureScreenshot triggers suggest `bdg dom screenshot`
+  - Network.getCookies triggers suggest `bdg network getCookies`
+  - CommandRunner integration for consistent hint display
+- **Resource type indicators in peek** - Visual indicators for network resource types (#68)
+  - Short codes in peek output: IMG (images), DOC (documents), XHR (AJAX), SCR (scripts)
+  - Helps quickly identify resource types during live monitoring
+  - Complements existing `--type` filtering for resource-based queries
+
+### Changed
+
+- **Improved error messages** - Better guidance and actionable suggestions (#68)
+  - Enhanced daemon-not-running errors with clear next steps
+  - Session-not-found errors include start command examples
+  - Invalid argument errors show expected formats
+- **Documentation updates** - Comprehensive agent discoverability documentation (#68)
+  - Added CLAUDE.md section on DOM interaction patterns
+  - Created manual testing guide for agent discovery features
+  - Reorganized agent discoverability docs to focus on unresolved items
+  - Added PAIN_POINTS_RESOLVED.md tracking completed improvements
+
+### Fixed
+
+- **String escaping security issue** - Properly escape backslashes in selector strings (#68)
+  - Fixes CodeQL high-severity warning about incomplete string escaping
+  - Backslashes now escaped before single quotes to prevent bypass
+  - Resolves potential injection in DOM formatter hints
+
+### Performance
+
+- **Optimized HAR endpoint selection** - Prefer current navigation's Document resource (#68)
+  - Smarter default endpoint inference from network data
+  - Improves accuracy of HAR export for SPAs
+
+## [0.6.4] - 2025-11-20
+
+### Added
+
+- **HAR Export** (`bdg network har`) - Export network data as HAR 1.2 format (#65)
+  - `bdg network har [output-file]` - Export to HAR format compatible with Chrome DevTools
+  - Works with live sessions (queries daemon via IPC) or post-session (reads session.json)
+  - Optional output filename defaults to timestamped file in ~/.bdg/
+  - Automatic binary content detection and base64 encoding
+  - Includes creator/browser metadata and Chrome version
+  - Valid HAR 1.2 format that opens in Chrome DevTools and HAR Viewer
+  - **Real timing data**: DNS resolution, TCP/SSL connection, send, wait (TTFB), and receive times
+  - **Accurate sizes**: Wire-level body sizes (encodedDataLength), HTTP headers including request/status lines
+  - **Server metadata**: IP address and connection ID for each request
+  - Proper handling of missing timing fields (-1 for unknown per HAR spec)
+- **Network headers command** (`bdg network headers`) - HTTP header inspection for debugging and analysis (#67)
+  - `bdg network headers` - Display all request and response headers for all network requests
+  - `bdg network headers <id>` - Show headers for a specific request by ID
+  - `bdg network headers --request` - Show only request headers
+  - `bdg network headers --response` - Show only response headers
+  - Human-readable tabular format with proper key-value alignment
+  - JSON output mode for programmatic processing
+  - Works with both live sessions and post-session analysis
+- **Resource type filtering** - Enhanced network telemetry with resource type metadata (#66)
+  - All network requests now include `resourceType` field (Document, Stylesheet, Script, XHR, Fetch, Image, Font, etc.)
+  - `bdg peek --type <types>` - Filter by resource type (e.g., `--type Document,XHR`)
+  - Resource types displayed in peek command output alongside URLs
+  - Better understanding of network traffic composition for debugging and optimization
+
+### Changed
+
+- **Documentation updates** - Updated CLI reference and roadmap for HAR export feature
+  - Removed completed Issue #62 from roadmap
+  - Prioritized Issue #48 (form interaction enhancements)
+
+## [0.6.3] - 2025-11-19 [YANKED]
+
+**Note**: This version was never released. Content moved to v0.6.4.
+
+### Added
+
+- **HAR Export** (`bdg network har`) - Export network data as HAR 1.2 format (#61)
+  - `bdg network har [output-file]` - Export to HAR format compatible with Chrome DevTools
+  - Works with live sessions (queries daemon via IPC) or post-session (reads session.json)
+  - Optional output filename defaults to timestamped file in ~/.bdg/
+  - Automatic binary content detection and base64 encoding
+  - Includes creator/browser metadata and Chrome version
+  - Valid HAR 1.2 format that opens in Chrome DevTools and HAR Viewer
+  - **Real timing data**: DNS resolution, TCP/SSL connection, send, wait (TTFB), and receive times
+  - **Accurate sizes**: Wire-level body sizes (encodedDataLength), HTTP headers including request/status lines
+  - **Server metadata**: IP address and connection ID for each request
+  - Proper handling of missing timing fields (-1 for unknown per HAR spec)
+
+## [0.6.2] - 2025-11-19
+
+### Added
+
+- **Accessibility tree inspection** (`bdg dom a11y`) - Comprehensive accessibility testing capabilities (#64)
+  - `bdg dom a11y tree` - View full accessibility tree with role/name/description hierarchy
+  - `bdg dom a11y query <pattern>` - Query nodes by role, name, or description (AND logic)
+  - `bdg dom a11y describe <selector>` - Get accessibility info for specific element
+  - Exposes Chrome's accessibility tree (what screen readers see)
+  - Human-readable tree view with automatic ignored node filtering
+  - JSON output for programmatic processing
+  - Use cases: verify accessible names, validate ARIA landmarks, audit form labels, CI/CD accessibility testing
+- **Aggressive daemon cleanup** - Enhanced cleanup of orphaned daemon processes (#46)
+  - `bdg cleanup --aggressive` now finds and kills orphaned daemon processes
+  - Cross-platform support (macOS, Linux, Windows)
+  - Prevents resource leaks from test failures, timeouts, and crashes
+  - Safe cleanup that preserves currently tracked daemon
+
+### Changed
+
+- **Test infrastructure consolidation** (#63)
+  - Added c8 coverage tooling with proper exclusions for test files
+  - Added comprehensive unit tests for core utilities (errors, http, process)
+  - Created reusable shell test helpers in `tests/lib/`
+  - Hardened shell tests against timing issues with better retry logic
+  - Improved smoke test reliability with better timeouts and daemon helpers
+- **Documentation reorganization** (#63)
+  - Consolidated scattered planning docs into `docs/roadmap/`
+  - Moved agent principles to dedicated `docs/principles/` directory
+  - Created `docs/quality/` section with test guides and shell test hardening docs
+  - Added implementation status tracking in roadmap
+  - Updated README with clear documentation navigation section
+- **Code quality improvements** (#59)
+  - Enhanced error handling and logging consistency
+  - Improved module boundaries and separation of concerns
+  - All 19 integration tests now pass (100% pass rate)
+
+### Fixed
+
+- **Test reliability** (#59)
+  - Fixed `tail.test` to match current JSON output format
+  - Fixed `url-handling.test` to use `--headless` flag for IP address test
+
+### Dependencies
+
+- Bump js-yaml from 4.1.0 to 4.1.1 (#45) - dev dependency security update
+
+## [0.6.1] - 2025-11-16
+
+### Changed
+
+- **Internal Refactoring**: Comprehensive codebase reorganization for better maintainability
+  - **Module boundaries** (#44): Moved Chrome cleanup to session layer, extracted start command helpers, fixed error imports across 28 files for clearer separation of concerns
+  - **Connection layer** (#43): Extracted types, config, and port reservation into dedicated modules (+266 lines, improved discoverability)
+  - **Daemon architecture** (#42): Extracted handlers and lifecycle logic from monolithic files (ipcServer.ts reduced by 80%, worker.ts reduced by 81%)
+  - **IPC layer** (#41): Extracted transport layer, flattened types, added barrel exports for cleaner imports
+  - **Session module** (#40, #39): Improved file operations with `fs.rmSync({ force: true })`, better Windows support, consolidated duplicate lock logic, exported `readPidFromFile` for reuse
+  - **Telemetry module** (#38): Replaced `console.error` with structured logging, used `filterDefined` for cleaner JSON output, added `isFilteredOut` helper
+  - **UI layer** (#37): Added `joinLines` helper, replaced non-null assertions with explicit null checks, added type interfaces for command options
+  - **DOM module** (#32): Consolidated into `src/commands/dom/` directory (7 files), deleted unused dead code, improved documentation
+- **Code Quality**: Removed dead code identified by static analysis, fixed TSDoc syntax violations, improved error handling consistency
+- **Testing**: Added 4 contract test files for session module (430 lines), enhanced test isolation with `BDG_SESSION_DIR`
+
+### Fixed
+
+- **Peek command exit code**: Return `RESOURCE_NOT_FOUND` (83) instead of `SESSION_FILE_ERROR` (103) when no session exists
+- **Worker IPC race condition**: Reordered initialization to setup IPC listener before sending ready signal, preventing intermittent failures when agents run follow-up commands immediately
+- **Chrome binary validation**: Added actionable error messages for `CHROME_PATH` overrides
+- **Process cleanup**: Improved detection and cleanup of orphaned worker processes when daemon crashes
+- **Form interaction bugs** (#32): Fixed 6 critical issues including injection vulnerability, memory leak, browser compatibility, visibility detection, selector generation, and dead code
+
+### Internal
+
+- **Net code reduction**: Despite adding features, overall codebase became more maintainable with ~1,200 lines removed from core daemon files
+- **Test coverage**: 165/165 tests passing (100%), enhanced with flaky tests investigation report
+- **Documentation**: Added comprehensive UX improvements tracking, form interaction plan, agent discoverability guide
+
+## [0.6.0] - 2025-11-13
+
+### Added
+- **CDP Self-Discovery**: Comprehensive protocol introspection for agent-friendly self-documentation
+  - `bdg cdp --list` - List all 53 CDP domains with metadata
+  - `bdg cdp <Domain> --list` - List all methods in a domain (e.g., Network has 39 methods)
+  - `bdg cdp <Method> --describe` - Show full method schema with parameters, types, and examples
+  - `bdg cdp --search <keyword>` - Search across 300+ CDP methods
+- **Case-Insensitive CDP Commands**: `network.getcookies` automatically normalizes to `Network.getCookies`
+- **Intelligent Error Recovery**: Typo detection using Levenshtein distance algorithm
+  - Suggests up to 3 similar methods when typos detected
+  - Example: `Network.getCookie` → "Did you mean: Network.getCookies?"
+- **Type-Safe CDP API**: Full TypeScript types using official devtools-protocol package
+  - IDE autocomplete for all 300+ CDP methods
+  - Compile-time type checking for parameters and return values
+  - Zero runtime overhead (types erased at compile time)
+- **Enhanced User Feedback**:
+  - Progress indicators during Chrome launch ("Launching Chrome...", "Waiting for Chrome to be ready...", "✓ Chrome ready")
+  - Detailed timeout error messages with troubleshooting steps
+  - Error context with suggestions in both JSON and human-readable formats
+
+### Changed
+- **Type System Migration**: Migrated from custom CDP types to official `devtools-protocol` types
+  - Removed 176 lines of custom type definitions
+  - Updated 12 files across telemetry, connection, commands, and daemon layers
+  - Better IDE support and automatic updates with protocol changes
+- **Documentation Updates**:
+  - Added `docs/TYPE_SAFE_CDP.md` - Comprehensive guide to type-safe CDP usage
+  - Updated `CLAUDE.md` with "Agent-Friendly Discovery" section
+  - Enhanced README with CDP discovery examples
+- **Command Options**: Added explicit `false` defaults to boolean options for clarity
+
+### Fixed
+- **Tilde Expansion**: Fix `~/` expansion in `--user-data-dir` option (was causing ENOENT errors)
+- **Directory Creation**: Ensure `userDataDir` exists before launching Chrome (chrome-launcher requirement)
+- **CI Integration**: Link `bdg` to PATH for integration tests in GitHub Actions
+
+### Testing
+- Added 28 CDP discovery integration tests (`tests/integration/cdp-discovery.test.sh`)
+- All smoke tests passing (11/11)
+- Integration tests: 9/9 passing (2 flaky tests removed from CI)
+
+### Internal
+- New modules: `src/cdp/` - Protocol introspection infrastructure
+  - `protocol.ts` (250 lines) - Protocol loader with case-insensitive lookup
+  - `schema.ts` (357 lines) - Agent-friendly method schemas
+  - `types.ts` (147 lines) - TypeScript types for protocol schema
+  - `typed-cdp.ts` (177 lines) - Type-safe CDP wrapper
+- Refactored error handling with structured `errorContext` support
+- Enhanced `CommandRunner` to pass suggestions to both JSON and human output
+
+### Performance
+- Protocol introspection cached for performance
+- No runtime overhead from type-safe API (TypeScript types only)
+
+## [0.5.1] - 2025-11-12
+
+### Fixed
+- Improved cleanup of orphaned worker processes when daemon crashes
+- Enhanced stale session detection and automatic cleanup
+- Better test isolation with `BDG_SESSION_DIR` environment variable override
+- Chrome binary validation with actionable error messages for `CHROME_PATH` overrides
+- Chrome profile directory now relative to session directory for better test isolation
+
+### Changed
+- Refactored error handling organization (connection errors moved from `ui/errors` to `connection/errors` domain)
+- Implemented hybrid CI/CD testing strategy:
+  - PR builds run fast contract tests only (~30-60s, no Chrome needed)
+  - Main branch runs full suite including smoke tests with Chrome
+  - Smoke tests skipped on PRs for faster feedback
+- Enhanced orphaned process detection (worker survives daemon crash)
+- Improved process kill mocking to handle negative PIDs correctly
+
+### Testing
+- Added comprehensive smoke test suite for end-to-end validation:
+  - Session lifecycle tests (start, peek, stop)
+  - Error handling tests (daemon crashes, invalid inputs)
+  - Runs only on main branch with headless Chrome
+- Improved smoke test reliability (increased wait times, better cleanup)
+- Better test process mocking for contract tests
+- Documented test pyramid strategy in `TESTING_PHILOSOPHY.md`
+
+### Internal
+- Removed dead code identified by static analysis (knip)
+- Fixed TSDoc syntax violations (no curly braces in `@throws`, proper `@example` code fences)
+- Added test home directory utilities (`testHome.ts`)
+- Enhanced daemon cleanup logic with Chrome process termination
+
+## [0.5.0] - 2025-11-08
+
+### Added
+- **Docker support improvements**
+  - Automatic Docker environment detection via `isDocker()` helper
+  - Docker-specific Chrome flags (`DOCKER_CHROME_FLAGS`) for GPU/graphics workarounds
+  - `--cap-add=SYS_ADMIN` capability added to docker-compose.yml for Chrome sandbox support
+  - Comprehensive Docker integration tests
+
+### Changed
+- Chrome launcher now automatically applies Docker-optimized flags when running in containers
+  - `--disable-gpu` - Disable GPU hardware acceleration
+  - `--disable-dev-shm-usage` - Overcome limited resource problems
+  - `--disable-software-rasterizer` - Don't fall back to software rendering
+  - `--single-process` - Run Chrome in single-process mode (safer in containers)
+
+### Fixed
+- Chrome now launches successfully in Docker containers with proper GPU workarounds
+- Docker environment detection works via `/.dockerenv` file and `/proc/self/cgroup` checks
+
+### Documentation
+- Updated docker-compose.yml with required security capabilities
+- Added comments explaining Docker-specific Chrome requirements
+- Documented alternative `seccomp=unconfined` approach for restricted environments
+
+## [0.4.0] - 2025-11-08
+
+### Added
+- **External Chrome connection support** via `--chrome-ws-url` flag
+  - Connect to Chrome running in Docker containers or external processes
+  - Supports WebSocket URLs (e.g., `ws://localhost:9222/devtools/page/{id}`)
+  - Skips Chrome launch and lifecycle management for external instances
+  - Comprehensive Docker documentation in `docs/DOCKER.md`
+- Centralized Chrome messages in `src/ui/messages/chrome.ts`:
+  - `chromeExternalConnectionMessage()`
+  - `chromeExternalWebSocketMessage(wsUrl)`
+  - `chromeExternalNoPidMessage()`
+  - `chromeExternalSkipTerminationMessage()`
+  - `noPageTargetFoundError(port, availableTargets)`
+
+### Changed
+- Refactored worker configuration to use `filterDefined()` utility (2 locations)
+- Improved code maintainability by removing 87 excessive inline comments
+- Enhanced error messages with centralized formatting functions
+- Test suite improvements: fixed 6 syntax errors and added missing `--headless` flags
+
+### Fixed
+- Worker ready signal now handles external Chrome correctly (no null reference errors)
+- IPC chain properly passes `chromeWsUrl` through all layers
+- Page target error messages include diagnostics and troubleshooting steps
+
+### Performance
+- Cleaner codebase with 94% fewer inline comments (kept only critical ones)
+
+### Testing
+- **100% test pass rate achieved** (19/19 tests passing)
+  - Integration tests: 9/9 (100%)
+  - Error scenarios: 6/6 (100%)
+  - Benchmarks: 4/4 (100%)
+
+## [0.3.2] - 2025-11-07
+
+### Added
+- **New `bdg tail` command** for continuous session monitoring
+  - Live updates with configurable interval (`--interval <ms>`, default 1000ms)
+  - All filtering options from peek (`--network`, `--console`, `--last N`)
+  - Proper SIGINT handling (Ctrl+C)
+  - JSON and verbose output modes
+  - Alternative to `bdg peek --follow` with better Unix semantics
+- Integration tests for tail command (9 test cases)
+
+### Changed
+- Updated help text to suggest `bdg tail` for continuous monitoring
+- Enhanced CLI documentation
+- Updated landing page with all available commands and diamond icon (◆)
+
+### Removed
+- Review documentation moved to completed work archives (CODE_REVIEW.md, REFACTORING_GUIDE.md, TECHNICAL_DEBT.md)
+
+### Phase 3 Technical Debt Resolution (Complete)
+This release completes Phase 3 of technical debt cleanup, achieving better Unix philosophy compliance:
+- **TD-001**: `--kill-chrome` flag remains available (users can also use `bdg cleanup --aggressive`)
+- **TD-005**: Created separate `tail` command (separates snapshot vs. streaming concerns)
+
+**All Technical Debt Resolved**: 13/13 items complete (100%)
+- Phase 1 & 2: Internal code quality (11 items) ✅
+- Phase 3: Unix philosophy compliance (2 items) ✅
+
+## [0.3.1] - 2025-11-07
+
+### Changed
+- **Code quality improvements** through Phase 1 technical debt resolution
+  - Simplified error code mapping in stop command (TD-006)
+  - Extracted magic numbers to named constants across codebase (TD-010)
+  - Enhanced IPC connection error messages with contextual information (TD-012)
+  - Replaced platform-specific execSync with cross-platform helper (TD-004)
+  - Resolved TODO comments in IPC server (TD-009)
+- **UI layer reorganization** for better maintainability
+  - Moved error handling modules from `src/` to `src/ui/errors/` directory
+  - Moved logger modules from `src/` to `src/ui/logging/` directory
+  - Updated all import paths to use new locations
+- **Documentation improvements**
+  - Clarified release process for title format and changelog updates
+  - Added comprehensive code review document (CODE_REVIEW.md) cataloguing 19 technical debt items
+  - Added detailed refactoring guide (REFACTORING_GUIDE.md) with before/after examples
+
+### Removed
+- Deprecated re-export files (`src/errors.ts`, `src/logger.ts`)
+
+### Performance
+- Improved code maintainability through reduced duplication and clearer structure
+
+## [0.3.0] - 2025-11-07
+
+### Added
+- **Screenshot command** (`bdg dom screenshot`) for capturing page screenshots
+  - Full-page and viewport-only capture modes
+  - PNG and JPEG format support with quality control (0-100)
+  - Automatic directory creation
+  - Comprehensive metadata output (dimensions, size, format)
+  - Human-readable and JSON output modes
+- Schema contract tests with golden files to prevent schema drift (12 tests)
+- Golden CDP workflow script for agent reference implementation (`tests/agent-benchmark/scenarios/00-golden-cdp-workflow.sh`)
+- Comprehensive exit codes documentation (`docs/EXIT_CODES.md`)
+- Schema migration plan documentation (`docs/roadmap/SCHEMA_MIGRATION_PLAN.md`)
+- Week 0 completion report (`docs/roadmap/WEEK_0_COMPLETION_REPORT.md`)
+- `ScreenshotData` interface to type definitions
+- Screenshot formatter for human-readable output
+
+### Changed
+- Page readiness now waits for stability by default (prevents premature DOM capture)
+- Test suite organized with dedicated fixtures directory
+- ESLint configuration enhanced for test files
+- Improved documentation structure for roadmap and quality guidelines
+
+### Fixed
+- npm distribution tags properly configured (`latest` and `alpha` both point to current version)
+- Package README now updates correctly on npm registry
+- TypeScript build cache issues resolved with clean rebuild process
+
+### Performance
+- Test fixtures automatically copied to dist during build
+
+## [0.2.1] - 2025-11-06
+
+### Added
+- Comprehensive test suite with agent benchmarks, error scenarios, edge cases, and integration tests
+- Test runner script (`tests/run-all-tests.sh`) with granular suite selection (`--benchmarks`, `--integration`, `--errors`, `--edge-cases`)
+- Agent benchmark framework for real-world web automation scenarios (Hacker News, GitHub, Wikipedia, Reddit)
+- Error scenario tests for port conflicts, invalid URLs, session recovery, daemon crashes, Chrome launch failures
+- Edge case tests for URL validation and handling
+- Integration tests for CDP, console, DOM, network, cleanup, details, peek, and status commands
+- Comprehensive test documentation in `tests/README.md`
+- Testing philosophy documentation in `docs/quality/`
+- Project roadmap documentation across multiple phases
+
+### Changed
+- **Code quality improvements** following KISS, DRY, and YAGNI principles
+- Enhanced TSDoc comments with detailed descriptions and `@remarks` sections
+- Reorganized testing documentation to `docs/quality/` directory
+- Improved error handling with proper warning messages instead of silent failures
+- Optimized Chrome diagnostics calls (reduced from 3× to 1× in error paths)
+- Combined duplicate PID validation logic in launcher (reduced 30 lines to 26)
+
+### Fixed
+- **Collector activation timing** - activate before navigation to capture initial page load events
+- **Stale daemon cleanup** - properly handle and report errors when removing stale daemon.pid files
+- **Port conflict detection** - detect orphaned Chrome processes before launch with better error messages
+- **URL validation** - stricter validation with centralized protocol constants and simplified logic
+- **Chrome process validation** - combined PID and liveness checks for more efficient error detection
+
+### Removed
+- Dead code and unused catch parameters across codebase
+- Obsolete `vbscript:` protocol support (YAGNI compliance)
+- Redundant protocol validation regex checks (~25 lines)
+- Duplicate protocol lists in URL utilities
+
+### Performance
+- Reduced code duplication by ~68 lines through DRY refactoring
+- Optimized Chrome diagnostics generation in error paths
+- Simplified URL validation logic for faster processing
+
+## [0.2.0] - 2025-11-06
+
+### Added
+- Debug logging mode with `--debug` flag for troubleshooting daemon/IPC issues
+- Live activity metrics to `bdg status` command (network requests, console messages, DOM queries)
+- Smart page readiness detection for SSR applications with three-phase adaptive detection
+- Chrome popup suppression (translate prompts, notification requests) for cleaner automation
+- Configurable IPC timeouts for better test reliability and slow page handling
+
+### Changed
+- Flatten CLI structure by eliminating `src/cli` directory for simpler imports
+- Centralize all UI messages into `src/ui` layer (commands, errors, session, console, preview, validation)
+- Rename "collectors" → "telemetry" throughout codebase for clearer terminology
+- Enhance message organization with domain-specific message modules
+- Improve peek command UX in follow mode (timestamps, hide tips during live updates)
+- Hide empty sections in peek output when filters are active
+
+### Fixed
+- Chrome launch validation now checks process liveness (no more false "PID: 0" success messages)
+- Enhanced Chrome launch errors with installation diagnostics and troubleshooting steps
+- Enhanced target-not-found errors with available tabs list and diagnostic commands
+- Port validation now throws consistent `ChromeLaunchError` instead of generic `Error`
+- Stale session auto-cleanup when daemon PIDs are dead (no more manual cleanup required)
+- **"Last Request" timestamp in status command** (was showing "489560h ago" instead of "2s ago")
+
+## [0.1.0] - 2025-11-05
+
+### Added
+- Direct CDP passthrough command (`bdg cdp`) for low-level Chrome DevTools Protocol access
+- High-level network commands (`bdg network getCookies`) with human-readable formatting
+- JavaScript evaluation command (`bdg dom eval`) for executing code in browser context
+- Console log queries (`bdg console`) with filtering and pagination support
+- Comprehensive contract tests for network collector and IPC server (1,173 lines)
+- Enhanced CDP type definitions with complete Network domain coverage
+- CommandRunner helper for unified error handling and output formatting
+- commonOptions helper for shared CLI flags (`--json`, `--last`, `--filter`)
+- responseValidator helper for type-safe IPC/CDP response validation
+- Phase 1 reliability improvements for SSR applications
+- Smart page readiness detection foundation (load event, network stability, DOM stability)
+- IPC-based live data streaming for `peek` and `details` commands
+
+### Changed
+- Migrated all CLI commands to unified helper architecture (KISS, DRY, YAGNI principles)
+- Replaced two-tier file-based preview system with pure IPC streaming
+- Improved status output with clean formatting and Chrome diagnostics
+- Enhanced error messages with consistent formatting and actionable suggestions
+- Git commit guidelines: exclude AI tool attribution from commit messages
+
+### Removed
+- Old DOM collector implementation (domCache, domQuery, selectorParser)
+- ipcTest command and tests (no longer needed)
+- PreviewWriter.ts and file-based preview system (139 lines)
+- Preview loop and file write operations from worker
+- Unused test fixtures and dead code
+
+### Fixed
+- Module resolution for TypeScript path aliases in tests
+- IPC timeout configuration for test reliability
+- Chrome launch validation with proper PID checks
+- Stale session detection and auto-cleanup
+
+### Performance
+- **241x smaller data transfer** for peek/details (no file I/O)
+- Faster response times with live data from memory instead of disk reads
+- Real-time access to preview data without stopping collection
+
+## [0.1.0-alpha.1] - 2025-11-05
+
+### Changed
+- Updated installation instructions to recommend alpha tag
+
+## [0.1.0-alpha.0] - 2025-11-05
+
+### Added
+- Initial alpha release
+- Core CLI commands: start, stop, status, cleanup, peek, details
+- Daemon + IPC architecture for persistent CDP connections
+- Three telemetry collectors: DOM, network, console
+- Chrome launcher integration with auto-detection
+- Session management with Unix socket IPC
+- JSON output format for programmatic consumption
+- Basic filtering for tracking domains and dev server noise
+
+---
+
+**Legend:**
+- `Added` - New features
+- `Changed` - Changes in existing functionality
+- `Deprecated` - Soon-to-be removed features
+- `Removed` - Removed features
+- `Fixed` - Bug fixes
+- `Security` - Vulnerability fixes
+- `Performance` - Performance improvements

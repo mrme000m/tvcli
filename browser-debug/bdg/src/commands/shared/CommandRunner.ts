@@ -1,0 +1,213 @@
+import { type BaseOptions } from '@/commands/shared/optionTypes.js';
+import { CommandError, isDaemonConnectionError } from '@/errors/index.js';
+import { daemonNotRunningError, unknownError, genericError } from '@/errors/messages.js';
+import { OutputBuilder, buildSuccessResponse } from '@/ui/OutputBuilder.js';
+import { getErrorMessage } from '@/utils/errors.js';
+import { EXIT_CODES } from '@/utils/exitCodes.js';
+
+export type { BaseOptions };
+
+/**
+ * Exit after pending stdout writes have drained.
+ *
+ * `process.exit()` terminates immediately, which can truncate output piped
+ * to another process (e.g. `bdg … -j | jq`) once the pipe buffer fills —
+ * large JSON payloads then arrive cut off mid-string. Waiting for the stream
+ * to flush keeps machine-readable output intact for downstream consumers.
+ */
+async function exitAfterFlush(code: number): Promise<never> {
+  if (!process.stdout.destroyed && process.stdout.writableLength > 0) {
+    // Resolve when the stream drains; the timeout guards against a write
+    // that never completes (e.g. stdout destroyed between the checks).
+    await Promise.race([
+      new Promise<void>((resolve) => process.stdout.write('', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+    ]);
+  }
+  return process.exit(code);
+}
+
+/**
+ * Execute an async function and output JSON result with proper error handling.
+ *
+ * Use this for early JSON exits when runCommand's formatter isn't needed.
+ * Handles errors consistently, outputting `{ success: false, error: "..." }` on failure.
+ *
+ * @param fn - Async function that returns data to serialize
+ *
+ * @example
+ * ```typescript
+ * if (options.json) {
+ *   await runJsonCommand(async () => {
+ *     const data = await fetchData();
+ *     return data;
+ *   });
+ * }
+ * ```
+ */
+export async function runJsonCommand<T>(fn: () => Promise<T>): Promise<never> {
+  try {
+    const data = await fn();
+    console.log(JSON.stringify(buildSuccessResponse(data), null, 2));
+    await exitAfterFlush(EXIT_CODES.SUCCESS);
+    return process.exit(EXIT_CODES.SUCCESS); // unreachable: exitAfterFlush exits
+  } catch (error) {
+    const exitCode =
+      error instanceof CommandError ? error.exitCode : EXIT_CODES.UNHANDLED_EXCEPTION;
+    console.log(JSON.stringify(OutputBuilder.buildJsonError(getErrorMessage(error)), null, 2));
+    await exitAfterFlush(exitCode);
+    return process.exit(exitCode); // unreachable: exitAfterFlush exits
+  }
+}
+
+/**
+ * Result from a command handler.
+ * Handler functions should return this structure to indicate success/failure.
+ */
+export interface CommandResult<T = unknown> {
+  /** Whether the command succeeded */
+  success: boolean;
+  /** Data to output (for successful commands) */
+  data?: T;
+  /** Error message (for failed commands) */
+  error?: string;
+  /** Optional exit code override (defaults: SUCCESS=0, error codes from EXIT_CODES) */
+  exitCode?: number;
+  /** Optional error context (suggestions, examples, etc.) */
+  errorContext?: Record<string, unknown>;
+  /** Optional hint message to display on stderr (for successful commands with guidance) */
+  hint?: string;
+}
+
+/**
+ * Handler function type.
+ * Command logic should be implemented as a function matching this signature.
+ */
+export type CommandHandler<TOptions extends BaseOptions, TResult = unknown> = (
+  options: TOptions
+) => Promise<CommandResult<TResult>>;
+
+/**
+ * Formatter function type for human-readable output.
+ * Receives the command result data and returns a formatted string.
+ *
+ * @returns Formatted string to be output to console
+ */
+export type CommandFormatter<TResult = unknown> = (data: TResult) => string;
+
+/**
+ * Run a command with consistent error handling, output formatting, and exit codes.
+ * Eliminates boilerplate try-catch and JSON output logic from command handlers.
+ *
+ * This helper:
+ * - Wraps command logic in try-catch
+ * - Handles IPC connection errors (ENOENT, ECONNREFUSED)
+ * - Formats output as JSON or human-readable based on --json flag
+ * - Exits with the appropriate exit code (after flushing stdout)
+ *
+ * @param handler - Command logic that returns CommandResult or throws
+ * @param options - Command options (must include json flag)
+ * @param formatter - Optional human-readable formatter (if not provided, outputs raw JSON)
+ *
+ * @example
+ * ```typescript
+ * await runCommand(
+ *   async (opts) => {
+ *     const data = await fetchData(opts.url);
+ *     return { success: true, data };
+ *   },
+ *   options,
+ *   formatData
+ * );
+ * ```
+ */
+export async function runCommand<TOptions extends BaseOptions, TResult = unknown>(
+  handler: CommandHandler<TOptions, TResult>,
+  options: TOptions,
+  formatter?: CommandFormatter<TResult>
+): Promise<void> {
+  try {
+    const result = await handler(options);
+
+    if (!result.success) {
+      if (options.json) {
+        const errorData: Record<string, unknown> = {
+          ...(result.exitCode !== undefined && { exitCode: result.exitCode }),
+          ...result.errorContext,
+        };
+        console.log(
+          JSON.stringify(
+            OutputBuilder.buildJsonError(result.error ?? 'Unknown error', errorData),
+            null,
+            2
+          )
+        );
+      } else {
+        console.error(result.error ? genericError(result.error) : unknownError());
+        if (result.errorContext && typeof result.errorContext === 'object') {
+          for (const value of Object.values(result.errorContext)) {
+            if (value !== undefined && value !== null) {
+              console.error(typeof value === 'string' ? value : JSON.stringify(value));
+            }
+          }
+        }
+      }
+      await exitAfterFlush(result.exitCode ?? EXIT_CODES.UNHANDLED_EXCEPTION);
+    }
+
+    if (result.hint) {
+      console.error(result.hint);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(buildSuccessResponse(result.data), null, 2));
+    } else if (formatter) {
+      const formattedOutput = formatter(result.data as TResult);
+      console.log(formattedOutput);
+    } else {
+      console.log(JSON.stringify(buildSuccessResponse(result.data), null, 2));
+    }
+
+    await exitAfterFlush(EXIT_CODES.SUCCESS);
+  } catch (error) {
+    if (error instanceof CommandError) {
+      if (options.json) {
+        console.log(
+          JSON.stringify(OutputBuilder.buildJsonError(error.message, error.metadata), null, 2)
+        );
+      } else {
+        console.error(genericError(error.message));
+        for (const value of Object.values(error.metadata)) {
+          console.error(value);
+        }
+      }
+      await exitAfterFlush(error.exitCode);
+    }
+
+    const errorMessage = getErrorMessage(error);
+
+    if (isDaemonConnectionError(error)) {
+      if (options.json) {
+        console.log(
+          JSON.stringify(
+            OutputBuilder.buildJsonError('Daemon not running', {
+              suggestion: 'Start it with: bdg <url>',
+            }),
+            null,
+            2
+          )
+        );
+      } else {
+        console.error(daemonNotRunningError());
+      }
+      await exitAfterFlush(EXIT_CODES.RESOURCE_NOT_FOUND);
+    }
+
+    if (options.json) {
+      console.log(JSON.stringify(OutputBuilder.buildJsonError(errorMessage), null, 2));
+    } else {
+      console.error(genericError(errorMessage));
+    }
+    await exitAfterFlush(EXIT_CODES.UNHANDLED_EXCEPTION);
+  }
+}
