@@ -1,0 +1,196 @@
+//@version=5
+indicator("MTF Confluence Engine", shorttitle="MTF-CONF", overlay=false)
+
+// Multi-timeframe confluence read in ONE study run: the chart timeframe gets
+// the full XAU-SCALP component set (entry timing lives here), and two higher
+// timeframes are pulled in via request.security — each evaluated in its own
+// context, so the HTF composite/EMA-stack/SuperTrend/RSI are the same values a
+// dedicated chart on that TF would produce. All knobs are runtime inputs so
+// the tvcli server (`/run` or `/run-skill mtf-confluence`, `inputs` map) can
+// reconfigure TFs and weights per call without editing the source.
+//
+// Signal-time semantics: read the LAST bar of the window. With the tvcli
+// historical anchor (`to`) that bar is the one containing the anchor moment;
+// request.security on the realtime/anchor bar returns the forming HTF bar —
+// the same "bar containing the signal" semantics as the two-run experiment.
+
+// === INPUTS ===
+grpTF = "Timeframes"
+htf1 = input.timeframe("60", "Higher TF 1", group=grpTF)
+htf2 = input.timeframe("240", "Higher TF 2", group=grpTF)
+
+grpW = "MTF Weights"
+wChart = input.float(0.5, "Chart TF weight", minval=0, maxval=1, step=0.05, group=grpW)
+wHtf1  = input.float(0.3, "Higher TF 1 weight", minval=0, maxval=1, step=0.05, group=grpW)
+wHtf2  = input.float(0.2, "Higher TF 2 weight", minval=0, maxval=1, step=0.05, group=grpW)
+
+grp1 = "EMA Settings"
+ema1Len = input.int(3, "Fast EMA", group=grp1)
+ema2Len = input.int(8, "Signal EMA", group=grp1)
+ema3Len = input.int(21, "Trend EMA", group=grp1)
+ema4Len = input.int(55, "Baseline EMA", group=grp1)
+
+grp2 = "SuperTrend"
+stAtrLen = input.int(10, "ST ATR Length", group=grp2)
+stFactor = input.float(3.0, "ST Factor", group=grp2)
+
+grp3 = "RSI"
+rsiLen = input.int(14, "RSI Length", group=grp3)
+
+grp4 = "Squeeze / Bollinger"
+bbLen = input.int(20, "BB Length", group=grp4)
+bbMult = input.float(2.0, "BB Mult", group=grp4)
+kcLen = input.int(20, "KC Length", group=grp4)
+kcMult = input.float(1.5, "KC Mult", group=grp4)
+
+grp5 = "Volume"
+volLen = input.int(20, "Volume MA Length", group=grp5)
+
+// === COMPONENTS (function form so each TF context gets its own series) ===
+// HEADLESS-SAFETY: keep every self-referential series `var` (see xau_scalp.pine
+// guard note — non-var recursive series silently degrade the headless runner).
+// `var` in function scope is per call-site, so the chart-TF call and each
+// request.security call maintain independent SuperTrend state.
+f_trend() =>
+    ema1 = ta.ema(close, ema1Len)
+    ema2 = ta.ema(close, ema2Len)
+    ema3 = ta.ema(close, ema3Len)
+    ema4 = ta.ema(close, ema4Len)
+    emaStack = 0
+    if ema1 > ema2 and ema2 > ema3 and ema3 > ema4
+        emaStack := 100
+    else if ema1 > ema2 and ema2 > ema3
+        emaStack := 67
+    else if ema1 > ema2
+        emaStack := 33
+    else if ema1 < ema2 and ema2 < ema3 and ema3 < ema4
+        emaStack := -100
+    else if ema1 < ema2 and ema2 < ema3
+        emaStack := -67
+    else if ema1 < ema2
+        emaStack := -33
+
+    atr = ta.atr(stAtrLen)
+    stUpper = hl2 + stFactor * atr
+    stLower = hl2 - stFactor * atr
+    var float stLine = na
+    var int stDir = 1
+    if na(stLine[1])
+        stLine := hl2
+    else
+        if close > stUpper[1]
+            stDir := 1
+            stLine := stLower
+        else if close < stLower[1]
+            stDir := -1
+            stLine := stUpper
+        else
+            stLine := stDir == 1 ? math.max(stLower, nz(stLine[1])) : math.min(stUpper, nz(stLine[1]))
+    rsi = ta.rsi(close, rsiLen)
+    [emaStack, stDir, rsi, atr, ema3]
+
+f_composite(emaStack, stDir, rsi, atr) =>
+    bbBasis = ta.sma(close, bbLen)
+    bbDev = bbMult * ta.stdev(close, bbLen)
+    kcMa = ta.sma(close, kcLen)
+    kcRange = ta.sma(ta.tr, kcLen)
+    midpoint = (ta.highest(high, kcLen) + ta.lowest(low, kcLen)) / 2
+    sqzMom = ta.linreg(close - (midpoint + kcMa) / 2, kcLen, 0)
+    upVol = close > open ? volume : 0
+    dnVol = close < open ? volume : 0
+    upSum = math.sum(upVol, 5)
+    dnSum = math.sum(dnVol, 5)
+    volDelta = (upSum + dnSum) > 0 ? (upSum - dnSum) / (upSum + dnSum) * 100 : 0
+    bbPct = bbDev > 0 ? (close - bbBasis) / bbDev * 100 : 0
+    rsiScore = (rsi - 50) * 2
+    sqzScore = math.max(-100, math.min(100, atr > 0 ? sqzMom / atr * 20 : 0))
+    bbScore = math.max(-100, math.min(100, bbPct))
+    c = emaStack * 0.25 + stDir * 100 * 0.20 + rsiScore * 0.15 + sqzScore * 0.15 + volDelta * 0.10 + bbScore * 0.10
+    c / 0.95
+
+f_read() =>
+    [emaStack, stDir, rsi, atr, ema3] = f_trend()
+    composite = f_composite(emaStack, stDir, rsi, atr)
+    [composite, emaStack, stDir, rsi, atr, ema3]
+
+// === CHART TF (full component set — entry timing lives here) ===
+[composite, emaStack, stDir, rsi, atr, ema3] = f_read()
+
+// Squeeze state / fresh catalyst (chart TF only)
+bbBasis = ta.sma(close, bbLen)
+bbDev = bbMult * ta.stdev(close, bbLen)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+kcMa = ta.sma(close, kcLen)
+kcRange = ta.sma(ta.tr, kcLen)
+kcUpper = kcMa + kcMult * kcRange
+kcLower = kcMa - kcMult * kcRange
+squeezeOn = bbLower > kcLower and bbUpper < kcUpper
+sqzRelease = not squeezeOn and squeezeOn[1]
+volMa = ta.sma(volume, volLen)
+volRatio = volMa > 0 ? volume / volMa : 1.0
+
+// === HIGHER TFs (trend context only) ===
+[h1Composite, h1Ema, h1St, h1Rsi, h1Atr, _e1] = request.security(syminfo.tickerid, htf1, f_read())
+[h2Composite, h2Ema, h2St, h2Rsi, h2Atr, _e2] = request.security(syminfo.tickerid, htf2, f_read())
+
+// === MTF COMPOSITE ===
+wSum = wChart + wHtf1 + wHtf2
+mtfComposite = wSum > 0 ? (composite * wChart + h1Composite * wHtf1 + h2Composite * wHtf2) / wSum : composite
+// Alignment: chart TF and both HTF composites share the trade direction's sign.
+// +100 all agree bullish, -100 all agree bearish, 0 mixed.
+bullAll = composite > 0 and h1Composite > 0 and h2Composite > 0
+bearAll = composite < 0 and h1Composite < 0 and h2Composite < 0
+mtfAligned = bullAll ? 100 : bearAll ? -100 : 0
+
+// === ENTRY FILTERS (chart TF; same rules as XAU-SCALP) ===
+rsiOkLong = rsi < 70
+rsiOkShort = rsi > 30
+volOk = volRatio > 0.5
+pullbackLong = emaStack >= 67 and close > ema3 and low <= ema3
+pullbackShort = emaStack <= -67 and close < ema3 and high >= ema3
+freshLong = sqzRelease or pullbackLong
+freshShort = sqzRelease or pullbackShort
+
+// === SIGNAL GRADE: XAU-SCALP grade on chart TF, +1 when the MTF read agrees ===
+baseSignal = 0
+if composite > 25 and stDir == 1 and emaStack > 0 and freshLong and rsiOkLong and volOk
+    baseSignal := 2
+else if composite < -25 and stDir == -1 and emaStack < 0 and freshShort and rsiOkShort and volOk
+    baseSignal := -2
+else if composite > 15 and stDir == 1 and emaStack > 0 and rsiOkLong and volOk
+    baseSignal := 1
+else if composite < -15 and stDir == -1 and emaStack < 0 and rsiOkShort and volOk
+    baseSignal := -1
+
+signal = baseSignal
+if baseSignal > 0 and mtfAligned == 100
+    signal := baseSignal + 1
+else if baseSignal < 0 and mtfAligned == -100
+    signal := baseSignal - 1
+
+// ATR-anchored SL/TP (chart TF), oriented by chart SuperTrend
+slLevel = close - stDir * 2 * atr
+tpLevel = close + stDir * 3 * atr
+
+// === PLOTS (all numeric for parser extraction; DO NOT reorder) ===
+plot(composite, "Composite", color=color.blue, linewidth=2)
+plot(emaStack, "EMA_Stack", color=color.green)
+plot(stDir * 100, "ST_Dir", color=color.orange)
+plot(rsi, "RSI", color=color.purple)
+plot(atr, "ATR", color=color.gray)
+plot(signal * 50, "Signal", color=color.lime, style=plot.style_histogram, linewidth=3)
+plot(slLevel, "SL", color=color.new(color.red, 30))
+plot(tpLevel, "TP", color=color.new(color.green, 30))
+plot(h1Composite, "HTF1_Composite", color=color.teal)
+plot(h1Ema, "HTF1_EMA", color=color.new(color.teal, 40))
+plot(h1St * 100, "HTF1_ST", color=color.new(color.teal, 60))
+plot(h1Rsi, "HTF1_RSI", color=color.new(color.purple, 40))
+plot(h2Composite, "HTF2_Composite", color=color.maroon)
+plot(h2Ema, "HTF2_EMA", color=color.new(color.maroon, 40))
+plot(h2St * 100, "HTF2_ST", color=color.new(color.maroon, 60))
+plot(h2Rsi, "HTF2_RSI", color=color.new(color.purple, 60))
+plot(mtfComposite, "MTF_Composite", color=color.yellow, linewidth=2)
+plot(mtfAligned, "MTF_Aligned", color=color.new(color.yellow, 40))
+plot(squeezeOn ? 100 : 0, "Squeeze", color=color.new(color.orange, 50))
+plot(volRatio * 100, "Vol_Ratio", color=color.new(color.aqua, 50))

@@ -47,7 +47,31 @@ type Server struct {
 	// tier MaxIndicators (free = 2).
 	accountMu    sync.Mutex
 	accountUsage map[string]int
+
+	// ── Saved-script cache (/run) ────────────────────────────────────
+	// /run clients (e.g. the faber0 signal-time gate) re-send the same Pine
+	// source on every call. Compiling, saving a temp script, fetching its
+	// metaInfo and deleting it again costs three Pine Facade round-trips per
+	// request, so successfully saved scripts are kept and reused, keyed by
+	// (account, source hash). Entries are only cached per account because a
+	// private script saved under one account is invisible to the others.
+	scriptCache   map[string]*scriptCacheEntry
+	scriptCacheMu sync.Mutex
 }
+
+// scriptCacheEntry is a Pine script saved under one account, reusable across
+// /run requests until it disappears server-side (then it is evicted and
+// re-saved once transparently).
+type scriptCacheEntry struct {
+	account  string
+	pineID   string
+	metaInfo map[string]any
+	lastUse  time.Time
+}
+
+// scriptCacheMaxEntries bounds the number of saved scripts kept per server
+// process; eviction is LRU with a best-effort remote delete.
+const scriptCacheMaxEntries = 32
 
 // New creates a Server with the given config.
 func New(cfg *config.Config) *Server {
@@ -56,6 +80,7 @@ func New(cfg *config.Config) *Server {
 		pfClient:     pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond, pinefacade.WithProxy(cfg.ProxyURL)),
 		mux:          http.NewServeMux(),
 		accountUsage: make(map[string]int),
+		scriptCache:  make(map[string]*scriptCacheEntry),
 	}
 	s.registerRoutes()
 	return s
@@ -99,6 +124,113 @@ func (s *Server) maxConcurrentFor(accountName string) int {
 		return 2
 	}
 	return limits.MaxIndicators
+}
+
+// --- Saved-script cache (/run) ----------------------------------------------
+
+func scriptCacheKey(account, source string) string {
+	return account + "|" + pinefacade.SHA256(source)
+}
+
+func (s *Server) lookupScript(key string) (*scriptCacheEntry, bool) {
+	s.scriptCacheMu.Lock()
+	defer s.scriptCacheMu.Unlock()
+	ent, ok := s.scriptCache[key]
+	if ok {
+		ent.lastUse = time.Now()
+	}
+	return ent, ok
+}
+
+// storeScript caches a saved script, evicting the least-recently-used entry
+// (with a best-effort remote delete) when the cache is full.
+func (s *Server) storeScript(key, account, pineID string, metaInfo map[string]any) {
+	s.scriptCacheMu.Lock()
+	if len(s.scriptCache) >= scriptCacheMaxEntries {
+		var oldestKey string
+		var oldest time.Time
+		for k, e := range s.scriptCache {
+			if oldestKey == "" || e.lastUse.Before(oldest) {
+				oldestKey, oldest = k, e.lastUse
+			}
+		}
+		if ent, ok := s.scriptCache[oldestKey]; ok {
+			delete(s.scriptCache, oldestKey)
+			go s.deleteCachedScript(ent)
+		}
+	}
+	s.scriptCache[key] = &scriptCacheEntry{account: account, pineID: pineID, metaInfo: metaInfo, lastUse: time.Now()}
+	s.scriptCacheMu.Unlock()
+}
+
+// evictScript drops a cache entry (e.g. the script vanished server-side) and
+// best-effort deletes it from the owning account.
+func (s *Server) evictScript(key string) {
+	s.scriptCacheMu.Lock()
+	ent, ok := s.scriptCache[key]
+	if ok {
+		delete(s.scriptCache, key)
+	}
+	s.scriptCacheMu.Unlock()
+	if ok {
+		go s.deleteCachedScript(ent)
+	}
+}
+
+func (s *Server) deleteCachedScript(ent *scriptCacheEntry) {
+	_, _ = s.pfClient.Delete(ent.pineID, cfgForAccount(s.cfg, ent.account).CookieHeaderOrEmpty())
+}
+
+func (s *Server) scriptCacheLen() int {
+	s.scriptCacheMu.Lock()
+	defer s.scriptCacheMu.Unlock()
+	return len(s.scriptCache)
+}
+
+// isMissingScriptError reports whether err means the saved script is gone
+// server-side (deleted on TradingView or invisible to this account), in which
+// case a cached entry must be evicted and re-saved.
+func isMissingScriptError(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "no source")
+}
+
+// saveScriptOnce compiles source, saves it as a temp script under the account
+// and fetches its metaInfo. saved=false means TradingView refused the save and
+// the returned pineID is the deterministic fallback — nothing to cache or
+// delete. err is only ever a compile failure (request-scoped, 400 territory).
+func (s *Server) saveScriptOnce(accCfg *config.Config, source string) (pineID string, metaInfo map[string]any, saved bool, err error) {
+	if _, err = s.pfClient.Compile(source, accCfg.CookieHeaderOrEmpty()); err != nil {
+		return "", nil, false, fmt.Errorf("compile: %w", err)
+	}
+	tempName := "agent_server_" + pinefacade.SHA256(source)[:12]
+	saveResp, saveErr := s.pfClient.SaveNew(source, tempName, accCfg.CookieHeaderOrEmpty())
+	if saveErr == nil {
+		if pid := extractPineID(saveResp); pid != "" {
+			if fetched, ferr := s.pfClient.Get(pid, "last", accCfg.CookieHeaderOrEmpty()); ferr == nil && fetched.MetaInfo != nil {
+				metaInfo = fetched.MetaInfo
+			}
+			return pid, metaInfo, true, nil
+		}
+	}
+	return "USER;eval" + pinefacade.SHA256(source)[:12], nil, false, nil
+}
+
+// resolveScript returns a runnable pineID for source under the given account,
+// reusing a cached saved script when one exists. wasCached tells the caller
+// the entry may be stale server-side (retry once via evict+resolve on a
+// missing-script error).
+func (s *Server) resolveScript(cacheKey, account string, accCfg *config.Config, source string) (pineID string, metaInfo map[string]any, wasCached bool, err error) {
+	if ent, ok := s.lookupScript(cacheKey); ok {
+		return ent.pineID, ent.metaInfo, true, nil
+	}
+	pineID, metaInfo, saved, err := s.saveScriptOnce(accCfg, source)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if saved {
+		s.storeScript(cacheKey, account, pineID, metaInfo)
+	}
+	return pineID, metaInfo, false, nil
 }
 
 // Handler returns the HTTP handler.
@@ -202,6 +334,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		"activeAccount":   activeAccount,
 		"failoverMax":     failoverMax(),
 		"accountUsage":    usage,
+		"scriptCacheSize": s.scriptCacheLen(),
 	})
 }
 
@@ -476,42 +609,8 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 		tried++
 		accCfg := cfgForAccount(s.cfg, name)
 
-		// 1. Compile to validate syntax (request-scoped; no failover).
-		_, err := s.pfClient.Compile(req.Source, accCfg.CookieHeaderOrEmpty())
-		if err != nil {
-			s.releaseAccountSlot(name)
-			writeJSON(w, http.StatusBadRequest, map[string]string{"error": "compile: " + err.Error()})
-			return
-		}
-
-		// 2. Save as temp script via Pine Facade to get a real Pine ID.
-		tempName := "agent_server_" + pinefacade.SHA256(req.Source)[:12]
-		var pineID string
-		var metaInfo map[string]any
-		var savedScript bool
-
-		saveResp, saveErr := s.pfClient.SaveNew(req.Source, tempName, accCfg.CookieHeaderOrEmpty())
-		if saveErr == nil {
-			if pid := extractPineID(saveResp); pid != "" {
-				pineID = pid
-				savedScript = true
-				if fetched, ferr := s.pfClient.Get(pineID, "last", accCfg.CookieHeaderOrEmpty()); ferr == nil && fetched.MetaInfo != nil {
-					metaInfo = fetched.MetaInfo
-				}
-			}
-		}
-		if pineID == "" {
-			pineID = "USER;eval" + pinefacade.SHA256(req.Source)[:12]
-		}
-
-		// 3. Cleanup temp script when done.
-		if savedScript {
-			defer func() {
-				s.pfClient.Delete(pineID, accCfg.CookieHeaderOrEmpty())
-			}()
-		}
-
-		// 4. Resolve symbol / timeframe / bars.
+		// 1. Resolve symbol / timeframe / bars (request validation before any
+		// facade work — a bad request must not compile/save anything).
 		symbol := req.Symbol
 		if symbol == "" {
 			symbol = "OANDA:XAUUSD"
@@ -538,7 +637,19 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			bars = limits.MaxBars
 		}
 
-		// Pre-check auth before running (fail fast on expired cookies).
+		// 2. Resolve the script, reusing the cached saved script for this
+		// (account, source) when one exists — repeat /run callers skip the
+		// compile+save+metaInfo+delete facade cycle entirely. Cache misses
+		// compile (400 on syntax error), save, and cache.
+		cacheKey := scriptCacheKey(name, req.Source)
+		pineID, metaInfo, wasCached, err := s.resolveScript(cacheKey, name, accCfg, req.Source)
+		if err != nil {
+			s.releaseAccountSlot(name)
+			writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+			return
+		}
+
+		// 3. Pre-check auth before running (fail fast on expired cookies).
 		if authInfo := auth.FetchAuthInfo(accCfg.SessionID, accCfg.Signature, "", accCfg.DeviceToken, auth.WithProxy(accCfg.ProxyURL)); !authInfo.Authenticated {
 			s.releaseAccountSlot(name)
 			writeJSON(w, http.StatusUnauthorized, map[string]any{
@@ -549,20 +660,30 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 5. Run via service.RunScript (fetches compiled IL from Pine Facade).
-		res, err := service.RunScript(context.Background(), accCfg, service.RunRequest{
-			PineID:       pineID,
-			Symbol:       symbol,
-			Timeframe:    tf,
-			Bars:         bars,
-			ToTime:       req.To,
-			Inputs:       req.Inputs,
-			ReservedKeys: []string{"source", "symbol", "timeframe", "bars", "to", "inputs", "forceCleanup"},
-			SettleMs:     1500,
-			ForceCleanup: req.ForceClean,
-			CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
-			Debug:        accCfg.Debug,
-		})
+		// 4. Run via service.RunScript (fetches compiled IL from Pine Facade).
+		runStudy := func(pineID string) (*service.RunResult, error) {
+			return service.RunScript(context.Background(), accCfg, service.RunRequest{
+				PineID:       pineID,
+				Symbol:       symbol,
+				Timeframe:    tf,
+				Bars:         bars,
+				ToTime:       req.To,
+				Inputs:       req.Inputs,
+				ReservedKeys: []string{"source", "symbol", "timeframe", "bars", "to", "inputs", "forceCleanup"},
+				SettleMs:     1500,
+				ForceCleanup: req.ForceClean,
+				CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
+				Debug:        accCfg.Debug,
+			})
+		}
+		res, err := runStudy(pineID)
+		if err != nil && wasCached && isMissingScriptError(err) {
+			// Cached script vanished server-side — evict, re-save once, retry.
+			s.evictScript(cacheKey)
+			if pineID, metaInfo, _, err = s.resolveScript(cacheKey, name, accCfg, req.Source); err == nil {
+				res, err = runStudy(pineID)
+			}
+		}
 		if err != nil {
 			s.releaseAccountSlot(name)
 			if isFailoverError(err) {
@@ -576,7 +697,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// 6. Build schema and parse output.
+		// 5. Build schema and parse output.
 		var sch *schema.PineSchema
 		if metaInfo != nil {
 			sch = schema.FromMetaInfo(pineID, metaInfo)
@@ -591,6 +712,7 @@ func (s *Server) handleRun(w http.ResponseWriter, r *http.Request) {
 			"timeframe": tf,
 			"result":    result,
 			"account":   name,
+			"cached":    wasCached,
 		})
 		return
 	}
@@ -750,50 +872,23 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 		tried++
 		accCfg := cfgForAccount(s.cfg, name)
 
-		if err := service.PreCheckScriptOwnership(accCfg, sk.PineID); err != nil {
-			s.releaseAccountSlot(name)
-			writeJSON(w, http.StatusNotFound, map[string]any{
-				"error":   fmt.Sprintf("skill %s: %s", req.Skill, err.Error()),
-				"code":    "script_not_owned",
-				"skill":   req.Skill,
-				"account": name,
-				"symbol":  symbol,
-			})
-			return
-		}
-
-		limits := accCfg.Limits()
-		accountBars := bars
-		if limits.MaxBars > 0 && accountBars > limits.MaxBars {
-			accountBars = limits.MaxBars
-		}
-
-		// Build inputs from skill defaults + request overrides.
-		inputs := make(map[string]string)
-		for _, inp := range sk.Inputs {
-			if inp.Default != nil {
-				inputs[inp.TVInputID] = fmt.Sprintf("%v", inp.Default)
+		// Embedded-source skills never resolve the PineID through the facade
+		// (it's a label), so the ownership precheck is meaningless for them.
+		if sk.Source == "" {
+			if err := service.PreCheckScriptOwnership(accCfg, sk.PineID); err != nil {
+				s.releaseAccountSlot(name)
+				writeJSON(w, http.StatusNotFound, map[string]any{
+					"error":   fmt.Sprintf("skill %s: %s", req.Skill, err.Error()),
+					"code":    "script_not_owned",
+					"skill":   req.Skill,
+					"account": name,
+					"symbol":  symbol,
+				})
+				return
 			}
 		}
-		for k, v := range req.Inputs {
-			inputs[k] = v
-		}
 
-		start := time.Now()
-		runReq := service.RunRequest{
-			PineID:       sk.PineID,
-			Symbol:       symbol,
-			Timeframe:    tf,
-			Bars:         accountBars,
-			ToTime:       req.To,
-			Inputs:       inputs,
-			ReservedKeys: nil,
-			SettleMs:     1500,
-			CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
-			Source:       sk.Source,
-		}
-
-		res, err := service.RunScript(context.Background(), accCfg, runReq)
+		agentOut, err := s.runSkillCompute(sk, name, accCfg, req.Inputs, req.Skill, symbol, tf, bars, req.To)
 		if err != nil {
 			s.releaseAccountSlot(name)
 			if isFailoverError(err) {
@@ -819,30 +914,6 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		duration := time.Since(start)
-
-		var result skill.SkillResult
-		if sk.ParseWithSchema != nil && res.Indicator != nil && res.Indicator.Schema != nil {
-			result = sk.ParseWithSchema(res.Periods, res.Graphic, res.Indicator.Schema, tf, symbol, nil)
-		} else {
-			result = sk.ParseOutput(res.Periods, res.Graphic, tf, symbol, nil)
-		}
-		if result.Status == "" {
-			result.Status = "ok"
-		}
-		if result.Workflow == "" {
-			result.Workflow = sk.Name
-		}
-
-		if result.Status == "ok" && lastPriceMissing(result.Market.LastPrice) {
-			// Anchor the fallback price fetch to the same window: a to-anchored
-			// historical run must never report the live price as its last bar.
-			if ohlcvBars, ferr := service.FetchOHLCVBarsToTime(accCfg, symbol, tf, 2, req.To); ferr == nil && len(ohlcvBars) > 0 {
-				result.Market.LastPrice = roundPrice(ohlcvBars[len(ohlcvBars)-1].Close)
-			}
-		}
-
-		agentOut := sk.ToAgent(result, symbol, tf, duration.Milliseconds())
 		agentOut.AgentContext.Account = name
 		agentOut.Execution.Attempts = tried
 		s.releaseAccountSlot(name)
@@ -861,7 +932,7 @@ func (s *Server) handleRunSkill(w http.ResponseWriter, r *http.Request) {
 // writing and does not acquire/release the account slot — callers own the slot
 // so the same logic can serve both the single-symbol /run-skill endpoint and
 // the multi-symbol /hunt batch endpoint.
-func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]string, skillName string, symbol, tf string, bars int, to int64) (skill.AgentResult, error) {
+func (s *Server) runSkillCompute(sk *skill.Skill, accountName string, accCfg *config.Config, inputs map[string]string, skillName string, symbol, tf string, bars int, to int64) (skill.AgentResult, error) {
 	limits := accCfg.Limits()
 	accountBars := bars
 	if limits.MaxBars > 0 && accountBars > limits.MaxBars {
@@ -878,21 +949,48 @@ func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]s
 		merged[k] = v
 	}
 
-	start := time.Now()
-	runReq := service.RunRequest{
-		PineID:       sk.PineID,
-		Symbol:       symbol,
-		Timeframe:    tf,
-		Bars:         accountBars,
-		ToTime:       to,
-		Inputs:       merged,
-		ReservedKeys: nil,
-		SettleMs:     1500,
-		CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
-		Source:       sk.Source,
+	// Embedded-source skill: TradingView stores script source encrypted
+	// (facade Get returns a key_cipher blob), so raw text cannot execute as a
+	// study payload — save the source under the serving account (cached per
+	// account+source hash) and run by the resulting real PineID, which also
+	// delivers full metaInfo so runtime inputs map correctly.
+	pineID := sk.PineID
+	source := sk.Source
+	wasCached := false
+	cacheKey := ""
+	if source != "" {
+		cacheKey = scriptCacheKey(accountName, source)
+		pid, _, cached, err := s.resolveScript(cacheKey, accountName, accCfg, source)
+		if err != nil {
+			return skill.AgentResult{}, err
+		}
+		pineID, source, wasCached = pid, "", cached
 	}
 
-	res, err := service.RunScript(context.Background(), accCfg, runReq)
+	start := time.Now()
+	runOnce := func(pineID, src string) (*service.RunResult, error) {
+		return service.RunScript(context.Background(), accCfg, service.RunRequest{
+			PineID:       pineID,
+			Symbol:       symbol,
+			Timeframe:    tf,
+			Bars:         accountBars,
+			ToTime:       to,
+			Inputs:       merged,
+			ReservedKeys: nil,
+			SettleMs:     1500,
+			CalcTimeout:  time.Duration(limits.CalcTimeoutSecs) * time.Second,
+			Source:       src,
+		})
+	}
+	res, err := runOnce(pineID, source)
+	if err != nil && wasCached && isMissingScriptError(err) {
+		// Cached script vanished server-side — evict, re-save once, retry.
+		s.evictScript(cacheKey)
+		if pid, _, _, rerr := s.resolveScript(cacheKey, accountName, accCfg, sk.Source); rerr == nil {
+			pineID = pid
+			res, err = runOnce(pineID, "")
+		}
+	}
 	if err != nil {
 		return skill.AgentResult{}, err
 	}
@@ -927,7 +1025,7 @@ func runSkillCompute(sk *skill.Skill, accCfg *config.Config, inputs map[string]s
 func (s *Server) runSkillWithAccount(w http.ResponseWriter, sk *skill.Skill, req runSkillRequest, symbol, tf string, bars int, name string, accCfg *config.Config) {
 	defer s.releaseAccountSlot(name)
 
-	agentOut, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars, req.To)
+	agentOut, err := s.runSkillCompute(sk, name, accCfg, req.Inputs, req.Skill, symbol, tf, bars, req.To)
 	if err != nil {
 		msg := err.Error()
 		code := "generic"
@@ -963,7 +1061,7 @@ type huntRequest struct {
 	Symbols        []string          `json:"symbols"`
 	Inputs         map[string]string `json:"inputs"`
 	MaxAccounts    int               `json:"maxAccounts"`    // 0 = all candidate accounts
-	ConcurrencyCap int               `json:"concurrencyCap"`  // hard cap on total in-flight workers (0 = auto)
+	ConcurrencyCap int               `json:"concurrencyCap"` // hard cap on total in-flight workers (0 = auto)
 	AccountRole    string            `json:"accountRole"`    // prefer accounts with this role (adhoc/script/signal/core); "" = no preference
 }
 
@@ -1172,7 +1270,7 @@ func (s *Server) handleHunt(w http.ResponseWriter, r *http.Request) {
 				continue // at cap → rotate; contention is transient
 			}
 			accCfg := cfgForAccount(s.cfg, name)
-			res, err := runSkillCompute(sk, accCfg, req.Inputs, req.Skill, symbol, tf, bars, 0)
+			res, err := s.runSkillCompute(sk, name, accCfg, req.Inputs, req.Skill, symbol, tf, bars, 0)
 			s.releaseAccountSlot(name)
 			if err != nil {
 				lastErr = err

@@ -13,6 +13,7 @@ Each file documents one registered `tvcli <skill>` command: its Pine Script, inp
 | [ema-atr](ema-atr.md) | Trend + Risk | `ema2Len/3Len`, `atrLen`, `atrMult` |
 | [gold-divergence](gold-divergence.md) | Momentum | `rsiLength` |
 | [liq-sweep](liq-sweep.md) | Liquidity | `swingLookback`, `volumeMultiplier` |
+| [mtf-confluence](mtf-confluence.md) | Trend (multi-TF) | `htf1`/`htf2`, `wChart`/`wHtf1`/`wHtf2` |
 | [order-flow](order-flow.md) | Volume | `vmaLength`, `volumeMultiplier` |
 | [quantum](quantum.md) | Trend Ribbon | All 8 EMA lengths |
 | [shemar](shemar.md) | Trend + Confidence | `hmaLength`, `atrPeriod`, `factor` |

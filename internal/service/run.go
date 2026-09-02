@@ -19,7 +19,7 @@ type RunRequest struct {
 	Symbol       string // already normalized via pinefacade.ValidateSymbol
 	Timeframe    string
 	Bars         int
-	ToTime       int64          // unix seconds: anchor the chart window at this past moment (0 = live)
+	ToTime       int64             // unix seconds: anchor the chart window at this past moment (0 = live)
 	Inputs       map[string]string // applied to the indicator via SetOption
 	ReservedKeys []string          // keys in Inputs to skip (reserved flag names)
 	SettleMs     int               // 0 → 1500
@@ -148,8 +148,14 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 	}
 
 	// When Source is provided (private scripts with raw Pine source),
-	// build the indicator directly without Pine Facade — the Pine Facade
-	// returns incomplete metaInfo for private scripts, causing 0 periods.
+	// build the indicator directly without Pine Facade.
+	//
+	// KNOWN-BROKEN, kept for API compatibility: TradingView stores private
+	// script source ENCRYPTED (the facade Get returns a `key_cipher` blob, not
+	// plaintext), so a plaintext `text` field fails server-side lexing
+	// ("line 1:12 no viable alternative at character '\n'"). No caller sets
+	// Source today; embedded-source skills are saved per account and run by
+	// PineID instead (see the server's script cache).
 	var indicator *tradingview.PineIndicator
 	var err error
 	if req.Source != "" {
