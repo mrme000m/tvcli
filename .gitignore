@@ -69,3 +69,4 @@ skill_work/
 # Local build artifacts / screenshots
 /bulk_validate
 /shots/
+accounts.json.bak*
