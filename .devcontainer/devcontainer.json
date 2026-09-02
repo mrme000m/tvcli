@@ -19,6 +19,6 @@
       }
     }
   },
-  "postCreateCommand": "go build -o tvcli ./cmd/tvcli && curl -fsSL https://opencode.ai/install | bash && printf 'export PATH=\"$HOME/.opencode/bin:$PATH\"\\n' >> ~/.profile",
+  "postCreateCommand": "go build -o tvcli ./cmd/tvcli && curl -fsSL https://opencode.ai/install | bash && { ACC=\"${CLOUDFLARE_ACCOUNT_ID}\"; KEY=\"${CLOUDFLARE_API_KEY}\"; [ -n \"${ACC}\" ] || ACC=\"$(sed -n 's/^CLOUDFLARE_ACCOUNT_ID=//p' /workspaces/.codespaces/shared/.env-secrets 2>/dev/null)\"; [ -n \"${KEY}\" ] || KEY=\"$(sed -n 's/^CLOUDFLARE_API_KEY=//p' /workspaces/.codespaces/shared/.env-secrets 2>/dev/null)\"; printf 'export PATH=\"$HOME/.opencode/bin:$PATH\"\\nexport CLOUDFLARE_ACCOUNT_ID=\"%s\"\\nexport CLOUDFLARE_API_KEY=\"%s\"\\n' \"${ACC}\" \"${KEY}\" >> \"${HOME}/.profile\"; printf 'export CLOUDFLARE_ACCOUNT_ID=\"%s\"\\nexport CLOUDFLARE_API_KEY=\"%s\"\\n' \"${ACC}\" \"${KEY}\" >> \"${HOME}/.bashrc\"; }",
   "remoteUser": "vscode"
 }
