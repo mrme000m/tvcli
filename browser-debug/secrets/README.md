@@ -24,12 +24,19 @@ changes.
 ## One-time setup (codespace / devcontainer)
 
 1. Create a Bitwarden API key for your user (web vault → Settings → API Key).
-2. Set codespace secrets (GitHub → repo → Settings → Codespaces → Secrets):
-   - `BW_CLIENTID` — API key client id
-   - `BW_CLIENTSECRET` — API key client secret
-   - `BW_PASSWORD` — vault master password (used non-interactively)
-3. `post-create.sh` runs `bw-provision.sh` automatically (configures
-   `bw config server`, `bw login --apikey`, `bw unlock`, `bw sync`).
+2. Publish the credentials as codespace secrets for the repo — either in the
+   GitHub UI (repo → Settings → Codespaces → Secrets) or with one command:
+   ```bash
+   BW_CLIENTID=… BW_CLIENTSECRET=… BW_PASSWORD=… \
+     bash browser-debug/secrets/set-codespace-secrets.sh   # needs pynacl + gh
+   # verify the API path without real values:
+   bash browser-debug/secrets/set-codespace-secrets.sh --test
+   ```
+3. Populate the vault items once, from a machine that already has working
+   secrets: `bash browser-debug/secrets/migrate-local.sh` (see below).
+4. `post-create.sh` runs `bw-provision.sh` automatically on every rebuild
+   (configures `bw config server`, `bw login --apikey`, `bw unlock`,
+   `bw sync`, fetches all manifest items).
 
 If the credentials are absent the provisioner exits `2` with a warning and the
 container still builds — no secrets, no live analysis, nothing else breaks.

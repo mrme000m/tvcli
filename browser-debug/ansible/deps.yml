@@ -392,15 +392,27 @@
       when: visual_python.rc != 0
       tags: [visual]
 
+    - name: Install python3-pip (Debian) for tvvisual deps
+      ansible.builtin.apt:
+        name: [python3-pip]
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+      tags: [visual]
+
     - name: Install tvvisual Python dependencies (idempotent)
+      # Debian bookworm marks the python env externally-managed (PEP 668) —
+      # --user installs need --break-system-packages; older pips (and macOS
+      # brew python) don't know the flag, so fall back to the plain form.
       # pip3 is a no-op ("Requirement already satisfied") once cloakbrowser is
-      # installed. failed_when false tolerates externally-managed environments
-      # where --user installs need --break-system-packages. Repo root is the
-      # parent of tv_workspace (browser-debug/) in the devcontainer.
-      ansible.builtin.command:
-        cmd: pip3 install --user -r visual/requirements.txt
+      # installed. Repo root is the parent of tv_workspace (browser-debug/).
+      ansible.builtin.shell: |
+        set -e
+        pip3 install --user --break-system-packages -r visual/requirements.txt \
+          || pip3 install --user -r visual/requirements.txt
+      args:
         chdir: "{{ tv_workspace }}/.."
       register: visual_pip
       changed_when: "'Requirement already satisfied' not in visual_pip.stdout"
-      failed_when: false
       tags: [visual]
