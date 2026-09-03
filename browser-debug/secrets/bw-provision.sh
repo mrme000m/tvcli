@@ -130,10 +130,37 @@ validate_json() { # $1=item $2=content $3=optional jq count expression
   fi
 }
 
-wire_source_into() { # $1=env file (abs) $2=shell rc (abs) — add a guarded source line only
+wire_source_into() { # $1=env file (abs) $2=shell rc (abs) — guarded, never-clobber source
   [ -f "$1" ] || return 0
   touch "$2" 2>/dev/null || { warn "cannot write $2 (skipping source wiring)"; return 0; }
-  grep -qF "$1" "$2" 2>/dev/null || printf '\n# tvcli runtime secrets (managed by bw-provision.sh)\n[ -f "%s" ] && . "%s"\n' "$1" "$1" >> "$2"
+  # Idempotent: the guarded block for this file is already wired.
+  grep -qF "bw-provision guarded source: $1" "$2" 2>/dev/null && return 0
+  # Upgrade: drop any legacy unguarded source line for this file (a plain
+  # `. file` clobbers env-injected values — e.g. the codespace secrets that
+  # login shells also receive via /etc/profile.d — with the vault runtime
+  # file's content, and that file may legitimately reference other shell
+  # variables that do not exist in this environment).
+  if [ -s "$2" ] && grep -qF "$1" "$2" 2>/dev/null; then
+    sed -i.bw-provision '\#'"$1"'#d' "$2" 2>/dev/null \
+      || warn "could not remove the legacy source line in $2"
+  fi
+  local body
+  body="$(cat <<'BODY'
+# bw-provision guarded source: @FILE@ — a value applies only when the variable
+# is unset/empty, so environment-injected secrets (codespace secrets, lifecycle
+# env) always take precedence over this vault runtime file.
+if [ -f "@FILE@" ]; then
+  while IFS= read -r __bw_line; do
+    case "$__bw_line" in ''|\#*) continue ;; esac
+    __bw_k="${__bw_line%%=*}"
+    case "$__bw_k" in ''|*[!A-Za-z0-9_]*) continue ;; esac
+    [ -n "${!__bw_k:-}" ] && continue
+    eval "export $__bw_line"
+  done < "@FILE@"
+fi
+BODY
+)"
+  printf '\n%s\n' "${body//@FILE@/$1}" >> "$2"
 }
 
 # --- modes -----------------------------------------------------------------
