@@ -68,16 +68,32 @@ for (const [name, value] of [
 
 await send('Page.navigate', { url: 'https://www.tradingview.com/chart/' });
 
-// 6. poll for the logged-in account (same probe as visual)
-const ACCOUNT_JS = `(function(){
+// 6. poll for the logged-in account (multi-signal: legacy aria-label,
+//    sign-in-control absence, profile API). TradingView has shipped header
+//    variants WITHOUT the "Logged in as" aria-label — a logged-in chart page
+//    shows no sign-in control, a logged-out one always does (verified
+//    2026-09-03: cookies set, saved layout loaded, no aria-label yet no
+//    sign-in control → authenticated).
+const ACCOUNT_JS = `(async () => {
   var b = document.querySelector('[aria-label^="Logged in as"]');
-  return b ? (b.getAttribute('aria-label') || '').split('\\n')[0].replace('Logged in as ', '').trim() : null;
+  if (b) return (b.getAttribute('aria-label') || '').split('\\n')[0].replace('Logged in as ', '').trim();
+  var signin = document.querySelector('a[href*="/signin"], a[href*="sign-in"], [data-dialog-name="sign-in"], button[aria-label*="Sign in" i]');
+  if (signin) return null;
+  try {
+    var r = await fetch('/api/v1/user/profile/me/', { headers: { 'Accept': 'application/json' } });
+    if (r.ok) { var j = await r.json(); if (j && j.username) return j.username + ' (profile API)'; }
+  } catch (e) {}
+  return null;
 })()`;
 let user = null;
 for (let i = 0; i < 40; i++) {
   await new Promise((r) => setTimeout(r, 1000));
-  const r = await send('Runtime.evaluate', { expression: ACCOUNT_JS, returnByValue: true });
+  const r = await send('Runtime.evaluate', { expression: ACCOUNT_JS, returnByValue: true, awaitPromise: true });
   if (r.result?.result?.value) { user = r.result.result.value; break; }
 }
-console.log(user ? `\nAUTH OK — logged in as: ${user}` : '\nAUTH UNKNOWN — no "Logged in as" found');
+if (!user) {
+  const fallback = await send('Runtime.evaluate', { expression: `!document.querySelector('a[href*="/signin"], a[href*="sign-in"], [data-dialog-name="sign-in"], button[aria-label*="Sign in" i]')`, returnByValue: true });
+  if (fallback?.result?.result?.value === true) user = '(no sign-in control — header variant)';
+}
+console.log(user ? `\nAUTH OK — logged in as: ${user}` : '\nAUTH UNKNOWN — no logged-in signal found (see browser-debug/AGENTS.md)');
 process.exit(0);
