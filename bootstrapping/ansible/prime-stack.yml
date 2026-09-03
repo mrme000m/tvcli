@@ -1,0 +1,614 @@
+---
+# prime-stack.yml — install and configure the DSH prime-orchestrator stack in
+# the tvcli devcontainer/codespace, so the dsh-prime-orchestrator plugin +
+# prime-agent CLI become the system's prime intelligence and agent fleet.
+#
+# Components (each independently runnable via --tags):
+#   dsh          @deepseek-ai/dsh CLI, EXACT version 0.1.1-rc.2 (plugin
+#                compatibility table: 0.1.0-rc.7 / 0.1.1-rc.2 supported,
+#                0.1.2-alpha NOT) + pnpm >= 10 (plugin management forwarder)
+#   plugin       dsh-prime-orchestrator into profile `web` (github spec),
+#                including the pnpm-10 allowBuilds remedy + one retry
+#   preset       warm-boot the web profile once so the plugin materializes the
+#                `prime-orchestrator` agent preset (~/.dsh/.agent-presets/)
+#   agent        prime-agent CLI (official installer, ~/.local/bin)
+#   env          PATH + Cloudflare env bridge in ~/.profile and ~/.bashrc
+#   dsh-config   ~/.dsh/settings.yaml (CF Workers AI as the default LLM)
+#   prime-config ~/.prime/agent/{models,auth,settings}.json (merged, never
+#                destroying other providers/keys)
+#   secrets      browser-debug/secrets/bw-provision.sh (never fatal)
+#
+# Run (inside the codespace, from the repo root):
+#   ansible-playbook bootstrapping/ansible/prime-stack.yml \
+#     -i localhost, -e ansible_connection=local \
+#     -e ansible_python_interpreter=/usr/bin/python3 \
+#     -e tv_workspace="$PWD"
+#
+# Contract:
+#   - CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_KEY (repo codespace secrets) gate
+#     every config-writing task; missing → warn + skip, never hard-fail.
+#     Pass -e prime_stack_strict=true to make missing secrets fatal instead.
+#   - The Cloudflare account id is ALWAYS templated at runtime from the env
+#     var; nothing is hardcoded. Auth values never appear in logs (no_log).
+#   - Idempotent: every task checks before it writes (marker-bounded shell
+#     blocks, skip-when-present guards, JSON merges keyed on the provider).
+#   - ansible-core 2.14 compatible (Debian bookworm ansible 7.7), builtin
+#     modules only.
+
+- name: Install and configure the DSH prime-orchestrator stack (codespace)
+  hosts: all
+  gather_facts: true
+
+  vars:
+    # --- knobs (override with -e) -------------------------------------------
+    prime_stack_strict: false        # true: missing CF secrets are fatal
+    prime_stack_force_settings: false # true: overwrite an existing ~/.dsh/settings.yaml (after backup)
+    tv_workspace: "{{ playbook_dir | dirname | dirname }}" # repo root (go/)
+
+    # --- fixed component identities ----------------------------------------
+    dsh_version: "0.1.1-rc.2"        # EXACTLY this (plugin compat table)
+    dsh_profile: web
+    dsh_plugin_spec: github:mrme000m/dsh-prime-orchestrator
+    dsh_plugin_package: dsh-prime-orchestrator
+    prime_agent_bin: "{{ lookup('env', 'HOME') }}/.local/bin/prime-agent"
+
+    # --- runtime locations ---------------------------------------------------
+    prime_home: "{{ lookup('env', 'HOME') }}"
+    dsh_home: "{{ lookup('env', 'DSH_HOME') | default(lookup('env', 'HOME') ~ '/.dsh', true) }}"
+    dsh_settings: "{{ dsh_home }}/settings.yaml"
+    dsh_profile_dir: "{{ dsh_home }}/profiles/{{ dsh_profile }}"
+    preset_root: "{{ dsh_home }}/.agent-presets"
+    preset_dir: "{{ preset_root }}/prime-orchestrator"
+
+    # --- secrets: only presence is ever inspected, never the values ---------
+    cf_account_id: "{{ lookup('env', 'CLOUDFLARE_ACCOUNT_ID') }}"
+    cf_api_key: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
+    cf_secrets_present: "{{ (cf_account_id | length) > 0 and (cf_api_key | length) > 0 }}"
+
+    # Cloudflare Workers AI model catalog (verified against the working
+    # production config; per-model caps copied verbatim).
+    prime_cf_models:
+      - id: "@cf/zai-org/glm-5.2"
+        name: CF Workers AI / GLM-5.2
+        contextWindow: 262144
+        maxTokens: 16384
+        reasoning: true
+      - id: "@cf/zai-org/glm-5.3"
+        name: CF Workers AI / GLM-5.3
+        contextWindow: 1048576
+        maxTokens: 131072
+        reasoning: true
+      - id: "@cf/zai-org/glm-5.3-flash"
+        name: CF Workers AI / GLM-5.3 Flash
+        contextWindow: 1048576
+        maxTokens: 131072
+        reasoning: true
+      - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
+        name: CF Workers AI / DeepSeek V4 Flash 0731
+        contextWindow: 131072
+        maxTokens: 16384
+      - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
+        name: CF Workers AI / DeepSeek V4 Pro 0813
+        contextWindow: 131072
+        maxTokens: 16384
+      - id: "@cf/qwen/qwen3.8-27b"
+        name: CF Workers AI / Qwen3.8 27B
+        contextWindow: 262144
+        maxTokens: 16384
+      - id: "@cf/moonshotai/kimi-k2.6"
+        name: CF Workers AI / Kimi K2.6
+        contextWindow: 262144
+        maxTokens: 16384
+      - id: "@cf/moonshotai/kimi-k2.7-code"
+        name: CF Workers AI / Kimi K2.7 Code
+        contextWindow: 262144
+        maxTokens: 16384
+        reasoning: true
+
+    # prime-agent models.json provider fragment (account id injected at runtime).
+    prime_cf_provider:
+      type: api_key
+      baseUrl: "https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/ai/v1"
+      api: openai-completions
+      models: "{{ prime_cf_models }}"
+
+    # Prefix, not a backreference: re.sub('^', 'prefix', id) is escape-proof
+    # across jinja/yaml quoting layers.
+    prime_cf_enabled_models: "{{ prime_cf_models | map(attribute='id') | map('regex_replace', '^', 'cloudflare-workers-ai/') | list }}"
+
+  tasks:
+    # ------------------------------------------------------------------ preflight
+    - name: Warn when Cloudflare secrets are missing (config tasks will be skipped)
+      ansible.builtin.debug:
+        msg: >-
+          [prime-stack] WARN: CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set —
+          dsh/prime-agent still install, but model-config tasks are skipped.
+          Set them as repo codespace secrets, then re-run this playbook.
+      when: not (cf_secrets_present | bool)
+      tags: [always]
+
+    - name: Fail on missing Cloudflare secrets (prime_stack_strict=true)
+      ansible.builtin.fail:
+        msg: "prime_stack_strict=true but CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY are not set"
+      when:
+        - prime_stack_strict | bool
+        - not (cf_secrets_present | bool)
+      tags: [always]
+
+    # ------------------------------------------------------------------ dsh
+    - name: Detect dsh CLI version
+      # Normalize to "MISSING" so the version test below never sees an empty string.
+      ansible.builtin.shell: dsh --version 2>/dev/null || echo MISSING
+      register: dsh_detect
+      changed_when: false
+      tags: [dsh, always]
+
+    - name: Warn when the installed dsh version differs from the supported one
+      ansible.builtin.debug:
+        msg: >-
+          [prime-stack] WARN: dsh {{ dsh_detect.stdout | trim }} is installed but
+          {{ dsh_version }} is the supported version for dsh-prime-orchestrator
+          (compatibility: 0.1.0-rc.7 / 0.1.1-rc.2 only). Not auto-upgrading.
+      when:
+        - dsh_detect.stdout != 'MISSING'
+        - (dsh_detect.stdout | trim) != dsh_version
+      tags: [dsh, always]
+
+    - name: Install dsh CLI at the exact supported version (npm global)
+      ansible.builtin.shell: npm install -g @deepseek-ai/dsh@{{ dsh_version }}
+      when: dsh_detect.stdout == 'MISSING'
+      tags: [dsh]
+
+    - name: Detect pnpm version
+      # Strip a leading "v" and normalize absence to 0.0.0 so the version test
+      # never sees an empty string (ansible-core 2.14 rejects that).
+      ansible.builtin.shell: |
+        v="$(pnpm --version 2>/dev/null || true)"
+        printf '%s' "${v#v}"
+        [ -n "$v" ] || echo 0.0.0
+      register: pnpm_detect
+      changed_when: false
+      tags: [dsh]
+
+    - name: Install pnpm 10 (dsh plugin add forwards to pnpm)
+      # dsh plugin add runs `pnpm` inside the profile directory; the devcontainer
+      # node feature ships npm only. pnpm >= 10 is the plugin's requirement.
+      ansible.builtin.shell: npm install -g pnpm@10
+      when: pnpm_detect.stdout is version('10.0.0', '<')
+      tags: [dsh]
+
+    # ------------------------------------------------------------------ plugin
+    # pnpm >= 11 blocks build scripts of git-hosted dependencies
+    # (ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED) and prints the exact allowBuilds
+    # key it wants: "name@<tarball-url-with-commit-sha>". That key changes
+    # with every plugin release, so the remedy is PARSED from the failed
+    # install output instead of being hardcoded — the playbook stays
+    # repeatable across plugin updates. (pnpm 10 needs no remedy: git-dep
+    # prepare scripts run unconditionally; verified empirically both ways.)
+    - name: Check whether the plugin is installed AND built in the profile
+      # package.json listing the dep alone is not enough — an interrupted
+      # install can leave it listed but unbuilt. Require lib/index.js too,
+      # so a broken half-state self-heals on the next playbook run.
+      ansible.builtin.shell: >-
+        grep -q '"{{ dsh_plugin_package }}"' "{{ dsh_profile_dir }}/package.json" 2>/dev/null
+        && test -f "{{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js"
+      register: plugin_installed
+      failed_when: false
+      changed_when: false
+      tags: [plugin]
+
+    - name: Install dsh-prime-orchestrator into the web profile
+      when: plugin_installed.rc != 0
+      block:
+        - name: Add the plugin to the profile (first attempt)
+          # Expected failure mode on pnpm >= 11: the build-script block. The
+          # output (incl. the remedy key) lands in the ansible log + the
+          # /tmp log file the remedy task parses.
+          ansible.builtin.shell: |
+            dsh plugin --profile {{ dsh_profile }} add {{ dsh_plugin_spec }} \
+              >/tmp/prime-stack-plugin-add.log 2>&1
+            rc=$?
+            cat /tmp/prime-stack-plugin-add.log >&2
+            exit $rc
+          register: plugin_add_first
+          failed_when: false
+          changed_when: plugin_add_first.rc == 0
+
+        - name: Merge the allowBuilds key pnpm demands into the profile workspace
+          # No-op when the first add succeeded (pnpm 10) or the key is
+          # already present. Quoted yaml keys: name@url contains ':' and '/'.
+          ansible.builtin.shell: |
+            set -e
+            file="{{ dsh_profile_dir }}/pnpm-workspace.yaml"
+            keys="$(sed -n '/^allowBuilds:/,$p' /tmp/prime-stack-plugin-add.log 2>/dev/null \
+                    | grep -E ': true$' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*: true$//' || true)"
+            [ -n "$keys" ] || { echo "no-remedy"; exit 0; }
+            [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
+            changed=no
+            for key in $keys; do
+              grep -qF "\"$key\": true" "$file" && continue
+              if grep -q '^allowBuilds:' "$file"; then
+                ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
+                sed -i "${ln}a\\  \"${key}\": true" "$file"
+              else
+                printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
+              fi
+              changed=yes
+            done
+            echo "$changed"
+          register: allowbuilds_fix
+          changed_when: allowbuilds_fix.stdout is search('yes')
+          when: plugin_add_first.rc != 0
+
+        - name: Retry the plugin add after allowing the build
+          ansible.builtin.shell: |
+            dsh plugin --profile {{ dsh_profile }} add {{ dsh_plugin_spec }} \
+              >/tmp/prime-stack-plugin-add.log 2>&1
+            rc=$?
+            cat /tmp/prime-stack-plugin-add.log >&2
+            exit $rc
+          register: plugin_add_retry
+          failed_when: false
+          changed_when: plugin_add_retry.rc == 0
+          when: plugin_add_first.rc != 0
+
+        - name: Verify the plugin's built artifact
+          ansible.builtin.stat:
+            path: "{{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js"
+          register: plugin_built
+
+        - name: Fail when the plugin did not install and build
+          ansible.builtin.fail:
+            msg: >-
+              dsh plugin add did not produce
+              {{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js
+              (first rc={{ plugin_add_first.rc | default(-1) }},
+              retry rc={{ plugin_add_retry.rc | default(-1) }}). Inspect
+              /tmp/prime-stack-plugin-add.log and the pnpm output above; the
+              usual causes are a still-blocked build (allowBuilds) or missing
+              network access to github.com.
+          when: not (plugin_built.stat.exists | default(false))
+      tags: [plugin]
+
+    # ------------------------------------------------------------------ agent
+    # Installed BEFORE the preset warm boot: the orchestration engine in the
+    # booted profile looks for the prime-agent binary at boot (config `bin`).
+    - name: Detect prime-agent CLI
+      ansible.builtin.shell: command -v prime-agent >/dev/null 2>&1 || [ -x "{{ prime_agent_bin }}" ]
+      register: prime_agent_detect
+      failed_when: false
+      changed_when: false
+      tags: [agent]
+
+    - name: Install prime-agent CLI (official installer, self-contained)
+      # Non-interactive in a TTY-less shell: the installer's prompt helper
+      # falls back to stdin/EOF and takes the defaults. Installs to
+      # ~/.local/bin (bridged into PATH by the env tag).
+      ansible.builtin.shell: curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+      when: prime_agent_detect.rc != 0
+      tags: [agent]
+
+    # ------------------------------------------------------------------ preset
+    # The plugin materializes the `prime-orchestrator` agent preset into
+    # $DSH_HOME/.agent-presets/prime-orchestrator/ at HOST BOOT (verified in the
+    # plugin's src/index.ts: apply() -> materializePresetOnBoot(ctx), called for
+    # every booted profile). `dsh plugin` is only a pnpm forwarder and never
+    # boots the host, so one short-lived `dsh web` boot is the cheap trigger.
+    # Never hand-copy preset files — that bypasses the plugin's sha256 marker
+    # semantics (user edits are preserved by the marker, not by file presence).
+    - name: Check for an already-materialized prime-orchestrator preset
+      ansible.builtin.stat:
+        path: "{{ preset_dir }}/preset.yml"
+      register: preset_file
+      tags: [preset]
+
+    - name: Warm-boot the web profile once to materialize the preset
+      # --port 0: the OS picks a free port (no clash with anything).
+      # --no-open: dsh 0.1.1-rc.2 opens the Web UI in a browser by default —
+      # pointless (and noisy) headless. timeout sends SIGTERM, which dsh
+      # treats as an ordinary stop (exit 0).
+      ansible.builtin.shell: timeout 60 dsh web --port 0 --host 127.0.0.1 --no-open >/tmp/dsh-warmboot.log 2>&1 || true
+      when: not preset_file.stat.exists
+      tags: [preset]
+
+    - name: Wait for the preset to materialize (up to 90s)
+      ansible.builtin.shell: |
+        for i in $(seq 1 90); do
+          [ -f "{{ preset_dir }}/preset.yml" ] && exit 0
+          sleep 1
+        done
+        exit 1
+      register: preset_wait
+      failed_when: false
+      changed_when: false
+      when: not preset_file.stat.exists
+      tags: [preset]
+
+    - name: Fail when the preset did not materialize
+      ansible.builtin.fail:
+        msg: >-
+          {{ preset_dir }}/preset.yml was not materialized within 90s of a warm
+          boot. Check /tmp/dsh-warmboot.log and that
+          'dsh web' boots cleanly by hand. Note: an existing preset the user
+          EDITED is intentionally preserved (marker semantics) — this task only
+          fails when no preset exists at all.
+      when:
+        - not preset_file.stat.exists
+        - preset_wait.rc | default(1) != 0
+      tags: [preset]
+
+    # ------------------------------------------------------------------ env
+    - name: Bridge PATH and Cloudflare env into login shells
+      # The plugin's llm-cf-provider + cf-tools read CLOUDFLARE_AI_TOKEN and
+      # CF_ACCOUNT_ID. Codespace secrets only inject CLOUDFLARE_API_KEY /
+      # CLOUDFLARE_ACCOUNT_ID, so resolve at SHELL time with :- fallbacks —
+      # the bridge works no matter which pair is set. Marker-bounded block =
+      # idempotent.
+      ansible.builtin.blockinfile:
+        path: "{{ item }}"
+        marker_begin: "# >>> dsh-prime-stack bootstrap >>>"
+        marker_end: "# <<< dsh-prime-stack bootstrap <<<"
+        block: |
+          export PATH="$HOME/.local/bin:$PATH"
+          export CLOUDFLARE_AI_TOKEN="${CLOUDFLARE_AI_TOKEN:-${CLOUDFLARE_API_KEY:-}}"
+          export CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:-}}"
+        create: true
+        mode: "0644"
+      loop:
+        - "{{ prime_home }}/.profile"
+        - "{{ prime_home }}/.bashrc"
+      tags: [env]
+
+    # ------------------------------------------------------------------ dsh-config
+    - name: Check for an existing dsh settings.yaml
+      ansible.builtin.stat:
+        path: "{{ dsh_settings }}"
+      register: dsh_settings_stat
+      tags: [dsh-config]
+
+    - name: Back up the existing dsh settings.yaml before any overwrite
+      ansible.builtin.copy:
+        src: "{{ dsh_settings }}"
+        dest: "{{ dsh_settings }}.pre-prime-stack.bak"
+        remote_src: true
+        mode: "0600"
+      when:
+        - cf_secrets_present | bool
+        - dsh_settings_stat.stat.exists
+      tags: [dsh-config]
+
+    - name: Note that the existing dsh settings.yaml is left untouched
+      ansible.builtin.debug:
+        msg: >-
+          [prime-stack] {{ dsh_settings }} already exists — left untouched
+          (backup at {{ dsh_settings }}.pre-prime-stack.bak). Re-run with
+          -e prime_stack_force_settings=true to replace it with the template.
+      when:
+        - cf_secrets_present | bool
+        - dsh_settings_stat.stat.exists
+        - not (prime_stack_force_settings | bool)
+      tags: [dsh-config]
+
+    - name: Write the dsh settings.yaml (CF Workers AI as the default LLM)
+      # Created when missing, or replaced (after the backup above) when
+      # prime_stack_force_settings=true. The account id comes from the env var
+      # at runtime — never hardcoded.
+      ansible.builtin.copy:
+        content: |
+          # Managed by bootstrapping/ansible/prime-stack.yml — dsh settings for
+          # the prime-orchestrator stack. The Cloudflare account id is
+          # templated from the CLOUDFLARE_ACCOUNT_ID env var at provision time.
+          agent-default-model:
+            provider: cloudflare-workers-ai
+            model: "@cf/zai-org/glm-5.3"
+          agent-presets:
+            default: prime-orchestrator
+          locale:
+            preference: en
+          permission:
+            defaultPreset: danger-full-access
+          llm-pi-ai:
+            providers:
+              cloudflare-workers-ai:
+                displayName: cloudflare-workers-ai
+                apiKeyEnv: CLOUDFLARE_AI_TOKEN
+                api: openai-completions
+                baseURL: https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/ai/v1
+                models:
+                  - id: "@cf/zai-org/glm-5.2"
+                    name: CF Workers AI / GLM-5.2
+                    contextWindow: 262144
+                    maxTokens: 16384
+                  - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
+                    name: CF Workers AI / DeepSeek V4 Flash 0731
+                    contextWindow: 131072
+                    maxTokens: 16384
+                  - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
+                    name: CF Workers AI / DeepSeek V4 Pro 0813
+                    contextWindow: 131072
+                    maxTokens: 16384
+                  - id: "@cf/qwen/qwen3.8-27b"
+                    name: CF Workers AI / Qwen3.8 27B
+                    contextWindow: 262144
+                    maxTokens: 16384
+                  - id: "@cf/moonshotai/kimi-k2.6"
+                    name: CF Workers AI / Kimi K2.6
+                    contextWindow: 262144
+                    maxTokens: 16384
+                  - id: "@cf/moonshotai/kimi-k2.7-code"
+                    name: CF Workers AI / Kimi K2.7 Code
+                    contextWindow: 262144
+                    maxTokens: 16384
+                  - id: "@cf/zai-org/glm-5.3"
+                    name: glm53
+                    contextWindow: 1048576
+                    maxTokens: 256000
+                  - id: "@cf/zai-org/glm-5.3-flash"
+                    name: glm53flash
+                    contextWindow: 1048576
+                    maxTokens: 128000
+        dest: "{{ dsh_settings }}"
+        mode: "0600"
+      when:
+        - cf_secrets_present | bool
+        - (not dsh_settings_stat.stat.exists) or (prime_stack_force_settings | bool)
+      tags: [dsh-config]
+
+    # ------------------------------------------------------------------ prime-config
+    - name: Merge the cloudflare-workers-ai provider into prime-agent models.json
+      # Keyed merge on providers.cloudflare-workers-ai — every other provider in
+      # an existing models.json is preserved verbatim. Prints "changed"/"unchanged".
+      ansible.builtin.shell: |
+        set -e
+        python3 - <<'PYEOF'
+        import json, os, sys
+        path = os.path.expanduser('~/.prime/agent/models.json')
+        provider = json.loads(os.environ['PRIME_PROVIDER_JSON'])
+        doc = {}
+        if os.path.exists(path):
+            with open(path) as f:
+                doc = json.load(f)
+        before = json.dumps(doc.get('providers', {}).get('cloudflare-workers-ai'), sort_keys=True)
+        doc.setdefault('providers', {})['cloudflare-workers-ai'] = provider
+        after = json.dumps(provider, sort_keys=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(doc, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        print('unchanged' if before == after else 'changed')
+        PYEOF
+      args:
+        executable: /bin/bash
+      environment:
+        PRIME_PROVIDER_JSON: "{{ prime_cf_provider | to_json }}"
+      register: prime_models_merge
+      changed_when: prime_models_merge.stdout is search('changed')
+      when: cf_secrets_present | bool
+      tags: [prime-config]
+
+    - name: Merge the Cloudflare API key into prime-agent auth.json
+      # The key is read straight from the process environment by python3 and
+      # written with mode 0600 — no_log keeps it (and any accidental output)
+      # out of the ansible log.
+      ansible.builtin.shell: |
+        set -e
+        python3 - <<'PYEOF'
+        import json, os
+        key = os.environ.get('CLOUDFLARE_API_KEY', '')
+        if not key:
+            raise SystemExit('CLOUDFLARE_API_KEY missing from the environment')
+        path = os.path.expanduser('~/.prime/agent/auth.json')
+        doc = {}
+        if os.path.exists(path):
+            with open(path) as f:
+                doc = json.load(f)
+        before = json.dumps(doc.get('cloudflare-workers-ai'), sort_keys=True)
+        entry = {'type': 'api_key', 'key': key}
+        doc['cloudflare-workers-ai'] = entry
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(doc, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        print('unchanged' if before == json.dumps(entry, sort_keys=True) else 'changed')
+        PYEOF
+      args:
+        executable: /bin/bash
+      register: prime_auth_merge
+      changed_when: prime_auth_merge.stdout is search('changed')
+      no_log: true
+      when: cf_secrets_present | bool
+      tags: [prime-config]
+
+    - name: Merge the Cloudflare defaults into prime-agent settings.json
+      # Sets defaultProvider/defaultModel/defaultThinkingLevel and merges the
+      # cloudflare-workers-ai model ids INTO the existing enabledModels list
+      # (union — other enabled models stay enabled). All other keys preserved.
+      ansible.builtin.shell: |
+        set -e
+        python3 - <<'PYEOF'
+        import json, os
+        path = os.path.expanduser('~/.prime/agent/settings.json')
+        doc = {}
+        if os.path.exists(path):
+            with open(path) as f:
+                doc = json.load(f)
+        cf_models = json.loads(os.environ['PRIME_CF_MODELS_JSON'])
+        before = json.dumps({
+            'defaultProvider': doc.get('defaultProvider'),
+            'defaultModel': doc.get('defaultModel'),
+            'defaultThinkingLevel': doc.get('defaultThinkingLevel'),
+            'enabledModels': sorted(doc.get('enabledModels') or []),
+        }, sort_keys=True)
+        doc['defaultProvider'] = 'cloudflare-workers-ai'
+        doc['defaultModel'] = '@cf/zai-org/glm-5.3'
+        doc['defaultThinkingLevel'] = 'high'
+        merged = list(doc.get('enabledModels') or [])
+        for m in cf_models:
+            if m not in merged:
+                merged.append(m)
+        doc['enabledModels'] = merged
+        after = json.dumps({
+            'defaultProvider': doc['defaultProvider'],
+            'defaultModel': doc['defaultModel'],
+            'defaultThinkingLevel': doc['defaultThinkingLevel'],
+            'enabledModels': sorted(doc['enabledModels']),
+        }, sort_keys=True)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(doc, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, path)
+        os.chmod(path, 0o600)
+        print('unchanged' if before == after else 'changed')
+        PYEOF
+      args:
+        executable: /bin/bash
+      environment:
+        PRIME_CF_MODELS_JSON: "{{ prime_cf_enabled_models | to_json }}"
+      register: prime_settings_merge
+      changed_when: prime_settings_merge.stdout is search('changed')
+      when: cf_secrets_present | bool
+      tags: [prime-config]
+
+    # ------------------------------------------------------------------ secrets
+    - name: Provision runtime secrets from the Bitwarden vault (never fatal)
+      # Same contract as .devcontainer/post-create.sh: exit 2 (credentials not
+      # configured) is a warning; any other non-zero is a warning too — secrets
+      # must never break the stack. bw-provision.sh itself never echoes values.
+      ansible.builtin.command:
+        cmd: bash "{{ tv_workspace }}/browser-debug/secrets/bw-provision.sh"
+        chdir: "{{ tv_workspace }}"
+      register: bw_provision
+      failed_when: false
+      changed_when: bw_provision.rc == 0
+      tags: [secrets]
+
+    - name: Warn when Bitwarden secrets were not provisioned
+      ansible.builtin.debug:
+        msg: >-
+          [prime-stack] WARN: secrets not provisioned (bw-provision exit
+          {{ bw_provision.rc }} — set BW_EMAIL / BW_PASSWORD, or BW_CLIENTID /
+          BW_CLIENTSECRET, as codespace secrets; see
+          browser-debug/secrets/README.md). The stack installs and runs
+          without them.
+      when: bw_provision.rc != 0
+      tags: [secrets]
+
+    # ------------------------------------------------------------------ summary
+    - name: Prime stack summary
+      ansible.builtin.debug:
+        msg:
+          - "dsh CLI: {{ 'installed ' + (dsh_detect.stdout | trim) if dsh_detect.stdout != 'MISSING' else 'FAILED to install' }}"
+          - "plugin {{ dsh_plugin_package }}: {{ 'present in profile ' ~ dsh_profile if (plugin_installed.rc | default(1)) == 0 or ((plugin_add_retry.rc | default(1)) == 0) else 'FAILED' }}"
+          - "preset prime-orchestrator: {{ 'materialized' if (preset_file.stat.exists | default(false)) or ((preset_wait.rc | default(1)) == 0) else 'NOT materialized' }}"
+          - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 else 'FAILED to install' }}"
+          - "CF model config: {{ 'written' if (cf_secrets_present | bool) else 'SKIPPED (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set)' }}"
+          - "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace"
+      tags: [always]

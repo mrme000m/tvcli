@@ -15,16 +15,19 @@
   "containerEnv": {
     "DISPLAY": ":99"
   },
-  "forwardPorts": [5900, 6080, 8765],
+  "forwardPorts": [5900, 6080, 8765, 3081],
   "portsAttributes": {
     "5900": { "label": "VNC (x11vnc)" },
     "6080": { "label": "noVNC web viewer" },
-    "8765": { "label": "tvcli HTTP server (/hunt multi-symbol)" }
+    "8765": { "label": "tvcli HTTP server (/hunt multi-symbol)" },
+    "3081": { "label": "dsh web GUI (Prime fleet column)" }
   },
   "secrets": {
     "BW_CLIENTID": { "description": "Bitwarden API-key client id (vault: keys.00m.indevs.in)" },
     "BW_CLIENTSECRET": { "description": "Bitwarden API-key client secret" },
-    "BW_PASSWORD": { "description": "Bitwarden master password — used non-interactively by browser-debug/secrets/bw-provision.sh" }
+    "BW_PASSWORD": { "description": "Bitwarden master password — used non-interactively by browser-debug/secrets/bw-provision.sh" },
+    "CLOUDFLARE_ACCOUNT_ID": { "description": "Cloudflare account id for Workers AI models — dsh + prime-agent LLM provider" },
+    "CLOUDFLARE_API_KEY": { "description": "Cloudflare Workers AI API token" }
   },
   "customizations": {
     "vscode": {

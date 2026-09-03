@@ -35,6 +35,33 @@ if [ -f "$WS/.tvcli-autoserve" ] && [ -x "$WS/tvcli" ] && [ -f "$WS/accounts.jso
     || echo "tvcli serve --daemon failed — inspect $WS/.tvcli-server.log"
 fi
 
+# Optional: auto-start the dsh Web GUI — the Prime fleet column with the
+# prime-orchestrator preset (dsh + dsh-prime-orchestrator plugin, provisioned by
+# bootstrapping/ansible/prime-stack.yml). Needs the Cloudflare credentials
+# (the LLM provider) — from the codespace secrets, or, failing those, the
+# bw-provisioned runtime file (sourced, never echoed). Enable once per
+# workspace with:  touch .dsh-autoweb
+if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
+  [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ -n "${CLOUDFLARE_API_KEY:-}" ] || {
+    set -a; [ -f "$WS/browser-debug/secrets/runtime/opencode.env" ] && . "$WS/browser-debug/secrets/runtime/opencode.env"; set +a
+  }
+  if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ -n "${CLOUDFLARE_API_KEY:-}" ]; then
+    export CLOUDFLARE_AI_TOKEN="$CLOUDFLARE_API_KEY"
+    export CF_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
+    if ! curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1; then
+      (cd "$HOME" && setsid nohup dsh web --port 3081 --host 0.0.0.0 --no-open >/tmp/dsh-web.log 2>&1 &)
+      for i in $(seq 1 60); do curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 && break; sleep 1; done
+      curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 \
+        && echo "dsh web ready: http://localhost:3081 (Prime fleet column in the Web GUI; preset: prime-orchestrator)" \
+        || echo "dsh web failed to start — inspect /tmp/dsh-web.log"
+    else
+      echo "dsh web already running (:3081)"
+    fi
+  else
+    echo "dsh web autostart: CLOUDFLARE credentials not in env — skipping (set codespace secrets or run bw-provision)"
+  fi
+fi
+
 # Optional: pre-launch the headful CloakBrowser on the Xvfb display
 # (logged-out; run `node browser-debug/tv.mjs` to authenticate from
 # browser-debug/.env). Enable with:  touch .tv-autobrowser

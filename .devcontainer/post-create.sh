@@ -34,3 +34,20 @@ go build -o tvcli ./cmd/tvcli
 # — the container builds and runs, just without live credentials.
 bash browser-debug/secrets/bw-provision.sh || \
   echo "  [post-create] WARN: secrets not provisioned (set BW_CLIENTID / BW_CLIENTSECRET / BW_PASSWORD as codespace secrets) — see browser-debug/secrets/README.md"
+
+# DSH prime-orchestrator stack (dsh + dsh-prime-orchestrator plugin +
+# prime-agent CLI + CF Workers AI model config). Same non-fatal contract as
+# the secrets step: a failed bootstrap never breaks the container build —
+# re-run inside the codespace with:  bash .devcontainer/post-create.sh
+# CF credentials come from the codespace secrets (CLOUDFLARE_ACCOUNT_ID /
+# CLOUDFLARE_API_KEY); when those are absent from the environment, fall back
+# to the bw-provisioned runtime file above (values are sourced, never echoed).
+# --skip-tags secrets: bw-provision already ran above in this script.
+set -a; [ -f browser-debug/secrets/runtime/opencode.env ] && . browser-debug/secrets/runtime/opencode.env; set +a
+ansible-playbook bootstrapping/ansible/prime-stack.yml \
+  -i localhost, \
+  -e ansible_connection=local \
+  -e ansible_python_interpreter=/usr/bin/python3 \
+  -e tv_workspace="$WS" \
+  --skip-tags secrets \
+  || echo "  [post-create] WARN: prime-stack bootstrap failed — re-run inside the codespace with: bash .devcontainer/post-create.sh"
