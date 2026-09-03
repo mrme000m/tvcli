@@ -218,9 +218,10 @@
     - name: Start Xvfb virtual display
       # pgrep -x (exact process name): pgrep -f would match this task's own
       # shell (the script text contains the pattern) and no-op forever.
+      # setsid: survive the launching session's teardown.
       ansible.builtin.shell: |
         if ! pgrep -x Xvfb >/dev/null; then
-          nohup Xvfb {{ xvfb_display }} -screen 0 {{ xvfb_screen }} >/tmp/xvfb.log 2>&1 &
+          setsid nohup Xvfb {{ xvfb_display }} -screen 0 {{ xvfb_screen }} >/tmp/xvfb.log 2>&1 &
         fi
         for i in $(seq 1 20); do pgrep -x Xvfb >/dev/null && break; sleep 0.5; done
         pgrep -x Xvfb >/dev/null || { echo "Xvfb failed to start:"; cat /tmp/xvfb.log; exit 1; }
@@ -231,7 +232,7 @@
     - name: Start x11vnc export
       ansible.builtin.shell: |
         if ! pgrep -x x11vnc >/dev/null; then
-          nohup x11vnc -display {{ xvfb_display }} -forever -nopw -rfbport {{ x11vnc_port }} >/tmp/x11vnc.log 2>&1 &
+          setsid nohup x11vnc -display {{ xvfb_display }} -forever -nopw -rfbport {{ x11vnc_port }} >/tmp/x11vnc.log 2>&1 &
         fi
         for i in $(seq 1 20); do pgrep -x x11vnc >/dev/null && break; sleep 0.5; done
         pgrep -x x11vnc >/dev/null || { echo "x11vnc failed to start:"; cat /tmp/x11vnc.log; exit 1; }
