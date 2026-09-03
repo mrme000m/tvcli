@@ -797,12 +797,13 @@
     # ------------------------------------------------------------------ extras/mobile
     - name: Run the dsh-mobile setup (pairing CA, scaffolds, control)
       # Official CLI setup: creates $DSH_HOME/mobile-access/{tls CA, mobile.css,
-      # mobile.js, extensions}, enables the gateway (control.json). Idempotent
+      # mobile.js, extensions}, enables the gateway (control.json). The CLI's
+      # setup is natively non-interactive (no --yes flag exists). Idempotent
       # guard: the CA is the expensive artifact.
       ansible.builtin.shell: |
         set -e
         [ -f "{{ dsh_home }}/mobile-access/tls/ca.pem" ] && { echo unchanged; exit 0; }
-        dsh plugin --profile {{ dsh_profile }} exec dsh-mobile setup --yes \
+        dsh plugin --profile {{ dsh_profile }} exec dsh-mobile setup \
           --port {{ mobile_gateway_port }} --dsh-port 3081 </dev/null
         echo changed
       args:
