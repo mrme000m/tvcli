@@ -1,37 +1,26 @@
 ---
-# prime-stack.yml — install and configure the DSH prime-orchestrator stack in
-# the tvcli devcontainer/codespace, so the dsh-prime-orchestrator plugin +
-# prime-agent CLI become the system's prime intelligence and agent fleet.
+# prime-stack.yml — orchestrator for the DSH prime-orchestrator stack in the
+# tvcli devcontainer/codespace.
 #
-# Components (each independently runnable via --tags):
-#   dsh          @deepseek-ai/dsh CLI, EXACT version 0.1.1-rc.2 (plugin
-#                compatibility table: 0.1.0-rc.7 / 0.1.1-rc.2 supported,
-#                0.1.2-alpha NOT) + pnpm >= 10 (plugin management forwarder)
-#   plugin       dsh-prime-orchestrator into profile `web` (github spec),
-#                including the pnpm-10 allowBuilds remedy + one retry
-#   preset       warm-boot the web profile once so the plugin materializes the
-#                `prime-orchestrator` agent preset (~/.dsh/.agent-presets/)
-#   agent        prime-agent CLI (official installer, ~/.local/bin)
-#   env          PATH + Cloudflare env bridge in ~/.profile and ~/.bashrc
-#   dsh-config   ~/.dsh/settings.yaml (CF Workers AI as the default LLM)
-#   prime-config ~/.prime/agent/{models,auth,settings}.json (merged, never
-#                destroying other providers/keys)
-#   extras/plugins  web-profile parity with the production Mac: dsh-mnemon,
-#                pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client,
-#                pi-agent-memory + the vendored dsh-restart (plugins/)
-#   extras/mnemon  mnemon settings + profile patch row (memory in the web UI)
-#   extras/mobile  dsh-mobile gateway setup (mobile access in the web UI;
-#                codespace: HTTP gateway behind the forwarded https origin)
-#   extras/mcp     home-level cordis patch mounting code-review-graph MCP
-#   fleet        the specialist agent fleet — vendored presets under
-#                bootstrapping/presets/ (tv-scout, tv-investigator, qd-analyst,
-#                wt-investigator) installed with marker semantics, plus the
-#                grid-trading wiring: the wundertrading MCP row in the web
-#                profile (keys read from the vault at provision time — never
-#                committed), the wt-tools cloak-dir override, the tvcli
-#                multi-account autoserve marker and the QuantDinger gateway
-#                env bridge. Loop blueprint: bootstrapping/docs/grid-fleet.md
-#   secrets      browser-debug/secrets/bw-provision.sh (never fatal)
+# ARCHITECTURE (v2): Ansible owns what it is good at — apt packages,
+# orchestration, tags, preflight — and every install/config step is
+# delegated to the modular, unit-tested python engine:
+#
+#     bootstrapping/python/prime_stack/        (importable library + stages)
+#     bootstrapping/python/bin/prime-stack      (standalone runner, no ansible)
+#
+# Each playbook task below runs ONE engine stage and parses its JSON
+# envelope (always the LAST stdout line; human logs go to stderr):
+#
+#     {"stage": ..., "changed": ..., "failed": ..., "summary_line": ...}
+#
+# Benefits over the v1 single-file playbook: the pnpm allowBuilds remedy,
+# JSON keyed-merges, fleet marker semantics and the settings.yaml catalog
+# are pure functions with unit tests (bootstrapping/python/tests/); the
+# engine is reusable standalone (`prime-stack --dry-run all`); secrets
+# never appear in task arguments (stages read them straight from the
+# process env), so no_log is needed nowhere; `ansible-playbook --check`
+# maps to engine dry-run and reports would-change faithfully.
 #
 # Run (inside the codespace, from the repo root):
 #   ansible-playbook bootstrapping/ansible/prime-stack.yml \
@@ -39,14 +28,19 @@
 #     -e ansible_python_interpreter=/usr/bin/python3 \
 #     -e tv_workspace="$PWD"
 #
-# Contract:
-#   - CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_KEY (repo codespace secrets) gate
-#     every config-writing task; missing → warn + skip, never hard-fail.
-#     Pass -e prime_stack_strict=true to make missing secrets fatal instead.
-#   - The Cloudflare account id is ALWAYS templated at runtime from the env
-#     var; nothing is hardcoded. Auth values never appear in logs (no_log).
-#   - Idempotent: every task checks before it writes (marker-bounded shell
-#     blocks, skip-when-present guards, JSON merges keyed on the provider).
+# Knobs (unchanged from v1):
+#   -e prime_stack_strict=true         missing CF secrets are fatal
+#   -e prime_stack_force_settings=true  replace ~/.dsh/settings.yaml (after backup)
+#
+# Tags (unchanged from v1): dsh, plugin, preset, agent, env, dsh-config,
+# prime-config, extras (plugins/mnemon/mobile/mcp), secrets, fleet, always.
+#
+# Contract (unchanged from v1):
+#   - CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_KEY gate the config-writing
+#     stages (skip + warn, fatal under strict). The account id is templated
+#     at runtime from the env var; auth values never appear in logs.
+#   - Idempotent: a second run does nothing; a half-installed state
+#     self-heals.
 #   - ansible-core 2.14 compatible (Debian bookworm ansible 7.7), builtin
 #     modules only.
 
@@ -57,137 +51,32 @@
   vars:
     # --- knobs (override with -e) -------------------------------------------
     prime_stack_strict: false        # true: missing CF secrets are fatal
-    prime_stack_force_settings: false # true: overwrite an existing ~/.dsh/settings.yaml (after backup)
-    tv_workspace: "{{ playbook_dir | dirname | dirname }}" # repo root (go/)
+    prime_stack_force_settings: false # true: replace an existing ~/.dsh/settings.yaml (after backup)
+    tv_workspace: "{{ playbook_dir | dirname | dirname }}" # repo root
 
-    # --- fixed component identities ----------------------------------------
-    dsh_version: "0.1.1-rc.2"        # EXACTLY this (plugin compat table)
-    dsh_profile: web
-    dsh_plugin_spec: github:mrme000m/dsh-prime-orchestrator
-    dsh_plugin_package: dsh-prime-orchestrator
-    prime_agent_bin: "{{ lookup('env', 'HOME') }}/.local/bin/prime-agent"
+    # --- engine location + shared stage environment ------------------------
+    prime_py: "{{ playbook_dir | dirname }}/python"
+    prime_stage_env:
+      PYTHONPATH: "{{ prime_py }}"
+      TV_WORKSPACE: "{{ tv_workspace }}"
+      PRIME_STACK_STRICT: "{{ 'true' if prime_stack_strict | bool else 'false' }}"
+      PRIME_STACK_FORCE_SETTINGS: "{{ 'true' if prime_stack_force_settings | bool else 'false' }}"
+      # ansible --check maps to engine dry-run: stage tasks still execute
+      # (check_mode: false) but perform no writes and run no installers.
+      PRIME_STACK_DRY_RUN: "{{ 'true' if ansible_check_mode else 'false' }}"
 
-    # Web-profile parity with the production Mac (~/.dsh/profiles/web):
-    # dsh-mnemon (memory), pi2dsh (Pi extension bridge), dsh-mobile (mobile
-    # access), @deepseek-ai/dsh-mcp-client + pi-agent-memory (plain deps),
-    # dsh-restart (vendored at plugins/dsh-restart — /restart reloads plugins
-    # without a manual stop). Versions pinned to the Mac's working set.
-    dsh_parity_plugins:
-      - { package: dsh-mnemon, spec: "dsh-mnemon@0.3.2" }
-      - { package: pi2dsh, spec: "pi2dsh@0.19.0" }
-      - { package: dsh-mobile, spec: "dsh-mobile@0.2.0" }
-      - { package: "@deepseek-ai/dsh-mcp-client", spec: "@deepseek-ai/dsh-mcp-client@0.0.1-rc.1" }
-      - { package: pi-agent-memory, spec: "pi-agent-memory@0.3.4" }
-      - { package: dsh-restart, spec: "./plugins/dsh-restart" }
-    # Registry packages whose native build scripts pnpm must be allowed to
-    # run (dsh-mobile deps; verified set from the production Mac profile).
-    dsh_native_build_keys: [node-pty, ssh2, cloudflared, cpu-features]
-    # dsh-mobile gateway: loopback HTTP behind the codespace https forward.
-    mobile_gateway_port: 3443
-
-    # --- runtime locations ---------------------------------------------------
-    prime_home: "{{ lookup('env', 'HOME') }}"
-    dsh_home: "{{ lookup('env', 'DSH_HOME') | default(lookup('env', 'HOME') ~ '/.dsh', true) }}"
-    dsh_settings: "{{ dsh_home }}/settings.yaml"
-    dsh_profile_dir: "{{ dsh_home }}/profiles/{{ dsh_profile }}"
-    preset_root: "{{ dsh_home }}/.agent-presets"
-    preset_dir: "{{ preset_root }}/prime-orchestrator"
-
-    # --- fleet: specialist agent presets + grid-trading wiring ---------------
-    # Consolidated from the production Mac's ~/.dsh/.agent-presets/ (Mac paths
-    # in the vendored copies are @TV_WORKSPACE@ / @CLOAK_DIR@ placeholders,
-    # resolved at install time). Together the fleet implements the autonomous
-    # grid-trading loop (see bootstrapping/docs/grid-fleet.md):
-    #   qd-analyst      research (gateway klines/news + tvcli skills)
-    #   tv-investigator screen (tvcli /hunt fan-out across the accounts.json
-    #                   multi-account cookie pool + network-API investigation)
-    #   wt-investigator configure (WunderTrading bots — Grid/DCA/Signal/
-    #                   Multi-Pair Grid — via wt CLI, REST, MCP, headful UI)
-    #   tv-scout        confirm (visual confluence on the live chart)
-    #   prime-orchestrator  coordinate/manage (fleet + prime-agent workers)
-    dsh_fleet_presets: [tv-scout, tv-investigator, qd-analyst, wt-investigator]
-    fleet_managed_by: prime-stack-bootstrap
-    fleet_preset_marker: .plugin-managed.json
-    fleet_preset_src: "{{ playbook_dir | dirname }}/presets"
-    fleet_preset_root: "{{ preset_root }}"
-    # tvcli multi-account HTTP server (POST /hunt fan-out over the account
-    # pool) — autostart only when the accounts.json registry is provisioned.
-    fleet_enable_tvcli_autoserve: true
-    # WunderTrading runtime env (bw-provision, vault item wundertrading-api —
-    # WT_API_KEY/WT_API_SECRET): the source for the mcp-wundertrading row.
-    # Cloak dir: browser-debug in this workspace hosts bdg + launch.mjs.
-    wt_runtime_env: "{{ tv_workspace }}/browser-debug/secrets/runtime/wt.env"
-    wt_cloak_dir: "{{ tv_workspace }}/browser-debug"
-    wt_mcp_url: "https://wundertrading.com:2083/mcp"
-    # QuantDinger gateway env for qd-analyst (optional: when QD_AGENT_TOKEN is
-    # unset the gateway auto-mints a short-lived read-only token for known
-    # users — the bridge only wires the file when it exists).
-    qd_runtime_env: "{{ tv_workspace }}/browser-debug/secrets/runtime/qd-agent.env"
-    web_profile_patch: "{{ dsh_profile_dir }}/cordis.patch.yml"
-
-    # --- secrets: only presence is ever inspected, never the values ---------
+    # --- preflight (visibility only; stages re-check) ------------------------
     cf_account_id: "{{ lookup('env', 'CLOUDFLARE_ACCOUNT_ID') }}"
     cf_api_key: "{{ lookup('env', 'CLOUDFLARE_API_KEY') }}"
     cf_secrets_present: "{{ (cf_account_id | length) > 0 and (cf_api_key | length) > 0 }}"
 
-    # Cloudflare Workers AI model catalog (verified against the working
-    # production config; per-model caps copied verbatim).
-    prime_cf_models:
-      - id: "@cf/zai-org/glm-5.2"
-        name: CF Workers AI / GLM-5.2
-        contextWindow: 262144
-        maxTokens: 16384
-        reasoning: true
-      - id: "@cf/zai-org/glm-5.3"
-        name: CF Workers AI / GLM-5.3
-        contextWindow: 1048576
-        maxTokens: 131072
-        reasoning: true
-      - id: "@cf/zai-org/glm-5.3-flash"
-        name: CF Workers AI / GLM-5.3 Flash
-        contextWindow: 1048576
-        maxTokens: 131072
-        reasoning: true
-      - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
-        name: CF Workers AI / DeepSeek V4 Flash 0731
-        contextWindow: 131072
-        maxTokens: 16384
-      - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
-        name: CF Workers AI / DeepSeek V4 Pro 0813
-        contextWindow: 131072
-        maxTokens: 16384
-      - id: "@cf/qwen/qwen3.8-27b"
-        name: CF Workers AI / Qwen3.8 27B
-        contextWindow: 262144
-        maxTokens: 16384
-      - id: "@cf/moonshotai/kimi-k2.6"
-        name: CF Workers AI / Kimi K2.6
-        contextWindow: 262144
-        maxTokens: 16384
-      - id: "@cf/moonshotai/kimi-k2.7-code"
-        name: CF Workers AI / Kimi K2.7 Code
-        contextWindow: 262144
-        maxTokens: 16384
-        reasoning: true
-
-    # prime-agent models.json provider fragment (account id injected at runtime).
-    prime_cf_provider:
-      type: api_key
-      baseUrl: "https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/ai/v1"
-      api: openai-completions
-      models: "{{ prime_cf_models }}"
-
-    # Prefix, not a backreference: re.sub('^', 'prefix', id) is escape-proof
-    # across jinja/yaml quoting layers.
-    prime_cf_enabled_models: "{{ prime_cf_models | map(attribute='id') | map('regex_replace', '^', 'cloudflare-workers-ai/') | list }}"
-
   tasks:
-    # ------------------------------------------------------------------ preflight
-    - name: Warn when Cloudflare secrets are missing (config tasks will be skipped)
+    # ---------------------------------------------------------------- preflight
+    - name: Warn when Cloudflare secrets are missing (config stages will be skipped)
       ansible.builtin.debug:
         msg: >-
           [prime-stack] WARN: CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set —
-          dsh/prime-agent still install, but model-config tasks are skipped.
+          dsh/prime-agent still install, but model-config stages are skipped.
           Set them as repo codespace secrets, then re-run this playbook.
       when: not (cf_secrets_present | bool)
       tags: [always]
@@ -200,1039 +89,198 @@
         - not (cf_secrets_present | bool)
       tags: [always]
 
+    # ------------------------------------------------------------------ packages
+    # Ansible owns the apt stage: declarative, idempotent package installs the
+    # engine stages depend on (python3-yaml for fleet-patch, curl for the
+    # prime-agent installer, setsid from util-linux, jq for bw-provision).
+    - name: Ensure runtime packages for the prime-stack engine
+      become: true
+      ansible.builtin.apt:
+        name:
+          - python3-yaml
+          - curl
+          - jq
+          - util-linux
+        state: present
+        install_recommends: false
+        cache_valid_time: 3600
+      tags: [packages, always]
+
     # ------------------------------------------------------------------ dsh
-    - name: Detect dsh CLI version
-      # Normalize to "MISSING" so the version test below never sees an empty string.
-      ansible.builtin.shell: dsh --version 2>/dev/null || echo MISSING
-      register: dsh_detect
-      changed_when: false
-      tags: [dsh, always]
-
-    - name: Warn when the installed dsh version differs from the supported one
-      ansible.builtin.debug:
-        msg: >-
-          [prime-stack] WARN: dsh {{ dsh_detect.stdout | trim }} is installed but
-          {{ dsh_version }} is the supported version for dsh-prime-orchestrator
-          (compatibility: 0.1.0-rc.7 / 0.1.1-rc.2 only). Not auto-upgrading.
-      when:
-        - dsh_detect.stdout != 'MISSING'
-        - (dsh_detect.stdout | trim) != dsh_version
-      tags: [dsh, always]
-
-    - name: Install dsh CLI at the exact supported version (npm global)
-      # Self-heal: a crashed npm replace can leave a half-removed global tree
-      # (ENOTEMPTY dirs, no bin symlink). Installing over that fails and
-      # pushes koffi into a cmake source build the container lacks. This
-      # task only runs when the dsh binary is MISSING, so removing the
-      # leftover tree first is always safe — the prebuilt koffi that ships
-      # in the tarball loads without its (npm-blocked) install script.
-      ansible.builtin.shell: |
-        set -e
-        groot="$(npm root -g)"
-        rm -rf "$groot/@deepseek-ai/dsh"
-        npm install -g @deepseek-ai/dsh@{{ dsh_version }}
-      register: dsh_install
-      when: dsh_detect.stdout == 'MISSING'
-      tags: [dsh]
-
-    - name: Detect pnpm version
-      # Strip a leading "v" and normalize absence to 0.0.0 so the version test
-      # never sees an empty string (ansible-core 2.14 rejects that).
-      ansible.builtin.shell: |
-        v="$(pnpm --version 2>/dev/null || true)"
-        printf '%s' "${v#v}"
-        [ -n "$v" ] || echo 0.0.0
-      register: pnpm_detect
-      changed_when: false
-      tags: [dsh]
-
-    - name: Install pnpm 10 (dsh plugin add forwards to pnpm)
-      # dsh plugin add runs `pnpm` inside the profile directory; the devcontainer
-      # node feature ships npm only. pnpm >= 10 is the plugin's requirement.
-      ansible.builtin.shell: npm install -g pnpm@10
-      when: pnpm_detect.stdout is version('10.0.0', '<')
+    - name: "stage: dsh — install the dsh CLI (exact 0.1.1-rc.2) + pnpm >= 10"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack dsh
+      environment: "{{ prime_stage_env }}"
+      register: r_dsh
+      changed_when: r_dsh.stdout_lines and (r_dsh.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [dsh]
 
     # ------------------------------------------------------------------ plugin
-    # pnpm >= 11 blocks build scripts of git-hosted dependencies
-    # (ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED) and prints the exact allowBuilds
-    # key it wants: "name@<tarball-url-with-commit-sha>". That key changes
-    # with every plugin release, so the remedy is PARSED from the failed
-    # install output instead of being hardcoded — the playbook stays
-    # repeatable across plugin updates. (pnpm 10 needs no remedy: git-dep
-    # prepare scripts run unconditionally; verified empirically both ways.)
-    - name: Check whether the plugin is installed AND built in the profile
-      # package.json listing the dep alone is not enough — an interrupted
-      # install can leave it listed but unbuilt. Require lib/index.js too,
-      # so a broken half-state self-heals on the next playbook run.
-      ansible.builtin.shell: >-
-        grep -q '"{{ dsh_plugin_package }}"' "{{ dsh_profile_dir }}/package.json" 2>/dev/null
-        && test -f "{{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js"
-      register: plugin_installed
-      failed_when: false
-      changed_when: false
-      tags: [plugin]
-
-    - name: Install dsh-prime-orchestrator into the web profile
-      when: plugin_installed.rc != 0
-      block:
-        - name: Add the plugin to the profile (first attempt)
-          # Expected failure mode on pnpm >= 11: the build-script block. The
-          # output (incl. the remedy key) lands in the ansible log + the
-          # /tmp log file the remedy task parses.
-          ansible.builtin.shell: |
-            dsh plugin --profile {{ dsh_profile }} add {{ dsh_plugin_spec }} \
-              >/tmp/prime-stack-plugin-add.log 2>&1
-            rc=$?
-            cat /tmp/prime-stack-plugin-add.log >&2
-            exit $rc
-          register: plugin_add_first
-          failed_when: false
-          changed_when: plugin_add_first.rc == 0
-
-        - name: Merge the allowBuilds key pnpm demands into the profile workspace
-          # No-op when the first add succeeded (pnpm 10) or the key is
-          # already present. Quoted yaml keys: name@url contains ':' and '/'.
-          ansible.builtin.shell: |
-            set -e
-            file="{{ dsh_profile_dir }}/pnpm-workspace.yaml"
-            keys="$(sed -n '/^allowBuilds:/,$p' /tmp/prime-stack-plugin-add.log 2>/dev/null \
-                    | grep -E ': true$' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*: true$//' || true)"
-            [ -n "$keys" ] || { echo "no-remedy"; exit 0; }
-            [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
-            changed=no
-            for key in $keys; do
-              grep -qF "\"$key\": true" "$file" && continue
-              if grep -q '^allowBuilds:' "$file"; then
-                ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
-                sed -i "${ln}a\\  \"${key}\": true" "$file"
-              else
-                printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
-              fi
-              changed=yes
-            done
-            echo "$changed"
-          register: allowbuilds_fix
-          changed_when: allowbuilds_fix.stdout is search('yes')
-          when: plugin_add_first.rc != 0
-
-        - name: Retry the plugin add after allowing the build
-          ansible.builtin.shell: |
-            dsh plugin --profile {{ dsh_profile }} add {{ dsh_plugin_spec }} \
-              >/tmp/prime-stack-plugin-add.log 2>&1
-            rc=$?
-            cat /tmp/prime-stack-plugin-add.log >&2
-            exit $rc
-          register: plugin_add_retry
-          failed_when: false
-          changed_when: plugin_add_retry.rc == 0
-          when: plugin_add_first.rc != 0
-
-        - name: Verify the plugin's built artifact
-          ansible.builtin.stat:
-            path: "{{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js"
-          register: plugin_built
-
-        - name: Fail when the plugin did not install and build
-          ansible.builtin.fail:
-            msg: >-
-              dsh plugin add did not produce
-              {{ dsh_profile_dir }}/node_modules/{{ dsh_plugin_package }}/lib/index.js
-              (first rc={{ plugin_add_first.rc | default(-1) }},
-              retry rc={{ plugin_add_retry.rc | default(-1) }}). Inspect
-              /tmp/prime-stack-plugin-add.log and the pnpm output above; the
-              usual causes are a still-blocked build (allowBuilds) or missing
-              network access to github.com.
-          when: not (plugin_built.stat.exists | default(false))
+    - name: "stage: plugin — dsh-prime-orchestrator into profile web (pnpm-11 allowBuilds remedy)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack plugin
+      environment: "{{ prime_stage_env }}"
+      register: r_plugin
+      changed_when: r_plugin.stdout_lines and (r_plugin.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [plugin]
 
     # ------------------------------------------------------------------ agent
-    # Installed BEFORE the preset warm boot: the orchestration engine in the
-    # booted profile looks for the prime-agent binary at boot (config `bin`).
-    - name: Detect prime-agent CLI
-      ansible.builtin.shell: command -v prime-agent >/dev/null 2>&1 || [ -x "{{ prime_agent_bin }}" ]
-      register: prime_agent_detect
-      failed_when: false
-      changed_when: false
-      tags: [agent]
-
-    - name: Install prime-agent CLI (official installer, self-contained)
-      # Downloaded to a file and run under `setsid --wait` with stdin closed.
-      # The installer's prompt helper reads /dev/tty whenever one is attached
-      # (the codespace lifecycle runs commands under a pty) and would hang
-      # forever waiting for a keypress; setsid detaches the controlling
-      # terminal so the helper falls back to stdin, and </dev/null makes every
-      # prompt take its default. --wait keeps ansible blocked until the exit
-      # code is available (setsid would otherwise fork away).
-      ansible.builtin.shell: |
-        curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh -o /tmp/prime-agent-install.sh
-        setsid --wait sh /tmp/prime-agent-install.sh </dev/null
-      register: prime_agent_install
-      when: prime_agent_detect.rc != 0
+    - name: "stage: agent — prime-agent CLI (official installer, pty-hang safe)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack agent
+      environment: "{{ prime_stage_env }}"
+      register: r_agent
+      changed_when: r_agent.stdout_lines and (r_agent.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [agent]
 
     # ------------------------------------------------------------------ preset
-    # The plugin materializes the `prime-orchestrator` agent preset into
-    # $DSH_HOME/.agent-presets/prime-orchestrator/ at HOST BOOT (verified in the
-    # plugin's src/index.ts: apply() -> materializePresetOnBoot(ctx), called for
-    # every booted profile). `dsh plugin` is only a pnpm forwarder and never
-    # boots the host, so one short-lived `dsh web` boot is the cheap trigger.
-    # Never hand-copy preset files — that bypasses the plugin's sha256 marker
-    # semantics (user edits are preserved by the marker, not by file presence).
-    - name: Check for an already-materialized prime-orchestrator preset
-      ansible.builtin.stat:
-        path: "{{ preset_dir }}/preset.yml"
-      register: preset_file
-      tags: [preset]
-
-    - name: Warm-boot the web profile once to materialize the preset
-      # --port 0: the OS picks a free port (no clash with anything).
-      # --no-open: dsh 0.1.1-rc.2 opens the Web UI in a browser by default —
-      # pointless (and noisy) headless. timeout sends SIGTERM, which dsh
-      # treats as an ordinary stop (exit 0).
-      ansible.builtin.shell: timeout 90 dsh web --port 0 --host 127.0.0.1 --no-open >/tmp/dsh-warmboot.log 2>&1 || true
-      when: not preset_file.stat.exists
-      tags: [preset]
-
-    - name: Wait for the preset to materialize (up to 120s)
-      ansible.builtin.shell: |
-        for i in $(seq 1 120); do
-          [ -f "{{ preset_dir }}/preset.yml" ] && exit 0
-          sleep 1
-        done
-        exit 1
-      register: preset_wait
-      failed_when: false
-      changed_when: false
-      when: not preset_file.stat.exists
-      tags: [preset]
-
-    - name: Fail when the preset did not materialize
-      ansible.builtin.fail:
-        msg: >-
-          {{ preset_dir }}/preset.yml was not materialized within 120s of a warm
-          boot. Check /tmp/dsh-warmboot.log and that
-          'dsh web' boots cleanly by hand. Note: an existing preset the user
-          EDITED is intentionally preserved (marker semantics) — this task only
-          fails when no preset exists at all.
-      when:
-        - not preset_file.stat.exists
-        - preset_wait.rc | default(1) != 0
+    - name: "stage: preset — warm-boot the web profile to materialize prime-orchestrator"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack preset
+      environment: "{{ prime_stage_env }}"
+      register: r_preset
+      changed_when: r_preset.stdout_lines and (r_preset.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [preset]
 
     # ------------------------------------------------------------------ env
-    - name: Bridge PATH and Cloudflare env into login shells
-      # The plugin's llm-cf-provider + cf-tools read CLOUDFLARE_AI_TOKEN and
-      # CF_ACCOUNT_ID. Codespace secrets only inject CLOUDFLARE_API_KEY /
-      # CLOUDFLARE_ACCOUNT_ID, so resolve at SHELL time with :- fallbacks —
-      # the bridge works no matter which pair is set. Marker-bounded block =
-      # idempotent.
-      ansible.builtin.blockinfile:
-        path: "{{ item }}"
-        marker_begin: "# >>> dsh-prime-stack bootstrap >>>"
-        marker_end: "# <<< dsh-prime-stack bootstrap <<<"
-        block: |
-          export PATH="$HOME/.local/bin:$PATH"
-          export CLOUDFLARE_AI_TOKEN="${CLOUDFLARE_AI_TOKEN:-${CLOUDFLARE_API_KEY:-}}"
-          export CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:-}}"
-        create: true
-        mode: "0644"
-      loop:
-        - "{{ prime_home }}/.profile"
-        - "{{ prime_home }}/.bashrc"
+    - name: "stage: env — PATH + Cloudflare env bridge in login shells"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack env
+      environment: "{{ prime_stage_env }}"
+      register: r_env
+      changed_when: r_env.stdout_lines and (r_env.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [env]
 
     # ------------------------------------------------------------------ dsh-config
-    - name: Check for an existing dsh settings.yaml
-      ansible.builtin.stat:
-        path: "{{ dsh_settings }}"
-      register: dsh_settings_stat
-      tags: [dsh-config]
-
-    - name: Back up the existing dsh settings.yaml before any overwrite
-      ansible.builtin.copy:
-        src: "{{ dsh_settings }}"
-        dest: "{{ dsh_settings }}.pre-prime-stack.bak"
-        remote_src: true
-        mode: "0600"
-      when:
-        - cf_secrets_present | bool
-        - dsh_settings_stat.stat.exists
-      tags: [dsh-config]
-
-    - name: Note that the existing dsh settings.yaml is left untouched
-      ansible.builtin.debug:
-        msg: >-
-          [prime-stack] {{ dsh_settings }} already exists — left untouched
-          (backup at {{ dsh_settings }}.pre-prime-stack.bak). Re-run with
-          -e prime_stack_force_settings=true to replace it with the template.
-      when:
-        - cf_secrets_present | bool
-        - dsh_settings_stat.stat.exists
-        - not (prime_stack_force_settings | bool)
-      tags: [dsh-config]
-
-    - name: Write the dsh settings.yaml (CF Workers AI as the default LLM)
-      # Created when missing, or replaced (after the backup above) when
-      # prime_stack_force_settings=true. The account id comes from the env var
-      # at runtime — never hardcoded.
-      ansible.builtin.copy:
-        content: |
-          # Managed by bootstrapping/ansible/prime-stack.yml — dsh settings for
-          # the prime-orchestrator stack. The Cloudflare account id is
-          # templated from the CLOUDFLARE_ACCOUNT_ID env var at provision time.
-          agent-default-model:
-            provider: cloudflare-workers-ai
-            model: "@cf/zai-org/glm-5.3"
-          agent-presets:
-            default: prime-orchestrator
-          locale:
-            preference: en
-          permission:
-            defaultPreset: danger-full-access
-          llm-pi-ai:
-            providers:
-              cloudflare-workers-ai:
-                displayName: cloudflare-workers-ai
-                apiKeyEnv: CLOUDFLARE_AI_TOKEN
-                api: openai-completions
-                baseURL: https://api.cloudflare.com/client/v4/accounts/{{ cf_account_id }}/ai/v1
-                models:
-                  - id: "@cf/zai-org/glm-5.2"
-                    name: CF Workers AI / GLM-5.2
-                    contextWindow: 262144
-                    maxTokens: 16384
-                  - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
-                    name: CF Workers AI / DeepSeek V4 Flash 0731
-                    contextWindow: 131072
-                    maxTokens: 16384
-                  - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
-                    name: CF Workers AI / DeepSeek V4 Pro 0813
-                    contextWindow: 131072
-                    maxTokens: 16384
-                  - id: "@cf/qwen/qwen3.8-27b"
-                    name: CF Workers AI / Qwen3.8 27B
-                    contextWindow: 262144
-                    maxTokens: 16384
-                  - id: "@cf/moonshotai/kimi-k2.6"
-                    name: CF Workers AI / Kimi K2.6
-                    contextWindow: 262144
-                    maxTokens: 16384
-                  - id: "@cf/moonshotai/kimi-k2.7-code"
-                    name: CF Workers AI / Kimi K2.7 Code
-                    contextWindow: 262144
-                    maxTokens: 16384
-                  - id: "@cf/zai-org/glm-5.3"
-                    name: glm53
-                    contextWindow: 1048576
-                    maxTokens: 256000
-                  - id: "@cf/zai-org/glm-5.3-flash"
-                    name: glm53flash
-                    contextWindow: 1048576
-                    maxTokens: 128000
-        dest: "{{ dsh_settings }}"
-        mode: "0600"
-      when:
-        - cf_secrets_present | bool
-        - (not dsh_settings_stat.stat.exists) or (prime_stack_force_settings | bool)
+    - name: "stage: dsh-config — ~/.dsh/settings.yaml (CF Workers AI default LLM)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack dsh-config
+      environment: "{{ prime_stage_env }}"
+      register: r_dsh_config
+      changed_when: r_dsh_config.stdout_lines and (r_dsh_config.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [dsh-config]
 
     # ------------------------------------------------------------------ prime-config
-    - name: Merge the cloudflare-workers-ai provider into prime-agent models.json
-      # Keyed merge on providers.cloudflare-workers-ai — every other provider in
-      # an existing models.json is preserved verbatim. Prints "changed"/"unchanged".
-      ansible.builtin.shell: |
-        set -e
-        python3 - <<'PYEOF'
-        import json, os, sys
-        path = os.path.expanduser('~/.prime/agent/models.json')
-        provider = json.loads(os.environ['PRIME_PROVIDER_JSON'])
-        doc = {}
-        if os.path.exists(path):
-            with open(path) as f:
-                doc = json.load(f)
-        before = json.dumps(doc.get('providers', {}).get('cloudflare-workers-ai'), sort_keys=True)
-        doc.setdefault('providers', {})['cloudflare-workers-ai'] = provider
-        after = json.dumps(provider, sort_keys=True)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(doc, f, indent=2)
-            f.write('\n')
-        os.replace(tmp, path)
-        os.chmod(path, 0o600)
-        print('unchanged' if before == after else 'changed')
-        PYEOF
-      args:
-        executable: /bin/bash
-      environment:
-        PRIME_PROVIDER_JSON: "{{ prime_cf_provider | to_json }}"
-      register: prime_models_merge
-      changed_when: prime_models_merge.stdout is search('(?m)^changed$')
-      when: cf_secrets_present | bool
-      tags: [prime-config]
-
-    - name: Merge the Cloudflare API key into prime-agent auth.json
-      # The key is read straight from the process environment by python3 and
-      # written with mode 0600 — no_log keeps it (and any accidental output)
-      # out of the ansible log.
-      ansible.builtin.shell: |
-        set -e
-        python3 - <<'PYEOF'
-        import json, os
-        key = os.environ.get('CLOUDFLARE_API_KEY', '')
-        if not key:
-            raise SystemExit('CLOUDFLARE_API_KEY missing from the environment')
-        path = os.path.expanduser('~/.prime/agent/auth.json')
-        doc = {}
-        if os.path.exists(path):
-            with open(path) as f:
-                doc = json.load(f)
-        before = json.dumps(doc.get('cloudflare-workers-ai'), sort_keys=True)
-        entry = {'type': 'api_key', 'key': key}
-        doc['cloudflare-workers-ai'] = entry
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(doc, f, indent=2)
-            f.write('\n')
-        os.replace(tmp, path)
-        os.chmod(path, 0o600)
-        print('unchanged' if before == json.dumps(entry, sort_keys=True) else 'changed')
-        PYEOF
-      args:
-        executable: /bin/bash
-      register: prime_auth_merge
-      changed_when: prime_auth_merge.stdout is search('(?m)^changed$')
-      no_log: true
-      when: cf_secrets_present | bool
-      tags: [prime-config]
-
-    - name: Merge the Cloudflare defaults into prime-agent settings.json
-      # Sets defaultProvider/defaultModel/defaultThinkingLevel and merges the
-      # cloudflare-workers-ai model ids INTO the existing enabledModels list
-      # (union — other enabled models stay enabled). All other keys preserved.
-      ansible.builtin.shell: |
-        set -e
-        python3 - <<'PYEOF'
-        import json, os
-        path = os.path.expanduser('~/.prime/agent/settings.json')
-        doc = {}
-        if os.path.exists(path):
-            with open(path) as f:
-                doc = json.load(f)
-        cf_models = json.loads(os.environ['PRIME_CF_MODELS_JSON'])
-        before = json.dumps({
-            'defaultProvider': doc.get('defaultProvider'),
-            'defaultModel': doc.get('defaultModel'),
-            'defaultThinkingLevel': doc.get('defaultThinkingLevel'),
-            'enabledModels': sorted(doc.get('enabledModels') or []),
-        }, sort_keys=True)
-        doc['defaultProvider'] = 'cloudflare-workers-ai'
-        doc['defaultModel'] = '@cf/zai-org/glm-5.3'
-        doc['defaultThinkingLevel'] = 'high'
-        merged = list(doc.get('enabledModels') or [])
-        for m in cf_models:
-            if m not in merged:
-                merged.append(m)
-        doc['enabledModels'] = merged
-        after = json.dumps({
-            'defaultProvider': doc['defaultProvider'],
-            'defaultModel': doc['defaultModel'],
-            'defaultThinkingLevel': doc['defaultThinkingLevel'],
-            'enabledModels': sorted(doc['enabledModels']),
-        }, sort_keys=True)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp = path + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(doc, f, indent=2)
-            f.write('\n')
-        os.replace(tmp, path)
-        os.chmod(path, 0o600)
-        print('unchanged' if before == after else 'changed')
-        PYEOF
-      args:
-        executable: /bin/bash
-      environment:
-        PRIME_CF_MODELS_JSON: "{{ prime_cf_enabled_models | to_json }}"
-      register: prime_settings_merge
-      changed_when: prime_settings_merge.stdout is search('(?m)^changed$')
-      when: cf_secrets_present | bool
+    - name: "stage: prime-config — ~/.prime/agent/{models,auth,settings}.json (keyed merges)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack prime-config
+      environment: "{{ prime_stage_env }}"
+      register: r_prime_config
+      changed_when: r_prime_config.stdout_lines and (r_prime_config.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [prime-config]
 
     # ------------------------------------------------------------------ extras/plugins
-    # Web-profile parity with the production Mac: the same plugin set, pinned
-    # to the Mac's working versions. Each install reuses the allowBuilds
-    # remedy from the dsh-prime-orchestrator section (inline, per item).
-    - name: Pre-seed allowBuilds for the known native build scripts
-      # pnpm >= 10 skips the postinstall builds of registry packages silently
-      # unless allowlisted — node-pty/ssh2/cloudflared/cpu-features (dsh-mobile
-      # deps) NEED their builds to function. Plain-name keys work for registry
-      # packages (verified on the production Mac profile).
-      ansible.builtin.shell: |
-        set -e
-        file="{{ dsh_profile_dir }}/pnpm-workspace.yaml"
-        [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
-        changed=no
-        for key in {{ dsh_native_build_keys | join(' ') }}; do
-          grep -qE "^[[:space:]]*[\"']?${key}[\"']?: true" "$file" && continue
-          if grep -q '^allowBuilds:' "$file"; then
-            ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
-            sed -i "${ln}a\\  \"${key}\": true" "$file"
-          else
-            printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
-          fi
-          changed=yes
-        done
-        echo "$changed"
-      args:
-        executable: /bin/bash
-      register: parity_allowbuilds_seed
-      changed_when: parity_allowbuilds_seed.stdout is search('yes')
-      tags: [extras, plugins]
-
-    - name: Install the parity plugins into the web profile
-      # Skip when the package is already a dependency; on the pnpm >= 11
-      # git-dep build block, parse the allowBuilds key pnpm demands, merge it
-      # into the profile workspace, retry once (same remedy as above).
-      ansible.builtin.shell: |
-        set -u
-        pkg="{{ item.package }}"
-        spec="{{ item.spec }}"
-        profile_dir="{{ dsh_profile_dir }}"
-        if grep -q "\"$pkg\"" "$profile_dir/package.json" 2>/dev/null; then
-          echo "already present: $pkg"
-          exit 0
-        fi
-        dsh plugin --profile {{ dsh_profile }} add "$spec" >/tmp/prime-stack-plugin-add.log 2>&1
-        rc=$?
-        if [ "$rc" -eq 0 ]; then
-          echo "installed: $pkg"
-          exit 0
-        fi
-        cat /tmp/prime-stack-plugin-add.log >&2
-        file="$profile_dir/pnpm-workspace.yaml"
-        [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
-        keys="$(sed -n '/^allowBuilds:/,$p' /tmp/prime-stack-plugin-add.log 2>/dev/null \
-                | grep -E ': true$' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*: true$//' || true)"
-        if [ -n "$keys" ]; then
-          for key in $keys; do
-            grep -qF "\"$key\": true" "$file" && continue
-            if grep -q '^allowBuilds:' "$file"; then
-              ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
-              sed -i "${ln}a\\  \"${key}\": true" "$file"
-            else
-              printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
-            fi
-          done
-          if dsh plugin --profile {{ dsh_profile }} add "$spec" >/tmp/prime-stack-plugin-add.log 2>&1; then
-            echo "installed: $pkg (after allowBuilds remedy)"
-            exit 0
-          fi
-          cat /tmp/prime-stack-plugin-add.log >&2
-        fi
-        echo "FAILED: $pkg" >&2
-        exit 1
-      args:
-        executable: /bin/bash
-        chdir: "{{ tv_workspace }}"
-      register: parity_plugins
-      failed_when: false
-      changed_when: parity_plugins.stdout is search('installed')
-      loop: "{{ dsh_parity_plugins }}"
-      loop_control:
-        label: "{{ item.package }}"
-      tags: [extras, plugins]
-
-    - name: Fail when a parity plugin refused to install
-      ansible.builtin.fail:
-        msg: >-
-          parity plugin install failed — see the pnpm output above the failing
-          item ({{ parity_plugins.results
-                  | selectattr('rc', 'defined')
-                  | selectattr('rc', 'ne', 0)
-                  | map(attribute='item')
-                  | map(attribute='package')
-                  | join(', ') }}).
-      when: parity_plugins.results | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0) | list | length > 0
-      tags: [extras, plugins]
-
-    - name: Rebuild the profile so native build scripts run
-      # `dsh plugin exec`/add is a pnpm forwarder; rebuild re-runs the
-      # postinstall builds allowBuilds permits (node-pty, ssh2, …). Cheap
-      # when everything is already built.
-      ansible.builtin.shell: |
-        dsh plugin --profile {{ dsh_profile }} rebuild >/tmp/prime-stack-plugin-rebuild.log 2>&1
-        rc=$?
-        [ "$rc" -eq 0 ] || cat /tmp/prime-stack-plugin-rebuild.log >&2
-        exit "$rc"
-      args:
-        executable: /bin/bash
-        chdir: "{{ tv_workspace }}"
-      register: parity_rebuild
-      changed_when: false
-      when: parity_plugins is changed or parity_allowbuilds_seed is changed
+    - name: "stage: extras-plugins — web-profile parity plugins (mnemon, pi2dsh, mobile, mcp-client, agent-memory, restart)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack extras-plugins
+      environment: "{{ prime_stage_env }}"
+      register: r_extras_plugins
+      changed_when: r_extras_plugins.stdout_lines and (r_extras_plugins.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [extras, plugins]
 
     # ------------------------------------------------------------------ extras/mnemon
-    - name: Apply the mnemon user-patch row to the web profile
-      # dsh-mnemon ships sane defaults; this replicates the production Mac's
-      # profile patch layer (remoteAccess trusted-host, guided modes).
-      ansible.builtin.shell: |
-        set -e
-        file="{{ dsh_profile_dir }}/cordis.patch.yml"
-        mkdir -p "$(dirname "$file")"
-        [ -f "$file" ] || printf '[]\n' > "$file"
-        grep -q 'id: mnemon' "$file" 2>/dev/null && { echo unchanged; exit 0; }
-        # The dsh profile template seeds the patch layer as a comment header
-        # plus a bare []; rows must REPLACE that placeholder, not follow it
-        # (a list after [] is invalid YAML — end-of-stream expected).
-        sed -i '/^\[\][[:space:]]*$/d' "$file"
-        cat >> "$file" <<'ROW'
-        # dsh-mnemon tuning (managed by bootstrapping/ansible/prime-stack.yml)
-        - id: mnemon
-          config:
-            routingGuidance: true
-            displayMode: sidebar
-            lifecycleEnabled: true
-            recallMode: guided
-            writebackMode: guided
-            idleReviewMs: 30000
-            tabEnabled: true
-            writeEnabled: true
-            remoteAccess: trusted-host
-            timeoutMs: 10000
-            defaultRecallLimit: 10
-            embedding:
-              enabled: false
-              endpoint: http://localhost:11434
-              model: nomic-embed-text
-            recallQuality:
-              policy: strict-v1
-              lowScoreThreshold: 0.25
-              highScoreThreshold: 0.6
-              candidateMultiplier: 3
-              maxMediumResults: 4
-              maxUnknownResults: 2
-        ROW
-        echo changed
-      args:
-        executable: /bin/bash
-      register: mnemon_row
-      changed_when: mnemon_row.stdout is search('(?m)^changed$')
-      tags: [extras, mnemon]
-
-    - name: Add the mnemon section to dsh settings.yaml
-      # taskAgentModel rides the CF Workers AI provider (the production Mac
-      # points it at its own cf provider; no honcho connection is provisioned
-      # here — Mnemon Native is the default space and needs no credentials).
-      ansible.builtin.shell: |
-        set -e
-        file="{{ dsh_settings }}"
-        # settings.yaml may be absent when CF secrets were missing at first
-        # boot (the dsh-config section skips then) — create it so mnemon
-        # still lands; chmod 600 matches the dsh-config writer.
-        [ -f "$file" ] || { touch "$file"; chmod 600 "$file"; }
-        grep -q '^mnemon:' "$file" 2>/dev/null && { echo unchanged; exit 0; }
-        cat >> "$file" <<'SECTION'
-        mnemon:
-          taskAgentModel:
-            mode: fixed
-            provider: cloudflare-workers-ai
-            model: "@cf/zai-org/glm-5.2"
-        SECTION
-        echo changed
-      args:
-        executable: /bin/bash
-      register: mnemon_settings
-      changed_when: mnemon_settings.stdout is search('(?m)^changed$')
+    - name: "stage: extras-mnemon — mnemon settings + profile patch row (memory in the web UI)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack extras-mnemon
+      environment: "{{ prime_stage_env }}"
+      register: r_extras_mnemon
+      changed_when: r_extras_mnemon.stdout_lines and (r_extras_mnemon.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [extras, mnemon]
 
     # ------------------------------------------------------------------ extras/mobile
-    - name: Run the dsh-mobile setup (pairing CA, scaffolds, control)
-      # Official CLI setup: creates $DSH_HOME/mobile-access/{tls CA, mobile.css,
-      # mobile.js, extensions}, enables the gateway (control.json). The CLI's
-      # setup is natively non-interactive (no --yes flag exists). Idempotent
-      # guard: the CA is the expensive artifact.
-      ansible.builtin.shell: |
-        set -e
-        [ -f "{{ dsh_home }}/mobile-access/tls/ca.pem" ] && { echo unchanged; exit 0; }
-        dsh plugin --profile {{ dsh_profile }} exec dsh-mobile setup \
-          --port {{ mobile_gateway_port }} --dsh-port 3081 </dev/null
-        echo changed
-      args:
-        executable: /bin/bash
-        chdir: "{{ tv_workspace }}"
-      register: mobile_setup
-      changed_when: mobile_setup.stdout is search('(?m)^changed$')
-      tags: [extras, mobile]
-
-    - name: Configure the mobile gateway listener for the codespace
-      # GitHub codespace forwarding terminates TLS at the edge (DigiCert
-      # *.app.github.dev), dials the container over loopback, and rewrites
-      # Host to localhost:<port> — it cannot front the gateway direct
-      # Host/Origin trust model, so the gateway keeps the plugin loopback
-      # shape: tls disabled on 127.0.0.1, loopback authorities (the dsh
-      # web sidebar proxies through here; GETs from the public -<port>
-      # vhost pass too). Phone pairing uses the plugin own remote
-      # providers (Tailscale Funnel / cpolar — enabled from the web UI),
-      # which build a publicTls gateway with matching authorities.
-      # Non-codespace devcontainers keep the managed LAN setup the CLI
-      # wrote.
-      ansible.builtin.shell: |
-        set -e
-        cs_name="${CODESPACE_NAME:-}"
-        [ -z "$cs_name" ] && cs_name="$(bash -lc 'printenv CODESPACE_NAME' 2>/dev/null || true)"
-        if [ -z "$cs_name" ]; then
-          echo "not a codespace — keeping the managed LAN setup"
-          exit 0
-        fi
-        export MOBILE_PORT="{{ mobile_gateway_port }}"
-        python3 - <<'PYEOF'
-        import base64, hashlib, json, os, pathlib
-        home = pathlib.Path(os.path.expanduser('~/.dsh/mobile-access'))
-        setup = home / 'setup.json'
-        doc = {}
-        if setup.exists():
-            try:
-                doc = json.loads(setup.read_text())
-            except Exception:
-                doc = {}
-        port = int(os.environ['MOBILE_PORT'])
-        # instanceId is NOT a free token: the gateway verifies it equals
-        # the fingerprint256 of the pairing CA (sha256 of the cert DER,
-        # hex, lowercase, no colons) at boot. Derive it from the actual
-        # CA so a drifted value self-heals.
-        instance_id = doc.get('instanceId')
-        try:
-            pem = (home / 'tls' / 'ca.pem').read_text()
-            der = base64.b64decode(''.join(
-                l for l in pem.splitlines() if not l.startswith('---')))
-            instance_id = hashlib.sha256(der).hexdigest()
-        except Exception:
-            pass  # no readable CA yet — keep whatever the setup CLI wrote
-        out = {
-            'version': 1,
-            'listenHost': '127.0.0.1',
-            'listenPort': port,
-            'upstreamOrigin': 'http://127.0.0.1:3081',
-            'publicAuthorities': [
-                f"localhost:{port}",
-                f"127.0.0.1:{port}",
-            ],
-            'instanceId': instance_id,
-            'pairingCaFile': str(home / 'tls' / 'ca.pem'),
-            'tls': {'mode': 'disabled'},
-            'allowedCidrs': ['127.0.0.0/8', '::1/128'],
-        }
-        if json.dumps(doc, sort_keys=True) == json.dumps(out, sort_keys=True):
-            print('unchanged'); raise SystemExit
-        tmp = str(setup) + '.tmp'
-        with open(tmp, 'w') as f:
-            json.dump(out, f, indent=2)
-            f.write('\n')
-        os.replace(tmp, setup)
-        os.chmod(setup, 0o600)
-        print('changed')
-        PYEOF
-      args:
-        executable: /bin/bash
-      register: mobile_codespace_origin
-      changed_when: mobile_codespace_origin.stdout is search('(?m)^changed$')
-      tags: [extras, mobile]
-
-    - name: Ensure the mobile gateway control file exists
-      # Create-only: a control.json the user turned OFF from the web UI is
-      # never force-re-enabled.
-      ansible.builtin.shell: |
-        set -e
-        file="{{ dsh_home }}/mobile-access/control.json"
-        [ -f "$file" ] && { echo unchanged; exit 0; }
-        printf '{"version":1,"enabled":true}\n' > "$file"
-        chmod 600 "$file"
-        echo changed
-      args:
-        executable: /bin/bash
-      register: mobile_control
-      changed_when: mobile_control.stdout is search('(?m)^changed$')
+    - name: "stage: extras-mobile — dsh-mobile gateway (mobile access, :3443 behind the codespace https origin)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack extras-mobile
+      environment: "{{ prime_stage_env }}"
+      register: r_extras_mobile
+      changed_when: r_extras_mobile.stdout_lines and (r_extras_mobile.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [extras, mobile]
 
     # ------------------------------------------------------------------ extras/mcp
-    - name: Write the home-level cordis patch (code-review-graph MCP)
-      # Parity with the production Mac's ~/.dsh/cordis.patch.yml: mounts the
-      # code-review-graph MCP server into every profile. Skipped (not failed)
-      # when the CLI is absent or the user already has a home-level patch.
-      ansible.builtin.shell: |
-        set -e
-        command -v code-review-graph >/dev/null 2>&1 || { echo "skipped: code-review-graph not installed"; exit 0; }
-        file="{{ dsh_home }}/cordis.patch.yml"
-        [ -f "$file" ] && { echo unchanged; exit 0; }
-        cat > "$file" <<'ROW'
-        # DSH home-level patch: applies to every profile.
-        # Loads the code-review-graph MCP server via @deepseek-ai/dsh-mcp-client.
-        # Set CODE_REVIEW_GRAPH_REPO to the project that has a .code-review-graph/ build.
-
-        - insert:
-            - id: mcp-code-review-graph
-              name: '@deepseek-ai/dsh-mcp-client'
-              config:
-                serverName: code-review-graph
-                transport: stdio
-                command: code-review-graph
-                args: !!js '["serve", "--repo", process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()]'
-                cwd: !!js 'process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()'
-                toolCallTimeoutMs: 60000
-                failOnStartupError: false
-        ROW
-        echo changed
-      args:
-        executable: /bin/bash
-      register: mcp_home_patch
-      changed_when: mcp_home_patch.stdout is search('(?m)^changed$')
+    - name: "stage: extras-mcp — home-level cordis patch (code-review-graph MCP)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack extras-mcp
+      environment: "{{ prime_stage_env }}"
+      register: r_extras_mcp
+      changed_when: r_extras_mcp.stdout_lines and (r_extras_mcp.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [extras, mcp]
 
     # ------------------------------------------------------------------ secrets
-    - name: Provision runtime secrets from the Bitwarden vault (never fatal)
-      # Same contract as .devcontainer/post-create.sh: exit 2 (credentials not
-      # configured) is a warning; any other non-zero is a warning too — secrets
-      # must never break the stack. bw-provision.sh itself never echoes values.
+    - name: "stage: secrets — Bitwarden vault provision (never fatal)"
       ansible.builtin.command:
-        cmd: bash "{{ tv_workspace }}/browser-debug/secrets/bw-provision.sh"
-        chdir: "{{ tv_workspace }}"
-      register: bw_provision
-      failed_when: false
-      changed_when: bw_provision.rc == 0
-      tags: [secrets]
-
-    - name: Warn when Bitwarden secrets were not provisioned
-      ansible.builtin.debug:
-        msg: >-
-          [prime-stack] WARN: secrets not provisioned (bw-provision exit
-          {{ bw_provision.rc }} — set BW_EMAIL / BW_PASSWORD, or BW_CLIENTID /
-          BW_CLIENTSECRET, as codespace secrets; see
-          browser-debug/secrets/README.md). The stack installs and runs
-          without them.
-      when: bw_provision.rc != 0
+        cmd: python3 -m prime_stack secrets
+      environment: "{{ prime_stage_env }}"
+      register: r_secrets
+      changed_when: r_secrets.stdout_lines and (r_secrets.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [secrets]
 
     # ------------------------------------------------------------------ fleet
-    # Specialist agent presets + grid-trading wiring. Runs after `secrets` so
-    # a standalone full run can read the freshly-provisioned wt.env (the
-    # post-create path provisions it even earlier, in bw-provision.sh).
-    - name: Install the specialist fleet presets (marker-preserved)
-      # Copies the vendored presets (bootstrapping/presets/) into
-      # ~/.dsh/.agent-presets/<name>/ with the plugin's marker semantics:
-      #   - no marker + no dir          → install + write the marker
-      #   - marker, sha changed         → update the files + refresh the marker
-      #   - marker, sha identical       → skip
-      #   - dir without OUR marker      → user-owned, preserved untouched
-      # @TV_WORKSPACE@ / @CLOAK_DIR@ placeholders resolve to this workspace.
-      ansible.builtin.shell: |
-        python3 - <<'PYEOF'
-        import hashlib, json, os, pathlib, sys
-        name = os.environ['FLEET_NAME']
-        src = pathlib.Path(os.environ['FLEET_SRC']) / name
-        dst = pathlib.Path(os.environ['FLEET_ROOT']) / name
-        marker = dst / os.environ['FLEET_MARKER']
-        ws, cloak = os.environ['TV_WORKSPACE'], os.environ['CLOAK_DIR']
-        files = ['preset.yml', 'agent.cordis.yml']
-
-        def rendered(f):
-            text = (src / f).read_text()
-            return (text.replace('@TV_WORKSPACE@', ws).replace('@CLOAK_DIR@', cloak))
-
-        hashes = {f: hashlib.sha256(rendered(f).encode()).hexdigest() for f in files}
-        if marker.exists():
-            try:
-                doc = json.loads(marker.read_text() or '{}')
-            except Exception:
-                doc = {}
-            if doc.get('managedBy') == os.environ['FLEET_MANAGED_BY'] and doc.get('files') == hashes:
-                print('unchanged'); raise SystemExit
-            if doc.get('managedBy') != os.environ['FLEET_MANAGED_BY']:
-                print('preserved: user-owned (marker managedBy differs)'); raise SystemExit
-        elif dst.exists():
-            print('preserved: user-owned (no prime-stack marker)'); raise SystemExit
-        dst.mkdir(parents=True, exist_ok=True)
-        for f in files:
-            (dst / f).write_text(rendered(f))
-        marker.write_text(json.dumps(
-            {'managedBy': os.environ['FLEET_MANAGED_BY'], 'version': 1,
-             'files': hashes}, indent=2) + '\n')
-        print('updated' if marker.exists() else 'changed')
-        PYEOF
-      args:
-        executable: /bin/bash
-      environment:
-        FLEET_NAME: "{{ item }}"
-        FLEET_SRC: "{{ fleet_preset_src }}"
-        FLEET_ROOT: "{{ fleet_preset_root }}"
-        FLEET_MARKER: "{{ fleet_preset_marker }}"
-        FLEET_MANAGED_BY: "{{ fleet_managed_by }}"
-        TV_WORKSPACE: "{{ tv_workspace }}"
-        CLOAK_DIR: "{{ wt_cloak_dir }}"
-      register: fleet_preset_install
-      changed_when: fleet_preset_install.stdout is search('(?m)^(updated|changed)$')
-      loop: "{{ dsh_fleet_presets }}"
-      loop_control:
-        label: "{{ item }}"
+    - name: "stage: fleet-presets — specialist agent presets (marker-preserved)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack fleet-presets
+      environment: "{{ prime_stage_env }}"
+      register: r_fleet_presets
+      changed_when: r_fleet_presets.stdout_lines and (r_fleet_presets.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [fleet]
 
-    - name: Upsert the grid-fleet rows into the web profile cordis patch
-      # Two rows, merged idempotently into ~/.dsh/profiles/web/cordis.patch.yml:
-      #   mcp-wundertrading — the official MCP server. Keys are read at
-      #     PROVISION TIME from the bw-provisioned runtime wt.env (vault item
-      #     wundertrading-api) or the process env; a rotated key pair
-      #     propagates on the next playbook run. Never logged (no_log) and
-      #     never committed — only the row template lives here.
-      #   wt-tools — config.cloakDir → workspace browser-debug (the plugin's
-      #     default is the dev Mac's minimal-mjs path).
-      # A dsh-seeded patch layer may carry a comment header + a bare `[]`
-      # placeholder — stripped before parsing (same remedy as the mnemon row).
-      # Missing keys → the MCP row is skipped with a warning; the wt_* plugin
-      # tools keep working (they read the vault through the credential seam).
-      ansible.builtin.shell: |
-        python3 - <<'PYEOF'
-        import json, os, pathlib, re, sys
-        import yaml
-        patch_file = pathlib.Path(os.environ['PATCH_FILE'])
-        wt_env = pathlib.Path(os.environ['WT_ENV'])
-        keys = {}
-        if wt_env.exists():
-            for line in wt_env.read_text().splitlines():
-                line = line.strip()
-                if line and not line.startswith('#') and '=' in line:
-                    k, v = line.split('=', 1)
-                    keys[k.strip()] = v.strip()
-        keys = {k: keys.get(k) or os.environ.get(k) for k in ('WT_API_KEY', 'WT_API_SECRET')}
-        cloak, mcp_url = os.environ['CLOAK_DIR'], os.environ['WT_MCP_URL']
-        text = patch_file.read_text() if patch_file.exists() else ''
-        text = re.sub(r'(?m)^\[\]\s*$', '', text)
-        doc = []
-        if text.strip():
-            try:
-                loaded = yaml.safe_load(text) or []
-            except Exception as exc:
-                raise SystemExit(f'cannot parse {patch_file}: {exc}')
-            doc = loaded if isinstance(loaded, list) else []
-        before = json.dumps(doc, sort_keys=True)
-        doc = [row for row in doc
-               if not (isinstance(row, dict) and row.get('id') in ('mcp-wundertrading', 'wt-tools'))]
-        updated = []
-        if all(keys.values()):
-            doc.append({
-                'id': 'mcp-wundertrading',
-                'name': '@deepseek-ai/dsh-mcp-client',
-                'config': {
-                    'serverName': 'wundertrading',
-                    'transport': 'streamable-http',
-                    'url': mcp_url,
-                    'toolCallTimeoutMs': 60000,
-                    'headers': {
-                        'X-API-Key': keys['WT_API_KEY'],
-                        'X-Secret-Key': keys['WT_API_SECRET'],
-                    },
-                },
-            })
-            updated.append('mcp-wundertrading')
-        else:
-            print('note: wundertrading keys missing (wt.env not provisioned / env unset) — MCP row skipped',
-                  file=sys.stderr)
-        doc.append({'id': 'wt-tools', 'config': {'cloakDir': cloak}})
-        updated.append('wt-tools')
-        patch_file.parent.mkdir(parents=True, exist_ok=True)
-        patch_file.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
-        os.chmod(patch_file, 0o600)
-        print('unchanged' if json.dumps(doc, sort_keys=True) == before
-              else f"updated: {', '.join(updated)}")
-        PYEOF
-      args:
-        executable: /bin/bash
-      environment:
-        PATCH_FILE: "{{ web_profile_patch }}"
-        WT_ENV: "{{ wt_runtime_env }}"
-        WT_MCP_URL: "{{ wt_mcp_url }}"
-        CLOAK_DIR: "{{ wt_cloak_dir }}"
-        # secrets may ride the process env on standalone runs (no wt.env yet)
-        WT_API_KEY: "{{ lookup('env', 'WT_API_KEY') }}"
-        WT_API_SECRET: "{{ lookup('env', 'WT_API_SECRET') }}"
-      register: fleet_patch_rows
-      changed_when: fleet_patch_rows.stdout is search('updated')
-      no_log: true
+    - name: "stage: fleet-patch — wundertrading MCP row + wt-tools cloakDir (web profile patch)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack fleet-patch
+      environment: "{{ prime_stage_env }}"
+      register: r_fleet_patch
+      changed_when: r_fleet_patch.stdout_lines and (r_fleet_patch.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [fleet]
 
-    - name: Enable the tvcli multi-account server autostart for the fleet
-      # The multi-session TV screening system: POST /hunt fans one skill
-      # across many symbols over the accounts.json cookie pool (round-robin
-      # + failover). Autostart only when the registry is provisioned.
-      ansible.builtin.shell: |
-        ws="{{ tv_workspace }}"
-        [ -f "$ws/accounts.json" ] || {
-          echo "skipped: accounts.json not provisioned yet (bw-provision) — tvcli autoserve stays off"
-          exit 0
-        }
-        if [ -f "$ws/.tvcli-autoserve" ]; then echo unchanged; else touch "$ws/.tvcli-autoserve"; echo enabled; fi
-      register: fleet_tvcli_autoserve
-      changed_when: fleet_tvcli_autoserve.stdout is search('enabled')
-      when: fleet_enable_tvcli_autoserve | bool
+    - name: "stage: fleet-autoserve — tvcli multi-account server autostart marker"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack fleet-autoserve
+      environment: "{{ prime_stage_env }}"
+      register: r_fleet_autoserve
+      changed_when: r_fleet_autoserve.stdout_lines and (r_fleet_autoserve.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [fleet]
 
-    - name: Bridge the QuantDinger gateway env for qd-analyst
-      # Guarded source of the optional runtime file so qd-analyst's
-      # $QD_AGENT_BASE_URL / $QD_AGENT_TOKEN resolve in login shells; an
-      # already-set environment (codespace secrets) always wins. When the
-      # gateway is unreachable the backend auto-mints a short-lived read-only
-      # token for known users, so a missing file is a no-op, not an error.
-      ansible.builtin.shell: |
-        set -e
-        file="{{ qd_runtime_env }}"
-        [ -f "$file" ] || { echo "skipped: $file not provisioned (optional)"; exit 0; }
-        changed=no
-        block() {
-          printf '%s\n' \
-            '# prime-stack fleet: guarded source of the QuantDinger gateway env' \
-            '# (a value applies only when the variable is unset — injected env wins).' \
-            'if [ -f "{{ qd_runtime_env }}" ]; then' \
-            '  while IFS= read -r __qd_line; do' \
-            '    [ -n "$__qd_line" ] || continue' \
-            '    [ "${__qd_line#\#}" = "$__qd_line" ] || continue' \
-            '    __qd_k="${__qd_line%%=*}"' \
-            '    case "$__qd_k" in *[!A-Za-z0-9_]*) continue ;; esac' \
-            '    [ -n "${!__qd_k:-}" ] && continue' \
-            '    eval "export $__qd_line"' \
-            '  done < "{{ qd_runtime_env }}"' \
-            'fi'
-        }
-        for rc in "{{ prime_home }}/.profile" "{{ prime_home }}/.bashrc"; do
-          grep -qF "qd-agent.env" "$rc" 2>/dev/null && continue
-          touch "$rc"
-          block >> "$rc"
-          changed=yes
-        done
-        echo "$changed"
-      args:
-        executable: /bin/bash
-      register: fleet_qd_env
-      changed_when: fleet_qd_env.stdout is search('yes')
+    - name: "stage: fleet-qdenv — QuantDinger gateway env bridge (qd-analyst)"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack fleet-qdenv
+      environment: "{{ prime_stage_env }}"
+      register: r_fleet_qdenv
+      changed_when: r_fleet_qdenv.stdout_lines and (r_fleet_qdenv.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
       tags: [fleet]
 
     # ------------------------------------------------------------------ summary
     - name: Prime stack summary
       ansible.builtin.debug:
-        msg:
-          - "dsh CLI: {{ 'installed ' + (dsh_detect.stdout | trim) if dsh_detect.stdout != 'MISSING' else ('installed by this run' if (dsh_install.rc | default(1)) == 0 else 'FAILED to install') }}"
-          - "plugin {{ dsh_plugin_package }}: {{ 'present in profile ' ~ dsh_profile if (plugin_installed.rc | default(1)) == 0 or ((plugin_add_retry.rc | default(1)) == 0) else 'FAILED' }}"
-          - "preset prime-orchestrator: {{ 'materialized' if (preset_file.stat.exists | default(false)) or ((preset_wait.rc | default(1)) == 0) else 'NOT materialized' }}"
-          - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 or ((prime_agent_install.rc | default(1)) == 0) else 'FAILED to install' }}"
-          - "CF model config: {{ 'written' if (cf_secrets_present | bool) else 'SKIPPED (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set)' }}"
-          - "parity plugins (mnemon, pi2dsh, mobile, mcp-client, agent-memory, restart): {{ 'installed this run' if (parity_plugins is defined and parity_plugins is changed) else ('checked (already present)' if (parity_plugins is defined) else 'not run (use --tags extras)') }}"
-          - "mnemon (memory in the web UI): {{ 'configured this run' if (mnemon_row is defined and mnemon_row is changed) else ('configured' if (mnemon_row is defined) else 'not run') }}"
-          - "mobile access (gateway :{{ mobile_gateway_port }}): {{ 'configured this run' if (mobile_setup is defined and (mobile_codespace_origin is changed or mobile_setup is changed)) else ('configured' if (mobile_setup is defined) else 'not run') }}"
-          - "code-review-graph MCP (home-level patch): {{ 'patched this run' if (mcp_home_patch is defined and mcp_home_patch is changed) else ('present' if (mcp_home_patch is defined) else 'not run') }}"
-          - "fleet presets (tv-scout, tv-investigator, qd-analyst, wt-investigator): {{ 'installed/updated this run' if (fleet_preset_install is defined and fleet_preset_install is changed) else ('present or user-preserved' if (fleet_preset_install is defined) else 'not run (use --tags fleet)') }}"
-          - "wundertrading MCP row + wt-tools cloakDir (web profile patch): {{ 'written this run' if (fleet_patch_rows is defined and fleet_patch_rows is changed) else ('checked (rows current)' if (fleet_patch_rows is defined) else 'not run') }}"
-          - "tvcli multi-account autoserve (.tvcli-autoserve): {{ 'enabled this run' if (fleet_tvcli_autoserve is defined and fleet_tvcli_autoserve is changed) else ('checked' if (fleet_tvcli_autoserve is defined) else 'not run') }}"
-          - "QuantDinger gateway env (qd-analyst): {{ 'bridged this run' if (fleet_qd_env is defined and fleet_qd_env is changed) else ('checked' if (fleet_qd_env is defined) else 'not run') }}"
-          - "grid fleet blueprint: bootstrapping/docs/grid-fleet.md (research → screen → configure → manage loop)"
-          - "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace"
+        msg: "{{ prime_summary_lines }}"
+      vars:
+        prime_envelopes: >-
+          {{ [r_dsh, r_plugin, r_agent, r_preset, r_env, r_dsh_config,
+              r_prime_config, r_extras_plugins, r_extras_mnemon, r_extras_mobile,
+              r_extras_mcp, r_secrets, r_fleet_presets, r_fleet_patch,
+              r_fleet_autoserve, r_fleet_qdenv]
+             | selectattr('stdout_lines', 'defined')
+             | map(attribute='stdout_lines')
+             | map('last')
+             | map('from_json')
+             | list }}
+        prime_summary_lines: >-
+          {{ prime_envelopes | map(attribute='summary_line') | list
+             + ['grid fleet blueprint: bootstrapping/docs/grid-fleet.md (research → screen → configure → manage loop)',
+                "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace",
+                'standalone re-run: bootstrapping/python/bin/prime-stack --dry-run all (no ansible needed)'] }}
       tags: [always]

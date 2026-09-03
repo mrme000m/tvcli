@@ -1,0 +1,15 @@
+# DSH home-level patch: applies to every profile.
+# Loads the code-review-graph MCP server via @deepseek-ai/dsh-mcp-client.
+# Set CODE_REVIEW_GRAPH_REPO to the project that has a .code-review-graph/ build.
+
+- insert:
+    - id: mcp-code-review-graph
+      name: '@deepseek-ai/dsh-mcp-client'
+      config:
+        serverName: code-review-graph
+        transport: stdio
+        command: code-review-graph
+        args: !!js '["serve", "--repo", process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()]'
+        cwd: !!js 'process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()'
+        toolCallTimeoutMs: 60000
+        failOnStartupError: false

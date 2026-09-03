@@ -112,6 +112,11 @@ tvcli/
   `prime-orchestrator` as the default agent preset, `prime-agent` CLI, CF
   Workers AI models from the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY` repo
   codespace secrets, bw CLI secrets via `browser-debug/secrets/bw-provision.sh`.
+  The playbook is a slim orchestrator (apt + tags); every install/config step
+  runs in the unit-tested Python engine `bootstrapping/python/prime_stack/`
+  (CLI: `bootstrapping/python/bin/prime-stack [--dry-run] <stage|group>`;
+  JSON envelopes on stdout, tests: `python3 -m unittest discover -s
+  bootstrapping/python/tests -t bootstrapping/python`).
   dsh Web GUI (Prime fleet column) on forwarded port 3081, opt-in autostart
   via `touch .dsh-autoweb`. E2E-verified in the codespace: post-create exit 0,
   LLM answers, GUI serving. See the `codespace-prime-stack` skill.
