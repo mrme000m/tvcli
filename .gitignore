@@ -80,3 +80,4 @@ browser-debug/secrets/runtime/
 # vendored tvvisual (visual/) — recipes + example are source, not artifacts
 !visual/recipes/*.json
 !visual/chart.example.json
+.tv-autobrowser

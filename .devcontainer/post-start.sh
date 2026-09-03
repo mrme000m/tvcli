@@ -34,3 +34,18 @@ if [ -f "$WS/.tvcli-autoserve" ] && [ -x "$WS/tvcli" ] && [ -f "$WS/accounts.jso
     && echo "tvcli server ready: http://localhost:8765 (GET /health /skills /accounts /queue-stats; POST /hunt /run-skill)" \
     || echo "tvcli serve --daemon failed — inspect $WS/.tvcli-server.log"
 fi
+
+# Optional: pre-launch the headful CloakBrowser on the Xvfb display
+# (logged-out; run `node browser-debug/tv.mjs` to authenticate from
+# browser-debug/.env). Enable with:  touch .tv-autobrowser
+if [ -f "$WS/.tv-autobrowser" ] && command -v node >/dev/null 2>&1; then
+  if ! curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+    (cd "$WS/browser-debug" && setsid nohup node launch.mjs >/dev/null 2>&1 &)
+    for i in $(seq 1 30); do curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+    curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1 \
+      && echo "CloakBrowser ready on CDP :9222 (authenticate with browser-debug/tv.mjs)" \
+      || echo "CloakBrowser pre-launch failed — run browser-debug/launch.mjs manually"
+  else
+    echo "CloakBrowser already running (CDP :9222)"
+  fi
+fi

@@ -16,7 +16,7 @@
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync,
+  chmodSync, closeSync, createWriteStream, existsSync, mkdirSync, openSync, readFileSync,
   readdirSync, renameSync, rmSync, statSync, writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
@@ -325,12 +325,17 @@ async function main() {
   if (process.argv.includes('--direct') || !TAG.startsWith('darwin')) {
     // Raw spawn (debugging / non-macOS). NOTE: on macOS this registers the app
     // as BackgroundOnly — process + CDP work but NO window appears.
-    const child = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
-    childPid = child.pid;
+    // stderr goes DIRECTLY to the log file (not through a launcher pipe): once
+    // launch.mjs exits, a piped stderr's read end closes and the child's next
+    // stderr write SIGPIPE-kills Chromium — browsers died minutes after launch
+    // with no visible cause whenever the launcher had already exited.
     stderrLog = join(profile, 'browser.stderr.log');
-    child.stderr.pipe(createWriteStream(stderrLog));
+    const errFd = openSync(stderrLog, 'a');
+    const child = spawn(bin, args, { stdio: ['ignore', 'ignore', errFd], detached: true });
+    childPid = child.pid;
     child.on('error', (e) => { console.error(`spawn failed: ${e.message}`); process.exit(1); });
     child.unref();
+    closeSync(errFd);
   } else {
     // Launch through the GUI (Aqua) domain via a one-shot LaunchAgent. Raw
     // spawn / `open` from a non-GUI shell registers the app BackgroundOnly and
