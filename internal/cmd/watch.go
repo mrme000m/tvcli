@@ -59,6 +59,7 @@ type WatchTrigger struct {
 type WatchSkillWatch struct {
 	Skill          string         `json:"skill"`
 	IntervalMin    float64        `json:"intervalMin"`
+	DebounceMin    float64        `json:"debounceMin,omitempty"`
 	BaselineFields map[string]any `json:"baselineFields"`
 	On             string         `json:"on,omitempty"`
 }
@@ -83,8 +84,16 @@ type WatchSpec struct {
 
 // WatchSkillState is the recorded skill-signal reference in the state file.
 type WatchSkillState struct {
-	LastRun string         `json:"lastRun"`
-	Values  map[string]any `json:"values"`
+	LastRun string                  `json:"lastRun"`
+	Values  map[string]any          `json:"values"`
+	Pending map[string]WatchPending `json:"pending,omitempty"`
+}
+
+// WatchPending is a debounce-pending skill flip: it fires only if it persists.
+type WatchPending struct {
+	From  any    `json:"from"`
+	To    any    `json:"to"`
+	Since string `json:"since"`
 }
 
 // WatchLast is the last observed snapshot recorded in the state file.
@@ -510,30 +519,94 @@ func (c *watchCmd) checkSkillWatch(env *cli.Env, spec *WatchSpec, w *WatchSkillW
 	for path := range w.BaselineFields {
 		vals[path] = dig(report, path)
 	}
-	ref := w.BaselineFields
+	// recorded = last CONFIRMED values (only updated when a flip fires or
+	// debounce is disabled); pending flips age until they persist or revert.
+	recorded := make(map[string]any, len(w.BaselineFields))
+	pending := map[string]WatchPending{}
+	var ref map[string]any
 	if state.Skill != nil && len(state.Skill.Values) > 0 {
 		ref = state.Skill.Values
 	}
-
-	var events []WatchEvent
-	for path, v := range vals {
-		if v == nil || equalWatchValues(v, ref[path]) {
-			continue
+	for k, v := range w.BaselineFields {
+		recorded[k] = v
+	}
+	if ref != nil {
+		for k, v := range ref {
+			recorded[k] = v
 		}
-		trig, ok := findSkillTrigger(spec)
-		if ok {
-			fire := trig
-			fire.ID = fmt.Sprintf("SIG-%s", watchFieldSlug(path))
-			fire.Label = fmt.Sprintf("%s flip: %s %v → %v", w.Skill, path, ref[path], v)
-			ev := buildWatchEvent(spec, fire, cur, ts, elapsedMin)
+	}
+	if state.Skill != nil {
+		for k, p := range state.Skill.Pending {
+			pending[k] = p
+		}
+	}
+
+	fired, recorded, newPending := applySkillWatch(recorded, pending, vals, w.DebounceMin, ts)
+	var events []WatchEvent
+	for path, ch := range fired {
+		if ev, ok := fireSkillEvent(spec, w, path, ch[0], ch[1], cur, ts, elapsedMin, env); ok {
 			events = append(events, ev)
-			fmt.Fprintf(env.Stderr, "FIRED %s: %v → %v\n", fire.ID, ref[path], v)
 		}
 	}
 	if !dryRun {
-		state.Skill = &WatchSkillState{LastRun: isoWatch(ts), Values: vals}
+		state.Skill = &WatchSkillState{LastRun: isoWatch(ts), Values: recorded, Pending: newPending}
 	}
 	return events
+}
+
+// applySkillWatch is the pure debounce decision: compares live values vs the
+// last CONFIRMED values, aging pending flips until they persist (fire) or
+// revert (die). fired maps field -> {from, to}.
+func applySkillWatch(recorded map[string]any, pending map[string]WatchPending,
+	vals map[string]any, debounceMin float64,
+	ts time.Time) (fired map[string][2]any, newRecorded map[string]any, newPending map[string]WatchPending) {
+	fired = map[string][2]any{}
+	newRecorded = make(map[string]any, len(recorded))
+	for k, v := range recorded {
+		newRecorded[k] = v
+	}
+	newPending = map[string]WatchPending{}
+	for path, v := range vals {
+		if v == nil {
+			continue
+		}
+		base := recorded[path]
+		if equalWatchValues(v, base) {
+			continue // matches confirmed state; any pending flip for it dies
+		}
+		prior, hasPrior := pending[path]
+		switch {
+		case debounceMin <= 0:
+			fired[path] = [2]any{base, v}
+			newRecorded[path] = v
+		case hasPrior && equalWatchValues(prior.To, v):
+			if since, err := time.Parse(time.RFC3339, prior.Since); err == nil &&
+				ts.Sub(since).Minutes() >= debounceMin {
+				fired[path] = [2]any{prior.From, v}
+				newRecorded[path] = v
+			} else {
+				newPending[path] = prior // still aging
+			}
+		default:
+			newPending[path] = WatchPending{From: base, To: v, Since: isoWatch(ts)}
+		}
+	}
+	return fired, newRecorded, newPending
+}
+
+// fireSkillEvent emits one skill flip event under the SIG-<field> id.
+func fireSkillEvent(spec *WatchSpec, w *WatchSkillWatch, path string, from, to any,
+	cur float64, ts time.Time, elapsedMin float64, env *cli.Env) (WatchEvent, bool) {
+	trig, ok := findSkillTrigger(spec)
+	if !ok {
+		return WatchEvent{}, false
+	}
+	fire := trig
+	fire.ID = fmt.Sprintf("SIG-%s", watchFieldSlug(path))
+	fire.Label = fmt.Sprintf("%s flip: %s %v → %v", w.Skill, path, from, to)
+	ev := buildWatchEvent(spec, fire, cur, ts, elapsedMin)
+	fmt.Fprintf(env.Stderr, "FIRED %s: %v → %v\n", fire.ID, from, to)
+	return ev, true
 }
 
 // runSkillReport executes a registered skill through the exact code path the

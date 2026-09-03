@@ -167,9 +167,11 @@ func TestWatchStateRoundTrip(t *testing.T) {
 	}
 }
 
-// TestActiveSpecLoads verifies the live watchtower spec parses into the Go
-// types and carries the expected trigger set. Skipped when the spec file is
-// not present (it lives outside this repo).
+// TestWatchActiveSpecLoads verifies the live watchtower spec parses into the Go
+// types and carries a structurally valid trigger set. Skipped when the spec
+// file is not present (it lives outside this repo). Episode-AGNOSTIC: episodes
+// rotate (ep1 zone triggers → ep2 coil breaks → ...), so only structure is
+// asserted, not specific trigger ids.
 func TestWatchActiveSpecLoads(t *testing.T) {
 	const specPath = "/Volumes/ExMac/code/tradingview/agents/watchtower/specs/ACTIVE_SPEC.json"
 	if _, err := os.Stat(specPath); err != nil {
@@ -179,19 +181,16 @@ func TestWatchActiveSpecLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load spec: %v", err)
 	}
-	want := map[string]bool{
-		"TP2": false, "TP1": false, "Z1": false, "L1": false, "L3": false,
-		"S1": false, "S2": false, "MV-UP": false, "MV-DN": false,
-		"SIG": false, "TPLUS": false, "EXP": false,
+	if len(spec.Triggers) < 8 {
+		t.Errorf("expected >=8 triggers, got %d", len(spec.Triggers))
 	}
+	kinds := map[string]int{}
 	for _, trig := range spec.Triggers {
-		if _, ok := want[trig.ID]; ok {
-			want[trig.ID] = true
-		}
+		kinds[trig.Type]++
 	}
-	for id, seen := range want {
-		if !seen {
-			t.Errorf("trigger %s missing from spec", id)
+	for _, k := range []string{"level", "pct", "skill", "time"} {
+		if kinds[k] == 0 {
+			t.Errorf("expected at least one %s trigger, got %v", k, kinds)
 		}
 	}
 	if spec.SkillWatch == nil || spec.SkillWatch.Skill != "xau-scalp" {
@@ -199,5 +198,61 @@ func TestWatchActiveSpecLoads(t *testing.T) {
 	}
 	if spec.Symbol != "OANDA:XAUUSD" || spec.TF != "15" {
 		t.Errorf("unexpected symbol/tf: %s %s", spec.Symbol, spec.TF)
+	}
+}
+
+func TestApplySkillWatchDebounce(t *testing.T) {
+	base := map[string]any{"market.bias": "neutral", "structure.stDir": float64(-1)}
+	ts := time.Date(2026, 9, 3, 18, 0, 0, 0, time.UTC)
+
+	// 1) debounce disabled -> immediate fire
+	fired, rec, pend := applySkillWatch(base, map[string]WatchPending{},
+		map[string]any{"market.bias": "bearish"}, 0, ts)
+	if len(fired) != 1 || fired["market.bias"][0] != "neutral" || fired["market.bias"][1] != "bearish" {
+		t.Errorf("debounce=0 must fire immediately, got %v", fired)
+	}
+	if rec["market.bias"] != "bearish" || len(pend) != 0 {
+		t.Errorf("debounce=0 must update recorded, got %v / %v", rec, pend)
+	}
+
+	// 2) first flip with debounce -> pending only, no fire
+	fired, rec, pend = applySkillWatch(base, map[string]WatchPending{},
+		map[string]any{"market.bias": "bearish"}, 15, ts)
+	if len(fired) != 0 {
+		t.Errorf("debounced first flip must NOT fire, got %v", fired)
+	}
+	if rec["market.bias"] != "neutral" {
+		t.Errorf("recorded must stay at confirmed value while pending, got %v", rec)
+	}
+	p := pend["market.bias"]
+	if p.To != "bearish" || p.From != "neutral" {
+		t.Errorf("pending must carry from/to, got %+v", p)
+	}
+
+	// 3) flip persists past the window -> fires with ORIGINAL from
+	fired, rec, pend = applySkillWatch(base, map[string]WatchPending{"market.bias": p},
+		map[string]any{"market.bias": "bearish"}, 15, ts.Add(16*time.Minute))
+	if len(fired) != 1 || fired["market.bias"][0] != "neutral" || fired["market.bias"][1] != "bearish" {
+		t.Errorf("persisted flip must fire with original from, got %v", fired)
+	}
+	if rec["market.bias"] != "bearish" || len(pend) != 0 {
+		t.Errorf("fired flip must update recorded and clear pending, got %v / %v", rec, pend)
+	}
+
+	// 4) flip reverts before aging -> dies silently
+	fired, rec, pend = applySkillWatch(base, map[string]WatchPending{"market.bias": p},
+		map[string]any{"market.bias": "neutral"}, 15, ts.Add(10*time.Minute))
+	if len(fired) != 0 || len(pend) != 0 {
+		t.Errorf("reverted flip must die without firing, got %v / %v", fired, pend)
+	}
+	if rec["market.bias"] != "neutral" {
+		t.Errorf("reverted flip must leave recorded unchanged, got %v", rec)
+	}
+
+	// 5) pending still aging (below threshold) -> stays pending
+	fired, _, pend = applySkillWatch(base, map[string]WatchPending{"market.bias": p},
+		map[string]any{"market.bias": "bearish"}, 15, ts.Add(5*time.Minute))
+	if len(fired) != 0 || len(pend) != 1 {
+		t.Errorf("flip below debounce window must stay pending, got %v / %v", fired, pend)
 	}
 }
