@@ -46,7 +46,10 @@ if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
     export CLOUDFLARE_AI_TOKEN="$CLOUDFLARE_API_KEY"
     export CF_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
     if ! curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1; then
-      (cd "$HOME" && setsid nohup dsh web --port 3081 --host 0.0.0.0 --no-open >/tmp/dsh-web.log 2>&1 &)
+      # 127.0.0.1 only: dsh refuses --host 0.0.0.0 on purpose (it would
+      # expose remote code execution to the network). The codespace port
+      # forwarder picks up localhost-bound ports anyway.
+      (cd "$HOME" && setsid nohup dsh web --port 3081 --host 127.0.0.1 --no-open >/tmp/dsh-web.log 2>&1 &)
       for i in $(seq 1 60); do curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 && break; sleep 1; done
       curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 \
         && echo "dsh web ready: http://localhost:3081 (Prime fleet column in the Web GUI; preset: prime-orchestrator)" \
