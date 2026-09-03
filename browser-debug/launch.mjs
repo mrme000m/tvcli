@@ -262,6 +262,16 @@ async function main() {
   const profile = process.env.CB_PROFILE || join(SCRIPT_DIR, 'profile');
   mkdirSync(profile, { recursive: true });
 
+  // Stale-profile recovery (containers / hard kills): a Chromium process from
+  // a previous container generation leaves SingletonLock / SingletonSocket /
+  // SingletonCookie behind, and the next launch aborts with "The profile
+  // appears to be in use by another Chromium process" — CDP never comes up.
+  // We just proved no live CDP session exists (loop above), so any lock
+  // present here is stale: remove it.
+  for (const f of ['SingletonLock', 'SingletonSocket', 'SingletonCookie']) {
+    rmSync(join(profile, f), { force: true });
+  }
+
   // Resolve the proxy into the actual --proxy-server value. Authed SOCKS5 →
   // local relay; everything else → passed through verbatim.
   let proxyArg = '';
