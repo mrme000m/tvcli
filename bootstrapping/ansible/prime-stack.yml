@@ -156,6 +156,7 @@
 
     - name: Install dsh CLI at the exact supported version (npm global)
       ansible.builtin.shell: npm install -g @deepseek-ai/dsh@{{ dsh_version }}
+      register: dsh_install
       when: dsh_detect.stdout == 'MISSING'
       tags: [dsh]
 
@@ -612,7 +613,7 @@
     - name: Prime stack summary
       ansible.builtin.debug:
         msg:
-          - "dsh CLI: {{ 'installed ' + (dsh_detect.stdout | trim) if dsh_detect.stdout != 'MISSING' else 'FAILED to install' }}"
+          - "dsh CLI: {{ 'installed ' + (dsh_detect.stdout | trim) if dsh_detect.stdout != 'MISSING' else ('installed by this run' if (dsh_install.rc | default(1)) == 0 else 'FAILED to install') }}"
           - "plugin {{ dsh_plugin_package }}: {{ 'present in profile ' ~ dsh_profile if (plugin_installed.rc | default(1)) == 0 or ((plugin_add_retry.rc | default(1)) == 0) else 'FAILED' }}"
           - "preset prime-orchestrator: {{ 'materialized' if (preset_file.stat.exists | default(false)) or ((preset_wait.rc | default(1)) == 0) else 'NOT materialized' }}"
           - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 or ((prime_agent_install.rc | default(1)) == 0) else 'FAILED to install' }}"
