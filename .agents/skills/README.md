@@ -12,6 +12,7 @@ for working with the `tvcli` TradingView Pine pipeline.
 | `tv-watch` | Watchtower agent protocol — act on market-watch trigger events (invocation packages, mission, armed specs). |
 | `openknowledge` | Work with the Open Knowledge knowledge base connected to this repository and capture durable insights. |
 | `codespace-prime-stack` | Operate, verify, and extend the bootstrapped DSH prime-orchestrator stack in the GitHub Codespace/devcontainer — dsh + dsh-prime-orchestrator plugin + prime-agent CLI with Cloudflare Workers AI models; the `bootstrapping/ansible/prime-stack.yml` playbook, the dsh Web GUI / Prime fleet column on port 3081, secrets contract, and the empirically verified gotchas. |
+| `wundertrading` | WunderTrading execution-layer skill — classify a token's market regime (trend/chop/squeeze via public OHLCV), map it to a classic/DCA strategy config (TP ladders, stops, trailing, DCA sizing math), deploy and manage it through the wun MCP tools or HMAC-signed REST API, and prove reliability from exported strategy history before scaling. |
 
 ## Packaging
 

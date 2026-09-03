@@ -19,7 +19,8 @@
       ".agents/skills/tvcli",
       ".agents/skills/pine2tool",
       ".agents/skills/openknowledge",
-      ".agents/skills/codespace-prime-stack"
+      ".agents/skills/codespace-prime-stack",
+      ".agents/skills/wundertrading"
     ],
     "subagents": {
       "agents": [
