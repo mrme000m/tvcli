@@ -1,0 +1,30 @@
+{
+  "name": "tvcli-skills",
+  "version": "1.0.0",
+  "description": "TradingView Pine Script market analysis toolkit — 20 indicator skills, consolidated XAUUSD scalping engine, async HTTP server, progressive Pine Script reference docs, and the codespace DSH prime-orchestrator stack skill",
+  "keywords": [
+    "pi-package",
+    "tradingview",
+    "pine-script",
+    "xauusd",
+    "market-analysis",
+    "trading",
+    "indicator",
+    "smc",
+    "supertrend",
+    "ema"
+  ],
+  "pi": {
+    "skills": [
+      ".agents/skills/tvcli",
+      ".agents/skills/pine2tool",
+      ".agents/skills/openknowledge",
+      ".agents/skills/codespace-prime-stack"
+    ],
+    "subagents": {
+      "agents": [
+        ".agents/agents"
+      ]
+    }
+  }
+}

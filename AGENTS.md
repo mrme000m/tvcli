@@ -16,7 +16,9 @@ agent-friendly JSON. It is packaged for agent consumption two ways:
    | `pine2tool` | Turning any `PUB;…`/`USER;…` ID or local `.pine` file into a reusable structured analysis tool + registrable skill stub. |
    | `tv-usecases` | Discover, develop, and orchestrate all major TradingView strategy/indicator use cases for agentic usage. Bridges bdg (live-chart investigation) with tvcli (headless execution). |
    | `tv-scout` | Drive the live TradingView web chart (headful CDP) to visually represent and confirm market understanding with screenshots. |
+   | `tv-watch` | Watchtower agent protocol — act on market-watch trigger events (invocation packages from `agents/watchtower/`). |
    | `openknowledge` | Reading/writing the `Wiki/` knowledge base via the `openknowledge` CLI. |
+   | `codespace-prime-stack` | Operate/verify/extend the bootstrapped DSH prime-orchestrator stack in the GitHub Codespace/devcontainer (dsh + dsh-prime-orchestrator + prime-agent + CF Workers AI; the `bootstrapping/` playbook, dsh Web GUI on :3081, secrets contract, verified gotchas). |
 
 2. **Pi package** — `package.json` at the root carries the `pi-package`
    keyword and a `pi.skills` manifest, so `pi install <this repo>` (local path
@@ -77,6 +79,9 @@ tvcli/
 │   ├── skill/          20-skill registry + per-script parsers (pkg/skill/parsers/)
 │   └── tradingview/    WebSocket client: protocol, chart/study lifecycle, auth
 ├── docs/               CLI_REFERENCE, MULTI_ACCOUNT, TIER_LIMITS, skills/, research/
+├── bootstrapping/      repeatable devcontainer ansible playbooks (ansible/prime-stack.yml:
+│                       dsh + dsh-prime-orchestrator + prime-agent + CF Workers AI — see
+│                       the codespace-prime-stack skill in .agents/skills/)
 ├── go.mod              module github.com/mrme000m/tvcli (go 1.22)
 └── Makefile
 ```
@@ -98,6 +103,17 @@ tvcli/
   endpoints. `runSkillCompute`/`runSkillWithAccount` are `*Server` methods.
   (`pkg/skill/parsers/mtf_confluence.{go,pine}` and
   `pkg/tradingview/inputparse.go` are now committed at HEAD.)
+- **Codespace prime stack (verified 2026-09-04):** the devcontainer is
+  bootstrapped into a DSH prime-orchestrator host by
+  `bootstrapping/ansible/prime-stack.yml` (run by `post-create.sh`,
+  idempotent, never build-breaking): dsh `0.1.1-rc.2` (exact — plugin
+  compatibility), `dsh-prime-orchestrator` in profile `web`,
+  `prime-orchestrator` as the default agent preset, `prime-agent` CLI, CF
+  Workers AI models from the `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY` repo
+  codespace secrets, bw CLI secrets via `browser-debug/secrets/bw-provision.sh`.
+  dsh Web GUI (Prime fleet column) on forwarded port 3081, opt-in autostart
+  via `touch .dsh-autoweb`. E2E-verified in the codespace: post-create exit 0,
+  LLM answers, GUI serving. See the `codespace-prime-stack` skill.
 
 ## Key commands (subset)
 

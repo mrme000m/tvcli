@@ -62,6 +62,7 @@ BINANCE_*.json
 skill_work/
 *.json
 !.devcontainer/devcontainer.json
+!package.json
 
 # Background server state
 .tvcli-server.pid

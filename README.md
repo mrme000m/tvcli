@@ -290,6 +290,30 @@ moment**: the window's last bar closes at `to`, and studies compute over
 the anchored (historical) window — a point-in-time market read with no
 lookahead, the headless equivalent of bar replay.
 
+## GitHub Codespace: Prime Intelligence Stack
+
+The devcontainer (`.devcontainer/`) bootstraps into a **DSH
+prime-orchestrator host** — the prime orchestrator preset and plugins
+become the codespace's prime intelligence and agent fleet:
+
+- [`bootstrapping/ansible/prime-stack.yml`](bootstrapping/ansible/prime-stack.yml)
+  (idempotent, run automatically by `post-create.sh`) installs:
+  **dsh** `0.1.1-rc.2` (exact — [plugin compatibility][po]), the
+  **`dsh-prime-orchestrator`** plugin into profile `web` (Prime fleet column
+  in the Web GUI, `prime_agent` tool, CF Workers AI LLM provider + tools),
+  the **`prime-orchestrator`** agent preset (default), the **prime-agent**
+  CLI, and all configuration.
+- **Models:** Cloudflare Workers AI (`@cf/zai-org/glm-5.3` default + 7 more)
+  via the `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_KEY` repo codespace
+  secrets. **Secrets:** Bitwarden (`bw` CLI) provisions `.env`,
+  `accounts.json`, and the browser-debug runtime files.
+- **Web GUI:** dsh web on forwarded port **3081** (Prime fleet column) —
+  opt-in autostart with `touch .dsh-autoweb`, then restart.
+- Operator manual: [`bootstrapping/README.md`](bootstrapping/README.md) ·
+  agent skill: `codespace-prime-stack` in `.agents/skills/`.
+
+[po]: https://github.com/mrme000m/dsh-prime-orchestrator
+
 ## Development
 
 ```bash

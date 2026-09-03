@@ -9,7 +9,9 @@ for working with the `tvcli` TradingView Pine pipeline.
 | `pine2tool` | Turn ANY Pine script (Pine ID or local `.pine`) into a reusable, structured analysis tool — download source, introspect inputs, run with custom inputs, extract signals/levels/graphics, and emit a registrable skill stub. |
 | `tv-usecases` | Discover, develop, and orchestrate all major TradingView strategy/indicator use cases for agentic usage. Catalogs 12 use cases (scan, run, analyze, study management, sweeps, symbol/tf, visual, protocol capture, chart model, pine2tool, consolidated engine, HTTP server). Bridges bdg (live-chart) with tvcli (headless). Includes DSH tv-investigator headless invocation. |
 | `tv-scout` | Progressively scout, instrument, and drive the live TradingView web chart for visual representation + vision-model confluence. |
+| `tv-watch` | Watchtower agent protocol — act on market-watch trigger events (invocation packages, mission, armed specs). |
 | `openknowledge` | Work with the Open Knowledge knowledge base connected to this repository and capture durable insights. |
+| `codespace-prime-stack` | Operate, verify, and extend the bootstrapped DSH prime-orchestrator stack in the GitHub Codespace/devcontainer — dsh + dsh-prime-orchestrator plugin + prime-agent CLI with Cloudflare Workers AI models; the `bootstrapping/ansible/prime-stack.yml` playbook, the dsh Web GUI / Prime fleet column on port 3081, secrets contract, and the empirically verified gotchas. |
 
 ## Packaging
 
