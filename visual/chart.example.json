@@ -1,0 +1,10 @@
+{
+  "symbol": "OANDA:XAUUSD",
+  "timeframe": "1",
+  "width": 1280,
+  "height": 800,
+  "bars": 150,
+  "hide_chrome": true,
+  "screenshot": "xauusd_1m.png",
+  "hold": 0
+}

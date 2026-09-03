@@ -12,6 +12,7 @@
 #   kasm    Linux-only: Kasm Workspaces single-server install (opt-in)
 #   vision  Mistral vision key present (never printed)
 #   bw      Bitwarden CLI + jq (secrets provisioning: secrets/bw-provision.sh)
+#   visual  tvvisual confluence channel (visual/requirements.txt via pip3 --user)
 #
 # Grounded in: launch.mjs, bdg/package.json, .agents/skills/tv-network/SKILL.md,
 # vision.mjs. NO invented package names, URLs, or versions.
@@ -373,3 +374,33 @@
       changed_when: false
       failed_when: false
       tags: [bw]
+
+    # ------------------------------------------------------------------ visual
+    # tvvisual (visual/ in this repo) is the headful confluence channel:
+    # python3 -m tvvisual confluence xau-scalp --env ../.env --tf 15
+    # Its only third-party dependency is cloakbrowser (see visual/requirements.txt).
+    - name: Detect python3 for tvvisual
+      ansible.builtin.command: python3 --version
+      register: visual_python
+      changed_when: false
+      failed_when: false
+      tags: [visual]
+
+    - name: Assert python3 present for tvvisual
+      ansible.builtin.fail:
+        msg: "python3 not found — required by the tvvisual confluence channel (visual/)"
+      when: visual_python.rc != 0
+      tags: [visual]
+
+    - name: Install tvvisual Python dependencies (idempotent)
+      # pip3 is a no-op ("Requirement already satisfied") once cloakbrowser is
+      # installed. failed_when false tolerates externally-managed environments
+      # where --user installs need --break-system-packages. Repo root is the
+      # parent of tv_workspace (browser-debug/) in the devcontainer.
+      ansible.builtin.command:
+        cmd: pip3 install --user -r visual/requirements.txt
+        chdir: "{{ tv_workspace }}/.."
+      register: visual_pip
+      changed_when: "'Requirement already satisfied' not in visual_pip.stdout"
+      failed_when: false
+      tags: [visual]

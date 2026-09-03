@@ -1,0 +1,25 @@
+{
+  "name": "vp-only",
+  "description": "Clean XAUUSD Volume Profile chart with POC/VAH/VAL levels only",
+  "params": {
+    "symbol": "OANDA:XAUUSD",
+    "timeframe": "60",
+    "bars": 180,
+    "poc": 4518.78,
+    "vah": 4612.17,
+    "val": 4469.63,
+    "bias": "bullish-breakout"
+  },
+  "steps": [
+    { "action": "open", "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "relogin", "required": false },
+    { "action": "open", "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "hide_chrome" },
+    { "action": "zoom_bars", "args": { "bars": "$params.bars" } },
+    { "action": "draw", "args": { "kind": "level", "price": "$params.poc", "label": "POC 4518.78", "color": "#ef5350" } },
+    { "action": "draw", "args": { "kind": "level", "price": "$params.vah", "label": "VAH 4612.17", "color": "#26a69a" } },
+    { "action": "draw", "args": { "kind": "level", "price": "$params.val", "label": "VAL 4469.63", "color": "#42a5f5" } },
+    { "action": "draw", "args": { "kind": "label", "text": "Volume Profile | Bias: $params.bias", "price": "$params.vah" } },
+    { "action": "screenshot", "args": { "path": "../xau-vp-clean.png", "region": "full" } }
+  ]
+}

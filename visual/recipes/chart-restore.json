@@ -1,0 +1,41 @@
+{
+  "name": "chart-restore",
+  "description": "Round-trip proof that the visual chart state is fully reconstructable from configuration. Builds a chart (symbol/timeframe + the xau-scalp study + drawn SL/TP levels), snapshots EVERY line tool (restorable DTO) plus the full layout JSON, wipes all drawings, restores them from the snapshot, and screenshots before/after. This is the 'make the whole visual state repeatable' artifact.",
+  "params": {
+    "symbol": "PEPPERSTONE:XAUUSD",
+    "timeframe": "5",
+    "bars": 150,
+    "script_query": "XAU Scalp Engine",
+    "script_match": "XAU Scalp Engine v2",
+    "sl": null,
+    "tp": null
+  },
+  "steps": [
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "relogin", "required": false },
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "add_indicator_search",
+      "required": false,
+      "args": { "name": "$params.script_query", "match": "$params.script_match" } },
+    { "action": "sleep", "args": { "seconds": 4 } },
+    { "action": "draw",
+      "required": false,
+      "args": { "kind": "level", "price": "$params.sl", "label": "SL", "color": "#ef5350" } },
+    { "action": "draw",
+      "required": false,
+      "args": { "kind": "level", "price": "$params.tp", "label": "TP", "color": "#26a69a" } },
+    { "action": "layout_export",
+      "args": { "path": "chart-restore-layout.json" } },
+    { "action": "drawings_snapshot",
+      "args": { "path": "chart-restore-drawings.json" } },
+    { "action": "screenshot",
+      "args": { "path": "../chart-restore-before.png", "region": "full" } },
+    { "action": "clear_drawings" },
+    { "action": "drawings_restore",
+      "args": { "path": "chart-restore-drawings.json" } },
+    { "action": "screenshot",
+      "args": { "path": "../chart-restore-after.png", "region": "full" } }
+  ]
+}

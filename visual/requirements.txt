@@ -1,0 +1,4 @@
+# tvvisual runtime dependencies (see pyproject.toml).
+# All other imports in tvvisual/*.py are Python stdlib (json, os, re, sys,
+# time, argparse, base64, subprocess, datetime, pathlib, http.server, urllib).
+cloakbrowser>=0.5.3,<1

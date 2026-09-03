@@ -80,10 +80,22 @@ node bdg/dist/index.js network list            # captured API calls
 ```
 
 ### 5. Visual confluence (represent + confirm)
-From the `visual/` sibling workspace (tvvisual): `confluence xau-scalp`
-runs tvcli compute → draws SL/TP/bias on the live chart → screenshot →
-exact-value readback + drift report. Inside this container the chart runs on
-the Xvfb display (watch it via VNC/noVNC).
+The tvvisual package is vendored **inside this repo** at `visual/` (package
+`visual/tvvisual/`, recipes `visual/recipes/`). `confluence xau-scalp` runs
+tvcli compute → draws SL/TP/bias on the live chart → screenshot → exact-value
+readback + drift report:
+
+```bash
+cd visual && python3 -m tvvisual confluence xau-scalp --env ../.env --tf 15
+```
+
+Its Python dependencies (`visual/requirements.txt` — cloakbrowser) are
+installed by `ansible-playbook browser-debug/ansible/deps.yml --tags visual`.
+Inside this container the chart runs on the Xvfb display (watch it via
+VNC/noVNC). The legacy sibling-workspace checkout
+(`cd ../visual && python3 -m tvvisual confluence xau-scalp --env ../go/.env`)
+still works outside the repo — `confluence.py` resolves the `tvcli` binary for
+both layouts.
 
 ### 6. Self-improvement loop
 - **Extend the skill set**: `pine2tool` turns any Pine ID into a parser-less

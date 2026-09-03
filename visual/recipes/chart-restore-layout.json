@@ -1,0 +1,2892 @@
+{
+ "resolution": "5",
+ "symbol_type": "commodity",
+ "exchange": "Pepperstone",
+ "listed_exchange": "PEPPERSTONE",
+ "symbol": "PEPPERSTONE:XAUUSD",
+ "short_name": "XAUUSD",
+ "legs": [
+  {
+   "symbol": "PEPPERSTONE:XAUUSD",
+   "pro_symbol": "PEPPERSTONE:XAUUSD"
+  }
+ ],
+ "id": 172153685,
+ "name": "XAUUSD 2H",
+ "description": "XAUUSD 2H",
+ "is_realtime": "1",
+ "study_meta_info_map": {
+  "StrategyScript$STD;RSI%1Strategy@tv-scripting-101[v.31.0]": {
+   "palettes": {},
+   "inputs": [
+    {
+     "defval": "bmI9Ks46_VnmQ6PyOPni84Hvp1s5Pdw==_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",
+     "id": "text",
+     "isHidden": true,
+     "name": "ILScript",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "",
+     "id": "pineId",
+     "isHidden": true,
+     "name": "pineId",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "",
+     "id": "pineVersion",
+     "isHidden": true,
+     "name": "pineVersion",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "{\"strategy\":1,\"ta\":1}",
+     "id": "pineFeatures",
+     "isFake": true,
+     "isHidden": true,
+     "name": "pineFeatures",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 14,
+     "display": 4294967295,
+     "id": "in_0",
+     "isFake": true,
+     "max": 1000000000000,
+     "min": -1000000000000,
+     "name": "Length",
+     "type": "integer"
+    },
+    {
+     "active": true,
+     "defval": 30,
+     "display": 4294967295,
+     "id": "in_1",
+     "isFake": true,
+     "max": 1000000000000,
+     "min": -1000000000000,
+     "name": "Oversold",
+     "type": "integer"
+    },
+    {
+     "active": true,
+     "defval": 70,
+     "display": 4294967295,
+     "id": "in_2",
+     "isFake": true,
+     "max": 1000000000000,
+     "min": -1000000000000,
+     "name": "Overbought",
+     "type": "integer"
+    },
+    {
+     "active": true,
+     "defval": 1,
+     "groupId": "strategy_props",
+     "id": "in_3",
+     "internalID": "pyramiding",
+     "isFake": true,
+     "max": 1000000,
+     "min": 0,
+     "name": "pyramiding",
+     "tooltip": "Maximum number of successive entries allowed in the same direction",
+     "type": "integer",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_4",
+     "internalID": "calc_on_order_fills",
+     "isFake": true,
+     "name": "Calculate Strategy on Order's Fill(s)",
+     "tooltip": "Triggers an additional intrabar calculation after order fills",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_5",
+     "internalID": "calc_on_every_tick",
+     "isFake": true,
+     "name": "Calculate Strategy on every Tick(s)",
+     "tooltip": "Recalculates the strategy with each real-time bar update",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": 0,
+     "groupId": "strategy_props",
+     "id": "in_6",
+     "internalID": "backtest_fill_limits_assumption",
+     "isFake": true,
+     "max": 1000000,
+     "min": 0,
+     "name": "Backtesting Limit Order(s) fill assumption",
+     "tooltip": "Ticks beyond the limit price required for limit order execution",
+     "type": "integer",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "fixed",
+     "groupId": "strategy_props",
+     "id": "in_7",
+     "internalID": "default_qty_type",
+     "isFake": true,
+     "name": "Default entry/order Qty Type",
+     "options": [
+      "fixed",
+      "cash_per_order",
+      "percent_of_equity"
+     ],
+     "tooltip": "Quantity per trade in the selected unit",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 1,
+     "groupId": "strategy_props",
+     "id": "in_8",
+     "internalID": "default_qty_value",
+     "isFake": true,
+     "min": 0,
+     "name": "Default entry/order Qty Value",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 1000000,
+     "groupId": "strategy_props",
+     "id": "in_9",
+     "internalID": "initial_capital",
+     "isFake": true,
+     "min": 0,
+     "name": "Initial Capital",
+     "tooltip": "Starting funds available for the trading strategy",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "NONE",
+     "groupId": "strategy_props",
+     "id": "in_10",
+     "internalID": "currency",
+     "isFake": true,
+     "name": "Base Currency",
+     "options": [
+      "NONE",
+      "USD",
+      "EUR",
+      "AUD",
+      "GBP",
+      "NZD",
+      "CAD",
+      "CHF",
+      "HKD",
+      "JPY",
+      "NOK",
+      "RUB",
+      "SEK",
+      "SGD",
+      "TRY",
+      "ZAR",
+      "BTC",
+      "ETH",
+      "MYR",
+      "KRW",
+      "USDT",
+      "INR",
+      "PKR",
+      "PLN",
+      "EGP",
+      "AED",
+      "COP",
+      "MXN",
+      "CLP",
+      "BRL",
+      "ARS",
+      "PEN",
+      "IDR",
+      "SAR",
+      "BDT",
+      "BHD",
+      "CNY",
+      "CZK",
+      "DKK",
+      "HUF",
+      "ILS",
+      "ISK",
+      "KES",
+      "KWD",
+      "LKR",
+      "MAD",
+      "NGN",
+      "PHP",
+      "QAR",
+      "RON",
+      "RSD",
+      "THB",
+      "TND",
+      "TWD",
+      "VES",
+      "VND"
+     ],
+     "tooltip": "Currency used in calculations and strategy results",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 0,
+     "groupId": "strategy_props",
+     "id": "in_11",
+     "internalID": "slippage",
+     "isFake": true,
+     "max": 1000000,
+     "min": 0,
+     "name": "Backtesting slippage for market orders",
+     "tooltip": "Ticks to be added to the fill price of market and stop orders",
+     "type": "integer",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "percent",
+     "groupId": "strategy_props",
+     "id": "in_12",
+     "internalID": "commission_type",
+     "isFake": true,
+     "name": "Commission Type",
+     "options": [
+      "percent",
+      "cash_per_contract",
+      "cash_per_order"
+     ],
+     "tooltip": "Entry and exit fees to be paid",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 0,
+     "groupId": "strategy_props",
+     "id": "in_13",
+     "internalID": "commission_value",
+     "isFake": true,
+     "min": 0,
+     "name": "Commission Value",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_14",
+     "internalID": "process_orders_on_close",
+     "isFake": true,
+     "name": "Process orders on bar Close",
+     "tooltip": "Fills market orders on the close of the bar where they are issued",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": "FIFO",
+     "groupId": "strategy_props",
+     "id": "in_15",
+     "internalID": "close_entries_rule",
+     "isFake": true,
+     "name": "Close entries rule",
+     "options": [
+      "FIFO",
+      "ANY"
+     ],
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 100,
+     "groupId": "strategy_props",
+     "id": "in_16",
+     "internalID": "margin_long",
+     "isFake": true,
+     "min": 0,
+     "name": "Margin Long",
+     "tooltip": "Percentage of the long position the strategy must fund from equity",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 100,
+     "groupId": "strategy_props",
+     "id": "in_17",
+     "internalID": "margin_short",
+     "isFake": true,
+     "min": 0,
+     "name": "Margin Short",
+     "tooltip": "Percentage of the short position the strategy must fund from equity",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": 2,
+     "groupId": "strategy_props",
+     "id": "in_18",
+     "internalID": "risk_free_rate",
+     "isFake": true,
+     "max": 100,
+     "min": 0,
+     "name": "Risk free rate",
+     "tooltip": "The annual percentage benchmark to compare against strategy returns for calculating the Sharpe and Sortino ratios",
+     "type": "float",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_19",
+     "internalID": "use_bar_magnifier",
+     "isFake": true,
+     "name": "Use Bar Magnifier",
+     "tooltip": "On historical bars, uses more precise lower timeframe prices for more realistic results",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_20",
+     "internalID": "fill_orders_on_standard_ohlc",
+     "isFake": true,
+     "name": "Fill orders using standard OHLC",
+     "tooltip": "Forces strategies running on Heikin Ashi charts to fill orders using actual OHLC prices, for more realistic results",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": "BACKTEST",
+     "groupId": "strategy_props",
+     "id": "in_21",
+     "internalID": "run_mode",
+     "isFake": true,
+     "isHidden": true,
+     "name": "Run mode: 'backtest', 'alert' or something else",
+     "options": [
+      "BACKTEST",
+      "ALERT"
+     ],
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "",
+     "groupId": "strategy_props",
+     "id": "in_22",
+     "internalID": "alert_message",
+     "isFake": true,
+     "isHidden": true,
+     "name": "Alert message template for run mode 'alert'",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "order_fills",
+     "groupId": "strategy_props",
+     "id": "in_23",
+     "internalID": "alert_type",
+     "isFake": true,
+     "isHidden": true,
+     "name": "Alert type for run mode 'alert'",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": "",
+     "groupId": "strategy_props",
+     "id": "in_24",
+     "isFake": true,
+     "isHidden": true,
+     "name": "exclude_from_report",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": true,
+     "groupId": "strategy_props",
+     "id": "in_25",
+     "isFake": true,
+     "isHidden": true,
+     "name": "trim_orders",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": "",
+     "groupId": "strategy_props",
+     "id": "in_26",
+     "internalID": "__calc_range",
+     "isFake": true,
+     "isHidden": true,
+     "name": "calc_range",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "active": true,
+     "defval": false,
+     "groupId": "strategy_props",
+     "id": "in_27",
+     "internalID": "calc_on_every_history_tick",
+     "isFake": true,
+     "name": "Calculate Strategy on every History Tick",
+     "tooltip": "Recalculates the strategy on each historical bar tick, simulating intrabar price movements",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "active": true,
+     "defval": false,
+     "id": "__profile",
+     "isFake": true,
+     "isHidden": true,
+     "migrate": true,
+     "name": "",
+     "type": "bool",
+     "display": 0
+    }
+   ],
+   "plots": [],
+   "graphics": {},
+   "defaults": {
+    "inputs": {
+     "__profile": false,
+     "in_0": 14,
+     "in_1": 30,
+     "in_10": "NONE",
+     "in_11": 0,
+     "in_12": "percent",
+     "in_13": 0,
+     "in_14": false,
+     "in_15": "FIFO",
+     "in_16": 100,
+     "in_17": 100,
+     "in_18": 2,
+     "in_19": false,
+     "in_2": 70,
+     "in_20": false,
+     "in_21": "BACKTEST",
+     "in_22": "",
+     "in_23": "order_fills",
+     "in_24": "",
+     "in_25": true,
+     "in_26": "",
+     "in_27": false,
+     "in_3": 1,
+     "in_4": false,
+     "in_5": false,
+     "in_6": 0,
+     "in_7": "fixed",
+     "in_8": 1,
+     "in_9": 1000000,
+     "pineFeatures": "{\"strategy\":1,\"ta\":1}",
+     "pineId": "",
+     "pineVersion": "",
+     "text": "bmI9Ks46_VnmQ6PyOPni84Hvp1s5Pdw==_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"
+    },
+    "strategy": {
+     "orders": {
+      "showLabels": true,
+      "showQty": true,
+      "visible": true
+     }
+    },
+    "styles": {}
+   },
+   "_metainfoVersion": 55,
+   "behind_chart": true,
+   "description": "RSI Strategy",
+   "docs": "",
+   "format": {
+    "type": "inherit"
+   },
+   "id": "StrategyScript$STD;RSI%1Strategy@tv-scripting-101",
+   "isTVScript": true,
+   "isTVScriptStrategy": true,
+   "isTVScriptStub": false,
+   "is_hidden_study": false,
+   "is_price_study": true,
+   "pine": {
+    "digest": "b08f6606c9ce33abed22818976d50e9adab47310",
+    "version": "31.0"
+   },
+   "scriptIdPart": "STD;RSI%1Strategy",
+   "shortDescription": "RSI Strategy",
+   "styles": {},
+   "usesPrivateLib": false,
+   "warnings": [],
+   "shortId": "StrategyScript$STD;RSI%1Strategy",
+   "packageId": "tv-scripting",
+   "version": 101,
+   "fullId": "StrategyScript$STD;RSI%1Strategy@tv-scripting-101",
+   "productId": "tv-scripting",
+   "_serverMetaInfoVersion": 55
+  },
+  "Script$USER;ed4cf60ef3fb43f6b91565afe52a3a4b@tv-scripting-101[v.2.0]": {
+   "palettes": {},
+   "inputs": [
+    {
+     "defval": "bmI9Ks46_rlRATaN1Bwkai3QYg7NQng==_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",
+     "id": "text",
+     "isHidden": true,
+     "name": "ILScript",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "",
+     "id": "pineId",
+     "isHidden": true,
+     "name": "pineId",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "",
+     "id": "pineVersion",
+     "isHidden": true,
+     "name": "pineVersion",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": "{\"indicator\":1,\"plot\":1,\"ta\":1,\"math\":1}",
+     "id": "pineFeatures",
+     "isFake": true,
+     "isHidden": true,
+     "name": "pineFeatures",
+     "type": "text",
+     "display": 15
+    },
+    {
+     "defval": 3,
+     "display": 15,
+     "group": "EMA Settings",
+     "id": "in_0",
+     "isFake": true,
+     "name": "Fast EMA",
+     "type": "integer"
+    },
+    {
+     "defval": 8,
+     "display": 15,
+     "group": "EMA Settings",
+     "id": "in_1",
+     "isFake": true,
+     "name": "Signal EMA",
+     "type": "integer"
+    },
+    {
+     "defval": 21,
+     "display": 15,
+     "group": "EMA Settings",
+     "id": "in_2",
+     "isFake": true,
+     "name": "Trend EMA",
+     "type": "integer"
+    },
+    {
+     "defval": 55,
+     "display": 15,
+     "group": "EMA Settings",
+     "id": "in_3",
+     "isFake": true,
+     "name": "Baseline EMA",
+     "type": "integer"
+    },
+    {
+     "defval": 10,
+     "display": 15,
+     "group": "SuperTrend",
+     "id": "in_4",
+     "isFake": true,
+     "name": "ST ATR Length",
+     "type": "integer"
+    },
+    {
+     "defval": 3,
+     "display": 15,
+     "group": "SuperTrend",
+     "id": "in_5",
+     "isFake": true,
+     "name": "ST Factor",
+     "type": "float"
+    },
+    {
+     "defval": 14,
+     "display": 15,
+     "group": "RSI",
+     "id": "in_6",
+     "isFake": true,
+     "name": "RSI Length",
+     "type": "integer"
+    },
+    {
+     "defval": 20,
+     "display": 15,
+     "group": "Squeeze / Bollinger",
+     "id": "in_7",
+     "isFake": true,
+     "name": "BB Length",
+     "type": "integer"
+    },
+    {
+     "defval": 2,
+     "display": 15,
+     "group": "Squeeze / Bollinger",
+     "id": "in_8",
+     "isFake": true,
+     "name": "BB Mult",
+     "type": "float"
+    },
+    {
+     "defval": 20,
+     "display": 15,
+     "group": "Squeeze / Bollinger",
+     "id": "in_9",
+     "isFake": true,
+     "name": "KC Length",
+     "type": "integer"
+    },
+    {
+     "defval": 1.5,
+     "display": 15,
+     "group": "Squeeze / Bollinger",
+     "id": "in_10",
+     "isFake": true,
+     "name": "KC Mult",
+     "type": "float"
+    },
+    {
+     "defval": 20,
+     "display": 15,
+     "group": "Volume",
+     "id": "in_11",
+     "isFake": true,
+     "name": "Volume MA Length",
+     "type": "integer"
+    },
+    {
+     "defval": false,
+     "group": "Calculation",
+     "id": "__fast_calc",
+     "isFake": true,
+     "isHidden": true,
+     "migrate": true,
+     "name": "Fast calculation",
+     "tooltip": "Limits script calculation to the last 2K bars. Turns off automatically when chart loads more historical data.",
+     "type": "bool",
+     "display": 0
+    },
+    {
+     "defval": false,
+     "id": "__profile",
+     "isFake": true,
+     "isHidden": true,
+     "migrate": true,
+     "name": "",
+     "type": "bool",
+     "display": 0
+    }
+   ],
+   "plots": [
+    {
+     "id": "plot_0",
+     "type": "line"
+    },
+    {
+     "id": "plot_1",
+     "type": "line"
+    },
+    {
+     "id": "plot_2",
+     "type": "line"
+    },
+    {
+     "id": "plot_3",
+     "type": "line"
+    },
+    {
+     "id": "plot_4",
+     "type": "line"
+    },
+    {
+     "id": "plot_5",
+     "type": "line"
+    },
+    {
+     "id": "plot_6",
+     "type": "line"
+    },
+    {
+     "id": "plot_7",
+     "type": "line"
+    },
+    {
+     "id": "plot_8",
+     "type": "line"
+    },
+    {
+     "id": "plot_9",
+     "type": "line"
+    },
+    {
+     "id": "plot_10",
+     "type": "line"
+    },
+    {
+     "id": "plot_11",
+     "type": "line"
+    },
+    {
+     "id": "plot_12",
+     "type": "line"
+    },
+    {
+     "id": "plot_13",
+     "type": "line"
+    },
+    {
+     "id": "plot_14",
+     "type": "line"
+    },
+    {
+     "id": "plot_15",
+     "type": "line"
+    }
+   ],
+   "graphics": {},
+   "defaults": {
+    "inputs": {
+     "__fast_calc": false,
+     "__profile": false,
+     "in_0": 3,
+     "in_1": 8,
+     "in_10": 1.5,
+     "in_11": 20,
+     "in_2": 21,
+     "in_3": 55,
+     "in_4": 10,
+     "in_5": 3,
+     "in_6": 14,
+     "in_7": 20,
+     "in_8": 2,
+     "in_9": 20,
+     "pineFeatures": "{\"indicator\":1,\"plot\":1,\"ta\":1,\"math\":1}",
+     "pineId": "",
+     "pineVersion": "",
+     "text": "bmI9Ks46_rlRATaN1Bwkai3QYg7NQng==_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"
+    },
+    "styles": {
+     "plot_0": {
+      "color": "#2962ff",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 2,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_1": {
+      "color": "#4CAF50",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_10": {
+      "color": "rgba(255,82,82,0.7)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_11": {
+      "color": "rgba(76,175,80,0.7)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_12": {
+      "color": "rgba(41,98,255,0.5)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_13": {
+      "color": "rgba(0,188,212,0.5)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_14": {
+      "color": "rgba(76,175,80,1)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 1,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_15": {
+      "color": "rgba(255,82,82,1)",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 1,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_2": {
+      "color": "#FF9800",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_3": {
+      "color": "#9C27B0",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_4": {
+      "color": "#FF5252",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_5": {
+      "color": "#FFEB3B",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_6": {
+      "color": "#00E676",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 1,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_7": {
+      "color": "#00BCD4",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_8": {
+      "color": "#787B86",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 1,
+      "plottype": 0,
+      "trackPrice": false,
+      "transparency": 0
+     },
+     "plot_9": {
+      "color": "#00E676",
+      "display": 15,
+      "linestyle": 0,
+      "linewidth": 3,
+      "plottype": 1,
+      "trackPrice": false,
+      "transparency": 0
+     }
+    }
+   },
+   "_metainfoVersion": 55,
+   "behind_chart": true,
+   "description": "XAUUSD Scalping Confluence Engine",
+   "docs": "",
+   "format": {
+    "type": "inherit"
+   },
+   "id": "Script$USER;ed4cf60ef3fb43f6b91565afe52a3a4b@tv-scripting-101",
+   "isTVScript": true,
+   "isTVScriptStub": false,
+   "is_hidden_study": false,
+   "is_price_study": false,
+   "pine": {
+    "digest": "a437c6f3be8cc822011bc454555cd7e99ac4ef33",
+    "version": "2.0"
+   },
+   "scriptIdPart": "USER;ed4cf60ef3fb43f6b91565afe52a3a4b",
+   "shortDescription": "XAU-SCALP",
+   "stats": {
+    "plot": 16
+   },
+   "styles": {
+    "plot_0": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Composite"
+    },
+    "plot_1": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "EMA_Stack"
+    },
+    "plot_10": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "SL"
+    },
+    "plot_11": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "TP"
+    },
+    "plot_12": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "EMA_Slope"
+    },
+    "plot_13": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Vol_Ratio"
+    },
+    "plot_14": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "FreshLong"
+    },
+    "plot_15": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "FreshShort"
+    },
+    "plot_2": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "ST_Dir"
+    },
+    "plot_3": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "RSI"
+    },
+    "plot_4": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Sqz_Mom"
+    },
+    "plot_5": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Squeeze"
+    },
+    "plot_6": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Sqz_Release"
+    },
+    "plot_7": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Vol_Delta"
+    },
+    "plot_8": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "BB_Pct"
+    },
+    "plot_9": {
+     "histogramBase": 0,
+     "isHidden": false,
+     "joinPoints": false,
+     "title": "Signal"
+    }
+   },
+   "usesPrivateLib": false,
+   "warnings": [],
+   "shortId": "Script$USER;ed4cf60ef3fb43f6b91565afe52a3a4b",
+   "packageId": "tv-scripting",
+   "version": 101,
+   "fullId": "Script$USER;ed4cf60ef3fb43f6b91565afe52a3a4b@tv-scripting-101",
+   "productId": "tv-scripting",
+   "_serverMetaInfoVersion": 55
+  }
+ },
+ "content": {
+  "name": "XAUUSD 2H",
+  "layout": "s",
+  "charts": [
+   {
+    "panes": [
+     {
+      "sources": [
+       {
+        "type": "MainSeries",
+        "id": "_seriesId",
+        "zorder": 0,
+        "haStyle": {
+         "studyId": "BarSetHeikenAshi@tv-basicstudies-60"
+        },
+        "renkoStyle": {
+         "studyId": "BarSetRenko@tv-prostudies-73"
+        },
+        "pbStyle": {
+         "studyId": "BarSetPriceBreak@tv-prostudies-34"
+        },
+        "kagiStyle": {
+         "studyId": "BarSetKagi@tv-prostudies-73"
+        },
+        "pnfStyle": {
+         "studyId": "BarSetPnF@tv-prostudies-73"
+        },
+        "rangeStyle": {
+         "studyId": "BarSetRange@tv-basicstudies-72"
+        },
+        "volFootprintStyle": {
+         "studyId": "Footprint@tv-volumebyprice-104"
+        },
+        "tpoStyle": {
+         "studyId": "TPOSessions@tv-volumebyprice-104"
+        },
+        "svpStyle": {
+         "studyId": "VbPSessions@tv-volumebyprice-126"
+        },
+        "formattingDeps": {
+         "pricescale": 100,
+         "minmov": 1,
+         "fractional": false,
+         "minmove2": 0,
+         "variable_tick_size": ""
+        },
+        "studyBindings": {
+         "17": null,
+         "18": {},
+         "20": null
+        },
+        "state": {
+         "style": 1,
+         "esdShowDividends": true,
+         "esdShowSplits": true,
+         "esdShowEarnings": true,
+         "esdShowBreaks": false,
+         "showContinuousContractSwitches": true,
+         "showContinuousContractSwitchesBreaks": false,
+         "showFuturesContractExpiration": true,
+         "showLastNews": true,
+         "showCountdown": true,
+         "visible": true,
+         "showPriceLine": true,
+         "priceLineWidth": 1,
+         "showPrevClosePriceLine": false,
+         "prevClosePriceLineWidth": 1,
+         "minTick": "default",
+         "dividendsAdjustment": false,
+         "backAdjustment": false,
+         "settlementAsClose": true,
+         "sessionId": "regular",
+         "bidAsk": {
+          "visible": false,
+          "lineStyle": 1,
+          "lineWidth": 1,
+          "bidLineColor": "#2962FF",
+          "askLineColor": "#F7525F"
+         },
+         "prePostMarket": {
+          "visible": true,
+          "lineStyle": 1,
+          "lineWidth": 1,
+          "preMarketColor": "#FB8C00",
+          "postMarketColor": "#2962FF",
+          "overnightMarketColor": "#8e24aa"
+         },
+         "highLowAvgPrice": {
+          "highLowPriceLinesVisible": false,
+          "highLowPriceLabelsVisible": false,
+          "averageClosePriceLineVisible": false,
+          "averageClosePriceLabelVisible": false,
+          "highLowPriceLinesWidth": 1,
+          "averagePriceLineWidth": 1,
+          "highLowPriceLinesColor": "",
+          "averagePriceLineColor": ""
+         },
+         "statusViewStyle": {
+          "fontSize": 16,
+          "showExchange": true,
+          "showInterval": true,
+          "symbolTextSource": "description"
+         },
+         "lineStyle": {
+          "linestyle": 0,
+          "linewidth": 2,
+          "priceSource": "close",
+          "colorType": "gradient",
+          "color": "#2962FF",
+          "gradientStartColor": "#D500F9",
+          "gradientEndColor": "#00BCE5"
+         },
+         "lineWithMarkersStyle": {
+          "linestyle": 0,
+          "linewidth": 2,
+          "priceSource": "close",
+          "colorType": "gradient",
+          "color": "#2962FF",
+          "gradientStartColor": "#D500F9",
+          "gradientEndColor": "#00BCE5"
+         },
+         "steplineStyle": {
+          "linestyle": 0,
+          "linewidth": 2,
+          "priceSource": "close",
+          "colorType": "gradient",
+          "color": "#2962FF",
+          "gradientStartColor": "#D500F9",
+          "gradientEndColor": "#00BCE5"
+         },
+         "baselineStyle": {
+          "topLineWidth": 2,
+          "bottomLineWidth": 2,
+          "topLineStyle": 0,
+          "bottomLineStyle": 0,
+          "priceSource": "close",
+          "transparency": 50,
+          "baseLevelPercentage": 50,
+          "baselineColor": "#8C8C8C",
+          "topFillColor1": "rgba(8, 153, 129, 0.28)",
+          "topFillColor2": "rgba(8, 153, 129, 0.05)",
+          "bottomFillColor1": "rgba(242, 54, 69, 0.05)",
+          "bottomFillColor2": "rgba(242, 54, 69, 0.28)",
+          "topLineColor": "#089981",
+          "bottomLineColor": "#F23645"
+         },
+         "areaStyle": {
+          "linestyle": 0,
+          "linewidth": 2,
+          "priceSource": "close",
+          "transparency": 100,
+          "color1": "rgba(41, 98, 255, 0.28)",
+          "color2": "#2962FF",
+          "linecolor": "#2962FF"
+         },
+         "hlcAreaStyle": {
+          "highLineVisible": true,
+          "highLineStyle": 0,
+          "highLineWidth": 2,
+          "lowLineVisible": true,
+          "lowLineStyle": 0,
+          "lowLineWidth": 2,
+          "closeLineStyle": 0,
+          "closeLineWidth": 2,
+          "highLineColor": "#00bcd4",
+          "lowLineColor": "#e91e63",
+          "closeLineColor": "#2962FF",
+          "highCloseFillColor": "rgba(0, 188, 212, 0.25)",
+          "closeLowFillColor": "rgba(233, 30, 99, 0.25)"
+         },
+         "barStyle": {
+          "barColorsOnPrevClose": false,
+          "dontDrawOpen": false,
+          "thinBars": true,
+          "downColor": "#F23645",
+          "upColor": "#089981"
+         },
+         "hlcBarsStyle": {
+          "thinBars": true,
+          "color": "#2962FF"
+         },
+         "candleStyle": {
+          "drawWick": true,
+          "drawBorder": true,
+          "barColorsOnPrevClose": false,
+          "drawBody": true,
+          "borderColor": "#378658",
+          "upColor": "#089981",
+          "wickColor": "#737375",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645",
+          "downColor": "#F23645",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645"
+         },
+         "volCandlesStyle": {
+          "drawWick": true,
+          "drawBorder": true,
+          "barColorsOnPrevClose": false,
+          "drawBody": true,
+          "borderColor": "#378658",
+          "upColor": "#089981",
+          "wickColor": "#737375",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645",
+          "downColor": "#F23645",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645"
+         },
+         "hollowCandleStyle": {
+          "drawWick": true,
+          "drawBorder": true,
+          "drawBody": true,
+          "upColor": "#089981",
+          "downColor": "#F23645",
+          "borderColor": "#378658",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645",
+          "wickColor": "#737375",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645"
+         },
+         "haStyle": {
+          "drawWick": true,
+          "drawBorder": true,
+          "showRealLastPrice": false,
+          "barColorsOnPrevClose": false,
+          "inputs": {},
+          "inputInfo": {},
+          "drawBody": true,
+          "borderColor": "#378658",
+          "upColor": "#089981",
+          "wickColor": "#737375",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645",
+          "downColor": "#F23645",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645"
+         },
+         "hiloStyle": {
+          "showBorders": true,
+          "showLabels": true,
+          "drawBody": true,
+          "color": "#2962FF",
+          "borderColor": "#2962FF",
+          "labelColor": "#2962FF"
+         },
+         "columnStyle": {
+          "barColorsOnPrevClose": true,
+          "priceSource": "close",
+          "baselinePosition": "bottom",
+          "upColor": "rgba(8, 153, 129, 0.5)",
+          "downColor": "rgba(242, 54, 69, 0.5)"
+         },
+         "renkoStyle": {
+          "inputs": {
+           "source": "close",
+           "sources": "Close",
+           "boxSize": 3,
+           "style": "ATR",
+           "atrLength": 14,
+           "percentageLTP": 1,
+           "wicks": true
+          },
+          "inputInfo": {
+           "source": {
+            "name": "Source"
+           },
+           "sources": {
+            "name": "Source"
+           },
+           "boxSize": {
+            "name": "Box size"
+           },
+           "style": {
+            "name": "Style"
+           },
+           "atrLength": {
+            "name": "ATR length"
+           },
+           "percentageLTP": {
+            "name": "Percentage"
+           },
+           "wicks": {
+            "name": "Wicks"
+           }
+          },
+          "upColor": "#089981",
+          "downColor": "#F23645",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645",
+          "upColorProjection": "#a9dcc3",
+          "downColorProjection": "#f5a6ae",
+          "borderUpColorProjection": "#a9dcc3",
+          "borderDownColorProjection": "#f5a6ae",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645"
+         },
+         "pbStyle": {
+          "inputs": {
+           "lb": 3
+          },
+          "inputInfo": {
+           "lb": {
+            "name": "Number of line"
+           }
+          },
+          "upColor": "#089981",
+          "downColor": "#F23645",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645",
+          "upColorProjection": "#a9dcc3",
+          "downColorProjection": "#f5a6ae",
+          "borderUpColorProjection": "#a9dcc3",
+          "borderDownColorProjection": "#f5a6ae"
+         },
+         "kagiStyle": {
+          "inputs": {
+           "style": "ATR",
+           "atrLength": 14,
+           "percentageLTP": 1,
+           "reversalAmount": 1
+          },
+          "inputInfo": {
+           "style": {
+            "name": "Style"
+           },
+           "atrLength": {
+            "name": "ATR length"
+           },
+           "percentageLTP": {
+            "name": "Percentage"
+           },
+           "reversalAmount": {
+            "name": "Reversal amount"
+           }
+          },
+          "downColor": "#F23645",
+          "upColor": "#089981",
+          "upColorProjection": "#a9dcc3",
+          "downColorProjection": "#f5a6ae"
+         },
+         "pnfStyle": {
+          "inputs": {
+           "sources": "Close",
+           "reversalAmount": 3,
+           "boxSize": 1,
+           "style": "ATR",
+           "atrLength": 14,
+           "percentageLTP": 1,
+           "oneStepBackBuilding": false
+          },
+          "inputInfo": {
+           "sources": {
+            "name": "Source"
+           },
+           "boxSize": {
+            "name": "Box size"
+           },
+           "reversalAmount": {
+            "name": "Reversal amount"
+           },
+           "style": {
+            "name": "Style"
+           },
+           "atrLength": {
+            "name": "ATR length"
+           },
+           "percentageLTP": {
+            "name": "Percentage"
+           },
+           "oneStepBackBuilding": {
+            "name": "One step back building"
+           }
+          },
+          "downColor": "#F23645",
+          "upColor": "#089981",
+          "upColorProjection": "#a9dcc3",
+          "downColorProjection": "#f5a6ae"
+         },
+         "rangeStyle": {
+          "barStyle": 0,
+          "thinBars": true,
+          "inputs": {
+           "range": 10,
+           "phantomBars": false
+          },
+          "inputInfo": {
+           "range": {
+            "name": "Range"
+           },
+           "phantomBars": {
+            "name": "Phantom bars"
+           }
+          },
+          "upColor": "#089981",
+          "downColor": "#F23645",
+          "upColorProjection": "#a9dcc3",
+          "downColorProjection": "#f5a6ae",
+          "candlesUpColor": "#089981",
+          "candlesDownColor": "#F23645",
+          "candlesBorderUpColor": "#089981",
+          "candlesBorderDownColor": "#F23645",
+          "candlesWickUpColor": "#089981",
+          "candlesWickDownColor": "#F23645"
+         },
+         "tpoStyle": {
+          "color": "#2962FF",
+          "linestyle": 0,
+          "linewidth": 2,
+          "styles": {
+           "splitByBlocks": false,
+           "splitByBlocksMode": 0
+          },
+          "inputs": {
+           "period": "Day",
+           "periodsNum": 1,
+           "profilesSessions": "All",
+           "customSession": "0930-1600",
+           "customSession2": "",
+           "customSession3": "",
+           "customSession4": "",
+           "customSession5": "",
+           "rowSize": "Auto",
+           "ticksPerRow": 100,
+           "vaPercent": 70,
+           "blockSize": "30m",
+           "mergePoints": "",
+           "extendPoorHigh": false,
+           "extendPoorLow": false,
+           "extendPOC": false,
+           "extendTpoVah": false,
+           "extendTpoVal": false,
+           "extendVolumePoc": false,
+           "extendVolumeVah": false,
+           "extendVolumeVal": false,
+           "extendSingleprints": false
+          },
+          "tpo": {
+           "colors": {
+            "gradientColors": [
+             "#e91e63",
+             "#00c853",
+             "#00bcd4",
+             "#651FFF"
+            ]
+           },
+           "showBlocks": true,
+           "showLetters": true,
+           "nonVaOpacity": 30
+          },
+          "levels": {
+           "showPOC": true,
+           "pocColor": "#0F0F0F",
+           "showPoorHigh": false,
+           "poorHighColor": "#6200EA",
+           "showPoorLow": false,
+           "poorLowColor": "#6200EA",
+           "showSingleprints": false,
+           "singleprintsColor": "rgba(224, 64, 251, 0.15)",
+           "showVAH": true,
+           "vahColor": "#0F0F0F",
+           "showVAL": true,
+           "valColor": "#0F0F0F",
+           "showMidpoint": false,
+           "showOpenPrice": false,
+           "showClosePrice": false,
+           "initialBalanceRange": {
+            "levels": 2,
+            "visible": true
+           }
+          },
+          "volumeProfile": {
+           "visible": true,
+           "valuesColor": "#0F0F0F",
+           "showValues": true,
+           "vah": {
+            "visible": false,
+            "color": "#0F0F0F",
+            "linestyle": 2,
+            "linewidth": 2
+           },
+           "val": {
+            "visible": false,
+            "color": "#0F0F0F",
+            "linestyle": 2,
+            "linewidth": 2
+           },
+           "poc": {
+            "visible": false,
+            "color": "#0F0F0F",
+            "linestyle": 0,
+            "linewidth": 2
+           },
+           "volumeColor": "rgba(38, 198, 218, 0.5)",
+           "valueAreaColor": "rgba(38, 198, 218, 0.75)",
+           "placement": "left_to_right"
+          },
+          "summary": {
+           "visible": false,
+           "belowSeries": true,
+           "infoBlocks": {
+            "hlRange": {
+             "visible": false
+            },
+            "pocPrice": {
+             "visible": false
+            },
+            "rotationFactor": {
+             "visible": false
+            },
+            "totalVolume": {
+             "visible": false
+            },
+            "tpoCountAbovePoc": {
+             "visible": false
+            },
+            "tpoCountBelowPoc": {
+             "visible": false
+            },
+            "tpoCountTotal": {
+             "visible": false
+            },
+            "vaRange": {
+             "visible": false
+            },
+            "vahPrice": {
+             "visible": false
+            },
+            "valPrice": {
+             "visible": false
+            },
+            "initialBalanceHigh": {
+             "visible": false
+            },
+            "initialBalanceLow": {
+             "visible": false
+            },
+            "initialBalanceRange": {
+             "visible": false
+            }
+           }
+          },
+          "priceSource": "close"
+         },
+         "svpStyle": {
+          "inputs": {
+           "profilesSessions": "All",
+           "customSession": "0930-1600",
+           "customSessionTZ": "Exchange",
+           "volume": "Up/Down",
+           "vaVolume": 70,
+           "extendPocRight": false,
+           "extendVAHRight": false,
+           "extendVALRight": false,
+           "rowsLayout": "Number Of Rows",
+           "rows": 24
+          },
+          "volumeProfile": {
+           "visible": true,
+           "valuesColor": "#0F0F0F",
+           "showValues": false,
+           "volumeColorUp": "rgba(38, 198, 218, 0.5)",
+           "volumeColorDown": "rgba(236, 64, 122, 0.5)",
+           "valueAreaColorUp": "rgba(38, 198, 218, 0.75)",
+           "valueAreaColorDown": "rgba(236, 64, 122, 0.75)",
+           "histogramBoxColor": "rgba(38, 198, 218, 0.05)",
+           "placement": "left_to_right",
+           "percentWidth": 100
+          },
+          "vah": {
+           "visible": false,
+           "color": "#0F0F0F",
+           "linestyle": 2,
+           "linewidth": 2
+          },
+          "val": {
+           "visible": false,
+           "color": "#0F0F0F",
+           "linestyle": 2,
+           "linewidth": 2
+          },
+          "poc": {
+           "visible": true,
+           "color": "#0F0F0F",
+           "linestyle": 0,
+           "linewidth": 2
+          },
+          "developingPoc": {
+           "visible": false,
+           "color": "#0F0F0F",
+           "linestyle": 0,
+           "linewidth": 1
+          },
+          "developingVA": {
+           "visible": false,
+           "color": "#00bcd4",
+           "linestyle": 0,
+           "linewidth": 1
+          }
+         },
+         "volFootprintStyle": {
+          "drawWick": true,
+          "drawBorder": true,
+          "barColorsOnPrevClose": false,
+          "drawBody": true,
+          "upColor": "#089981",
+          "downColor": "#F23645",
+          "borderColor": "#378658",
+          "borderUpColor": "#089981",
+          "borderDownColor": "#F23645",
+          "wickColor": "#737375",
+          "wickUpColor": "#089981",
+          "wickDownColor": "#F23645",
+          "deltaAdjust": true,
+          "showSummary": true,
+          "summaryMode": 0,
+          "extendedSummary": {
+           "belowSeries": true,
+           "blockInfo": {
+            "volume": {
+             "visible": false
+            },
+            "volumePercentage": {
+             "visible": false
+            },
+            "buyVolume": {
+             "visible": false
+            },
+            "buyVolumePercentage": {
+             "visible": false
+            },
+            "sellVolume": {
+             "visible": false
+            },
+            "sellVolumePercentage": {
+             "visible": false
+            },
+            "delta": {
+             "visible": false
+            },
+            "deltaPercentage": {
+             "visible": false
+            },
+            "minDelta": {
+             "visible": false
+            },
+            "maxDelta": {
+             "visible": false
+            },
+            "sessionCVD": {
+             "visible": false
+            },
+            "pocPrice": {
+             "visible": false
+            },
+            "hlRange": {
+             "visible": false
+            }
+           },
+           "openInterestBlockInfo": {
+            "openInterest": {
+             "visible": false
+            }
+           },
+           "extendedOpenInterestBlockInfo": {
+            "openInterestHigh": {
+             "visible": false
+            },
+            "openInterestLow": {
+             "visible": false
+            }
+           }
+          },
+          "type": "Buy and sell",
+          "displayMode": 0,
+          "pointOfControl": true,
+          "bgColors": {
+           "adjBuyBgColors": [
+            "#70CCBD",
+            "#22AB94",
+            "#06806B",
+            "#004D40"
+           ],
+           "adjSellBgColors": [
+            "#FAA1A4",
+            "#F7525F",
+            "#CC2F3C",
+            "#802028"
+           ],
+           "adjTotalBgColors": [
+            "#90BFF9",
+            "#3179F5",
+            "#1E53E5",
+            "#143EB2"
+           ],
+           "buyBgColor": "#22AB94",
+           "sellBgColor": "#F7525F",
+           "totalBgColor": "#3179F5",
+           "pocColor": "#000000"
+          },
+          "imbalanceHighlight": {
+           "buyColor": "#089981",
+           "sellColor": "#F23645",
+           "visible": true
+          },
+          "unfinishedAuction": {
+           "highColor": "#D500F9",
+           "lowColor": "#00e5ff"
+          },
+          "inputs": {
+           "rowSize": "Auto",
+           "atrLength": 14,
+           "imbalancePercent": 300,
+           "ticksPerRow": 100,
+           "showVA": true,
+           "vaPercent": 70,
+           "calcStackedImbalance": false,
+           "showUnfinishedAuction": false,
+           "stackedImbalanceCount": 3,
+           "ignore_zero_volume_for_imbalance_calc": false,
+           "minimal_imbalance_volume": 0
+          }
+         },
+         "baseLineColor": "#B8B8B8",
+         "prevClosePriceLineColor": "#555555",
+         "priceLineColor": "",
+         "timeframe": "",
+         "shortName": "XAUUSD",
+         "currencyId": "USD",
+         "unitId": null,
+         "metricId": null,
+         "symbol": "PEPPERSTONE:XAUUSD",
+         "interval": "5",
+         "priceAxisProperties": {
+          "autoScale": true,
+          "autoScaleDisabled": false,
+          "lockScale": false,
+          "percentage": false,
+          "percentageDisabled": false,
+          "log": false,
+          "logDisabled": false,
+          "alignLabels": true,
+          "isInverted": false,
+          "indexedTo100": false
+         }
+        }
+       },
+       {
+        "type": "StudyStrategy",
+        "id": "E7gFVY",
+        "state": {
+         "inputs": {
+          "in_0": 14,
+          "in_1": 30,
+          "in_10": "NONE",
+          "in_11": 0,
+          "in_12": "percent",
+          "in_13": 0,
+          "in_14": false,
+          "in_15": "FIFO",
+          "in_16": 100,
+          "in_17": 100,
+          "in_18": 2,
+          "in_19": false,
+          "in_2": 70,
+          "in_20": false,
+          "in_21": "BACKTEST",
+          "in_22": "",
+          "in_23": "order_fills",
+          "in_24": "",
+          "in_25": true,
+          "in_26": "",
+          "in_27": false,
+          "in_3": 1,
+          "in_4": false,
+          "in_5": false,
+          "in_6": 0,
+          "in_7": "fixed",
+          "in_8": 1,
+          "in_9": 1000000,
+          "pineFeatures": "{\"strategy\":1,\"ta\":1}",
+          "pineId": "",
+          "pineVersion": ""
+         },
+         "styles": {},
+         "bands": {},
+         "graphics": {},
+         "ohlcPlots": {},
+         "palettes": {},
+         "filledAreasStyle": {},
+         "filledAreas": {},
+         "visible": true,
+         "showLegendValues": true,
+         "showLegendInputs": true,
+         "showLabelsOnPriceScale": true,
+         "precision": "default",
+         "strategy": {
+          "orders": {
+           "showLabels": true,
+           "showQty": true,
+           "visible": true
+          }
+         },
+         "parentSources": []
+        },
+        "zorder": -10000,
+        "ownFirstValue": null,
+        "metaInfo": "StrategyScript$STD;RSI%1Strategy@tv-scripting-101[v.31.0]"
+       },
+       {
+        "type": "LineToolFixedRangeVolumeProfile",
+        "id": "5bRAOh",
+        "state": {
+         "inputs": {
+          "extendToRight": false,
+          "first_bar_time": 0,
+          "last_bar_time": 0,
+          "mapRightBoundaryToBarStartTime": false,
+          "rows": 201,
+          "rowsLayout": "Number Of Rows",
+          "subscribeRealtime": true,
+          "vaVolume": 70,
+          "volume": "Up/Down"
+         },
+         "styles": {
+          "developingPoc": {
+           "color": "#0F0F0F",
+           "display": 0,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 9,
+           "trackPrice": false,
+           "transparency": 0,
+           "visible": false,
+           "title": "developingPoc"
+          },
+          "developingVAHigh": {
+           "color": "#00bcd4",
+           "display": 0,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 9,
+           "trackPrice": false,
+           "transparency": 0,
+           "visible": false,
+           "title": "developingVAHigh"
+          },
+          "developingVALow": {
+           "color": "#00bcd4",
+           "display": 0,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 9,
+           "trackPrice": false,
+           "transparency": 0,
+           "visible": false,
+           "title": "developingVALow"
+          }
+         },
+         "bands": {},
+         "graphics": {
+          "horizlines": {
+           "pocLines": {
+            "color": "rgba(156, 39, 176, 1)",
+            "style": 0,
+            "visible": true,
+            "width": 2
+           },
+           "vahLines": {
+            "color": "rgba(242, 54, 69, 1)",
+            "style": 0,
+            "visible": true,
+            "width": 2
+           },
+           "valLines": {
+            "color": "rgba(56, 142, 60, 1)",
+            "style": 0,
+            "visible": true,
+            "width": 2
+           }
+          },
+          "hhists": {
+           "histBars2": {
+            "colors": [
+             "rgba(38, 198, 218, 0.5)",
+             "rgba(236, 64, 122, 0.5)"
+            ],
+            "valuesColor": "#0F0F0F",
+            "direction": "left_to_right",
+            "percentWidth": 30,
+            "showValues": false,
+            "transparencies": [
+             75,
+             75
+            ],
+            "visible": true
+           },
+           "histBarsVA": {
+            "colors": [
+             "rgba(38, 198, 218, 0.75)",
+             "rgba(236, 64, 122, 0.75)"
+            ],
+            "valuesColor": "#0F0F0F",
+            "direction": "left_to_right",
+            "percentWidth": 30,
+            "showValues": false,
+            "transparencies": [
+             30,
+             30
+            ],
+            "visible": true
+           }
+          },
+          "polygons": {
+           "histBoxBg": {
+            "color": "rgba(38, 198, 218, 0.05)",
+            "transparency": 94
+           }
+          }
+         },
+         "ohlcPlots": {},
+         "palettes": {},
+         "filledAreasStyle": {},
+         "filledAreas": {},
+         "visible": true,
+         "showLabelsOnPriceScale": true,
+         "precision": "default",
+         "adjustedToSplitTime": 1783693274.182,
+         "symbolStateVersion": 2,
+         "zOrderVersion": 2,
+         "frozen": false,
+         "symbol": "PEPPERSTONE:XAUUSD",
+         "currencyId": null,
+         "unitId": null,
+         "metricId": "price",
+         "title": "",
+         "interval": "120"
+        },
+        "points": [
+         {
+          "time_t": 1783692000,
+          "offset": 0,
+          "price": 4203.45,
+          "interval": "120"
+         },
+         {
+          "time_t": 1783036800,
+          "offset": 0,
+          "price": 4021.65,
+          "interval": "120"
+         }
+        ],
+        "zorder": 5000,
+        "ownerSource": "_seriesId",
+        "linkKey": "A7NFRk0Fg6mJ",
+        "sharingMode": 1,
+        "metaInfo": {
+         "palettes": {},
+         "inputs": [
+          {
+           "defval": false,
+           "id": "mapRightBoundaryToBarStartTime",
+           "isHidden": true,
+           "name": "mapRightBoundary",
+           "type": "bool",
+           "display": 0
+          },
+          {
+           "defval": "Number Of Rows",
+           "id": "rowsLayout",
+           "name": "Rows Layout",
+           "options": [
+            "Number Of Rows",
+            "Ticks Per Row"
+           ],
+           "type": "text",
+           "display": 15
+          },
+          {
+           "defval": 24,
+           "id": "rows",
+           "max": 1000000,
+           "min": 1,
+           "name": "Row Size",
+           "type": "integer",
+           "display": 15
+          },
+          {
+           "defval": "Up/Down",
+           "id": "volume",
+           "name": "Volume",
+           "options": [
+            "Up/Down",
+            "Total",
+            "Delta"
+           ],
+           "type": "text",
+           "display": 15
+          },
+          {
+           "defval": 0,
+           "id": "first_bar_time",
+           "isHidden": true,
+           "max": 253370764800,
+           "min": -253370764800,
+           "name": "First Bar Time",
+           "type": "time",
+           "display": 0
+          },
+          {
+           "defval": 0,
+           "id": "last_bar_time",
+           "isHidden": true,
+           "max": 253370764800,
+           "min": -253370764800,
+           "name": "Last Bar Time",
+           "type": "time",
+           "display": 0
+          },
+          {
+           "defval": 70,
+           "id": "vaVolume",
+           "max": 100,
+           "min": 0,
+           "name": "Value Area Volume",
+           "type": "integer",
+           "display": 15
+          },
+          {
+           "defval": true,
+           "id": "subscribeRealtime",
+           "isHidden": true,
+           "name": "SubscribeRealtime",
+           "type": "bool",
+           "display": 0
+          },
+          {
+           "defval": false,
+           "id": "extendToRight",
+           "name": "Extend Right",
+           "type": "bool",
+           "display": 0
+          }
+         ],
+         "plots": [
+          {
+           "id": "developingPoc",
+           "type": "line"
+          },
+          {
+           "id": "developingVAHigh",
+           "type": "line"
+          },
+          {
+           "id": "developingVALow",
+           "type": "line"
+          }
+         ],
+         "graphics": {
+          "hhists": {
+           "histBars2": {
+            "location": "absolute",
+            "title": "Volume Profile",
+            "titles": [
+             "Up Volume",
+             "Down Volume"
+            ]
+           },
+           "histBarsVA": {
+            "location": "absolute",
+            "title": "Value Area",
+            "titles": [
+             "Value Area Up",
+             "Value Area Down"
+            ]
+           }
+          },
+          "horizlines": {
+           "pocLines": {
+            "name": "POC",
+            "showPrice": true
+           },
+           "vahLines": {
+            "name": "VAH",
+            "showPrice": true
+           },
+           "valLines": {
+            "name": "VAL",
+            "showPrice": true
+           }
+          },
+          "polygons": {
+           "histBoxBg": {
+            "mouseTouchable": false,
+            "name": "Histogram Box",
+            "showBorder": false
+           }
+          }
+         },
+         "defaults": {
+          "graphics": {
+           "hhists": {
+            "histBars2": {
+             "colors": [
+              "#2962ff",
+              "#fbc02d"
+             ],
+             "direction": "left_to_right",
+             "percentWidth": 30,
+             "showValues": false,
+             "transparencies": [
+              75,
+              75
+             ],
+             "valuesColor": "#424242",
+             "visible": true
+            },
+            "histBarsVA": {
+             "colors": [
+              "#2962ff",
+              "#fbc02d"
+             ],
+             "direction": "left_to_right",
+             "percentWidth": 30,
+             "showValues": false,
+             "transparencies": [
+              30,
+              30
+             ],
+             "valuesColor": "#424242",
+             "visible": true
+            }
+           },
+           "horizlines": {
+            "pocLines": {
+             "color": "#f44336",
+             "style": 0,
+             "visible": true,
+             "width": 2
+            },
+            "vahLines": {
+             "color": "#2962ff",
+             "style": 0,
+             "visible": false,
+             "width": 2
+            },
+            "valLines": {
+             "color": "#2962ff",
+             "style": 0,
+             "visible": false,
+             "width": 2
+            }
+           },
+           "polygons": {
+            "histBoxBg": {
+             "color": "#37a6ef",
+             "transparency": 94
+            }
+           }
+          },
+          "inputs": {
+           "extendToRight": false,
+           "first_bar_time": 0,
+           "last_bar_time": 0,
+           "mapRightBoundaryToBarStartTime": false,
+           "rows": 24,
+           "rowsLayout": "Number Of Rows",
+           "subscribeRealtime": true,
+           "vaVolume": 70,
+           "volume": "Up/Down"
+          },
+          "styles": {
+           "developingPoc": {
+            "color": "#f44336",
+            "display": 0,
+            "linestyle": 0,
+            "linewidth": 1,
+            "plottype": 9,
+            "trackPrice": false,
+            "transparency": 0,
+            "visible": false
+           },
+           "developingVAHigh": {
+            "color": "#2962ff",
+            "display": 0,
+            "linestyle": 0,
+            "linewidth": 1,
+            "plottype": 9,
+            "trackPrice": false,
+            "transparency": 0,
+            "visible": false
+           },
+           "developingVALow": {
+            "color": "#2962ff",
+            "display": 0,
+            "linestyle": 0,
+            "linewidth": 1,
+            "plottype": 9,
+            "trackPrice": false,
+            "transparency": 0,
+            "visible": false
+           }
+          }
+         },
+         "_metainfoVersion": 55,
+         "description": "Fixed Range",
+         "format": {
+          "type": "volume"
+         },
+         "id": "VbPFixed@tv-basicstudies-276",
+         "is_hidden_study": true,
+         "is_price_study": true,
+         "shortDescription": "FRVP",
+         "styles": {
+          "developingPoc": {
+           "format": {
+            "type": "price"
+           },
+           "histogramBase": 0,
+           "title": "Developing POC"
+          },
+          "developingVAHigh": {
+           "format": {
+            "type": "price"
+           },
+           "histogramBase": 0,
+           "title": "Developing VA High"
+          },
+          "developingVALow": {
+           "format": {
+            "type": "price"
+           },
+           "histogramBase": 0,
+           "title": "Developing VA Low"
+          }
+         },
+         "description_localized": "Fixed Range",
+         "shortId": "VbPFixed",
+         "packageId": "tv-basicstudies",
+         "version": 276,
+         "fullId": "VbPFixed@tv-basicstudies-276",
+         "productId": "tv-basicstudies",
+         "_serverMetaInfoVersion": 55
+        }
+       },
+       {
+        "type": "LineToolHorzLine",
+        "id": "wFJZgP",
+        "state": {
+         "linecolor": "#ef5350",
+         "textcolor": "#2962FF",
+         "linewidth": 2,
+         "linestyle": 0,
+         "showPrice": true,
+         "fontsize": 12,
+         "bold": false,
+         "italic": false,
+         "horzLabelsAlign": "center",
+         "vertLabelsAlign": "middle",
+         "text": "SL",
+         "symbolStateVersion": 2,
+         "zOrderVersion": 2,
+         "frozen": false,
+         "title": "",
+         "interval": "5",
+         "symbol": "PEPPERSTONE:XAUUSD",
+         "currencyId": null,
+         "unitId": null,
+         "metricId": "price",
+         "visible": true,
+         "adjustedToSplitTime": 1787192648.114
+        },
+        "points": [
+         {
+          "time_t": 1787099100,
+          "offset": 0,
+          "price": 4510,
+          "interval": "5"
+         }
+        ],
+        "zorder": 7500,
+        "ownerSource": "_seriesId",
+        "linkKey": "UTd11BDj4lkk",
+        "sharingMode": 1
+       },
+       {
+        "type": "LineToolHorzLine",
+        "id": "nIDzZ6",
+        "state": {
+         "linecolor": "#26a69a",
+         "textcolor": "#2962FF",
+         "linewidth": 2,
+         "linestyle": 0,
+         "showPrice": true,
+         "fontsize": 12,
+         "bold": false,
+         "italic": false,
+         "horzLabelsAlign": "center",
+         "vertLabelsAlign": "middle",
+         "text": "TP",
+         "symbolStateVersion": 2,
+         "zOrderVersion": 2,
+         "frozen": false,
+         "title": "",
+         "interval": "5",
+         "symbol": "PEPPERSTONE:XAUUSD",
+         "currencyId": null,
+         "unitId": null,
+         "metricId": "price",
+         "visible": true,
+         "adjustedToSplitTime": 1787192648.426
+        },
+        "points": [
+         {
+          "time_t": 1787099100,
+          "offset": 0,
+          "price": 4480,
+          "interval": "5"
+         }
+        ],
+        "zorder": 8750,
+        "ownerSource": "_seriesId",
+        "linkKey": "6UpoEiI4N6ZJ",
+        "sharingMode": 1
+       }
+      ],
+      "mainSourceId": "_seriesId",
+      "stretchFactor": 2904.7160710820335,
+      "leftAxisesState": [],
+      "rightAxisesState": [
+       {
+        "state": {
+         "id": "gSiPKjNRAlLR",
+         "m_priceRange": null,
+         "m_isAutoScale": true,
+         "m_isPercentage": false,
+         "m_isIndexedTo100": false,
+         "m_isLog": false,
+         "m_isLockScale": false,
+         "m_isInverted": false,
+         "m_topMargin": 0.1,
+         "m_bottomMargin": 0.08,
+         "alignLabels": true,
+         "logFormula": {
+          "logicalOffset": 4,
+          "coordOffset": 0.0001
+         },
+         "hasCalculatedPriceRange": true
+        },
+        "sources": [
+         "_seriesId",
+         "E7gFVY",
+         "5bRAOh",
+         "wFJZgP",
+         "nIDzZ6"
+        ]
+       }
+      ],
+      "overlayPriceScales": {},
+      "priceScaleRatio": null,
+      "isCollapsed": false,
+      "isMaximized": false,
+      "mode": 0
+     },
+     {
+      "sources": [
+       {
+        "type": "Study",
+        "id": "VtFOxz",
+        "state": {
+         "inputs": {
+          "__fast_calc": false,
+          "in_0": 3,
+          "in_1": 8,
+          "in_10": 1.5,
+          "in_11": 20,
+          "in_2": 21,
+          "in_3": 55,
+          "in_4": 10,
+          "in_5": 3,
+          "in_6": 14,
+          "in_7": 20,
+          "in_8": 2,
+          "in_9": 20,
+          "pineFeatures": "{\"indicator\":1,\"plot\":1,\"ta\":1,\"math\":1}",
+          "pineId": "",
+          "pineVersion": ""
+         },
+         "styles": {
+          "plot_0": {
+           "color": "#2962ff",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 2,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_0"
+          },
+          "plot_1": {
+           "color": "#4CAF50",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_1"
+          },
+          "plot_10": {
+           "color": "rgba(255,82,82,0.7)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_10"
+          },
+          "plot_11": {
+           "color": "rgba(76,175,80,0.7)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_11"
+          },
+          "plot_12": {
+           "color": "rgba(41,98,255,0.5)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_12"
+          },
+          "plot_13": {
+           "color": "rgba(0,188,212,0.5)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_13"
+          },
+          "plot_14": {
+           "color": "rgba(76,175,80,1)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 1,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_14"
+          },
+          "plot_15": {
+           "color": "rgba(255,82,82,1)",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 1,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_15"
+          },
+          "plot_2": {
+           "color": "#FF9800",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_2"
+          },
+          "plot_3": {
+           "color": "#9C27B0",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_3"
+          },
+          "plot_4": {
+           "color": "#FF5252",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_4"
+          },
+          "plot_5": {
+           "color": "#FFEB3B",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_5"
+          },
+          "plot_6": {
+           "color": "#00E676",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 1,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_6"
+          },
+          "plot_7": {
+           "color": "#00BCD4",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_7"
+          },
+          "plot_8": {
+           "color": "#787B86",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 1,
+           "plottype": 0,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_8"
+          },
+          "plot_9": {
+           "color": "#00E676",
+           "display": 15,
+           "linestyle": 0,
+           "linewidth": 3,
+           "plottype": 1,
+           "trackPrice": false,
+           "transparency": 0,
+           "title": "plot_9"
+          }
+         },
+         "bands": {},
+         "graphics": {},
+         "ohlcPlots": {},
+         "palettes": {},
+         "filledAreasStyle": {},
+         "filledAreas": {},
+         "visible": true,
+         "showLegendValues": true,
+         "showLegendInputs": true,
+         "showLabelsOnPriceScale": true,
+         "precision": "default",
+         "parentSources": []
+        },
+        "zorder": -10000,
+        "ownFirstValue": null,
+        "metaInfo": "Script$USER;ed4cf60ef3fb43f6b91565afe52a3a4b@tv-scripting-101[v.2.0]"
+       }
+      ],
+      "mainSourceId": "VtFOxz",
+      "stretchFactor": 1000,
+      "leftAxisesState": [],
+      "rightAxisesState": [
+       {
+        "state": {
+         "id": "8XhxKEINyESc",
+         "m_priceRange": null,
+         "m_isAutoScale": true,
+         "m_isPercentage": false,
+         "m_isIndexedTo100": false,
+         "m_isLog": false,
+         "m_isLockScale": false,
+         "m_isInverted": false,
+         "m_topMargin": 0.1,
+         "m_bottomMargin": 0.08,
+         "alignLabels": true,
+         "logFormula": {
+          "logicalOffset": 4,
+          "coordOffset": 0.0001
+         },
+         "hasCalculatedPriceRange": true
+        },
+        "sources": [
+         "VtFOxz"
+        ]
+       }
+      ],
+      "overlayPriceScales": {},
+      "priceScaleRatio": null,
+      "isCollapsed": false,
+      "isMaximized": false,
+      "mode": 0
+     }
+    ],
+    "timeScale": {
+     "m_barSpacing": 9.76914556438657,
+     "m_rightOffset": 10,
+     "rightOffsetPercentage": 5,
+     "usePercentageRightOffset": false
+    },
+    "chartProperties": {
+     "paneProperties": {
+      "backgroundType": "solid",
+      "vertGridProperties": {
+       "style": 0,
+       "visible": true,
+       "color": "rgba(46, 46, 46, 0.2)"
+      },
+      "horzGridProperties": {
+       "style": 0,
+       "visible": true,
+       "color": "rgba(46, 46, 46, 0.2)"
+      },
+      "crossHairProperties": {
+       "style": 2,
+       "transparency": 0,
+       "width": 1,
+       "color": "#9C9C9C"
+      },
+      "topMargin": 10,
+      "bottomMargin": 8,
+      "axisProperties": {
+       "autoScale": true,
+       "autoScaleDisabled": false,
+       "lockScale": false,
+       "percentage": false,
+       "percentageDisabled": false,
+       "indexedTo100": false,
+       "log": false,
+       "logDisabled": false,
+       "alignLabels": true,
+       "isInverted": false
+      },
+      "legendProperties": {
+       "showStudyArguments": true,
+       "showStudyTitles": true,
+       "showStudyValues": true,
+       "showSeriesTitle": true,
+       "showSeriesOHLC": true,
+       "showLegend": true,
+       "showLastDayChange": false,
+       "showBarChange": true,
+       "showVolume": true,
+       "showBackground": true,
+       "showPriceSource": true,
+       "backgroundTransparency": 50,
+       "showLogo": true,
+       "showTradingButtons": true,
+       "showTradingButtonsMobile": true,
+       "showSeriesLegendCloseOnMobile": true,
+       "barChangeUpColor": "#089981",
+       "barChangeDownColor": "#F23645",
+       "useBarChangeCustomColors": false
+      },
+      "separatorColor": "#EBEBEB",
+      "background": "#ffffff",
+      "backgroundGradientStartColor": "#ffffff",
+      "backgroundGradientEndColor": "#ffffff"
+     },
+     "scalesProperties": {
+      "fontSize": 12,
+      "scaleSeriesOnly": false,
+      "showSeriesLastValue": true,
+      "seriesLastValueMode": 1,
+      "showSeriesPrevCloseValue": false,
+      "showStudyLastValue": true,
+      "showSymbolLabels": false,
+      "showStudyPlotLabels": false,
+      "showBidAskLabels": false,
+      "showPrePostMarketPriceLabel": true,
+      "showFundamentalNameLabel": false,
+      "showFundamentalLastValue": true,
+      "barSpacing": 6,
+      "axisHighlightColor": "rgba(41, 98, 255, 0.25)",
+      "axisLineToolLabelBackgroundColorCommon": "#2962FF",
+      "axisLineToolLabelBackgroundColorActive": "#143EB2",
+      "showPriceScaleCrosshairLabel": true,
+      "showTimeScaleCrosshairLabel": true,
+      "crosshairLabelBgColorLight": "#0F0F0F",
+      "crosshairLabelBgColorDark": "#3D3D3D",
+      "saveLeftEdge": false,
+      "textColor": "#0F0F0F",
+      "lineColor": "rgba(46, 46, 46, 0)",
+      "backgroundColor": "#ffffff"
+     },
+     "publishedChartsTimelineProperties": {
+      "type": "BarsMarksContainer",
+      "id": "PublishedChartsTimeline",
+      "zorder": 10000003,
+      "pinnedTooltips": {}
+     },
+     "chartEventsSourceProperties": {
+      "visible": true,
+      "futureOnly": true,
+      "breaks": {
+       "color": "#555555",
+       "visible": false,
+       "style": 2,
+       "width": 1
+      }
+     },
+     "tradingProperties": {
+      "showPositions": true,
+      "positionAndBracketsPL": true,
+      "positionPL": {
+       "visibility": true,
+       "display": 0
+      },
+      "bracketsPL": {
+       "visibility": true,
+       "display": 0
+      },
+      "showOrders": true,
+      "showProjectMarketOrder": false,
+      "showExecutions": true,
+      "showExecutionsLabels": false,
+      "showReverse": true,
+      "extendLeft": true,
+      "lineLength": 5,
+      "horizontalAlignment": 2,
+      "lineWidth": 1,
+      "lineStyle": 0
+     },
+     "priceScaleSelectionStrategyName": "auto",
+     "inactivityGaps": false
+    },
+    "sessions": {
+     "properties": {
+      "sessionHighlight": {
+       "backgrounds": {
+        "preMarket": {
+         "color": "#FF9800",
+         "transparency": 92
+        },
+        "postMarket": {
+         "color": "#2962FF",
+         "transparency": 92
+        },
+        "nightMarket": {
+         "color": "#D500F9",
+         "transparency": 92,
+         "visible": true,
+         "available": true
+        },
+        "electronic": {
+         "color": "#2962FF",
+         "transparency": 92
+        },
+        "outOfSession": {
+         "color": "#2962FF",
+         "transparency": 92,
+         "visible": true,
+         "available": false
+        }
+       },
+       "vertlines": {
+        "sessBreaks": {
+         "color": "#4985e7",
+         "style": 2,
+         "visible": false,
+         "width": 1,
+         "available": true
+        }
+       }
+      }
+     }
+    },
+    "version": 3,
+    "timezone": "Etc/UTC",
+    "shouldBeSavedEvenIfHidden": true,
+    "linkingGroup": null,
+    "lineToolsGroups": {
+     "groups": []
+    },
+    "chartId": "1"
+   }
+  ],
+  "symbolLock": 0,
+  "intervalLock": 0,
+  "trackTimeLock": 0,
+  "dateRangeLock": 0,
+  "crosshairLock": 1,
+  "layoutsSizes": {
+   "s": [
+    {
+     "percent": 1
+    }
+   ]
+  },
+  "symbolAliasServiceState": []
+ }
+}

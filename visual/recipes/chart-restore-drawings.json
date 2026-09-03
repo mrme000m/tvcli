@@ -1,0 +1,556 @@
+{
+ "ok": true,
+ "client_id": "dvv4N29P/1/B7xp7juvhqBn",
+ "count": 3,
+ "items": [
+  {
+   "id": "wFJZgP",
+   "ownerSource": "_seriesId",
+   "state": {
+    "type": "LineToolHorzLine",
+    "id": "wFJZgP",
+    "state": {
+     "linecolor": "#ef5350",
+     "textcolor": "#2962FF",
+     "linewidth": 2,
+     "linestyle": 0,
+     "showPrice": true,
+     "fontsize": 12,
+     "bold": false,
+     "italic": false,
+     "horzLabelsAlign": "center",
+     "vertLabelsAlign": "middle",
+     "text": "SL",
+     "symbolStateVersion": 2,
+     "zOrderVersion": 2,
+     "frozen": false,
+     "title": "",
+     "interval": "5",
+     "symbol": "PEPPERSTONE:XAUUSD",
+     "currencyId": null,
+     "unitId": null,
+     "metricId": "price",
+     "visible": true,
+     "adjustedToSplitTime": 1787192648.114
+    },
+    "points": [
+     {
+      "time_t": 1787099100,
+      "offset": 0,
+      "price": 4510,
+      "interval": "5"
+     }
+    ],
+    "zorder": 7500,
+    "ownerSource": "_seriesId",
+    "linkKey": "UTd11BDj4lkk"
+   },
+   "symbol": "PEPPERSTONE:XAUUSD",
+   "currencyId": null,
+   "unitId": null
+  },
+  {
+   "id": "nIDzZ6",
+   "ownerSource": "_seriesId",
+   "state": {
+    "type": "LineToolHorzLine",
+    "id": "nIDzZ6",
+    "state": {
+     "linecolor": "#26a69a",
+     "textcolor": "#2962FF",
+     "linewidth": 2,
+     "linestyle": 0,
+     "showPrice": true,
+     "fontsize": 12,
+     "bold": false,
+     "italic": false,
+     "horzLabelsAlign": "center",
+     "vertLabelsAlign": "middle",
+     "text": "TP",
+     "symbolStateVersion": 2,
+     "zOrderVersion": 2,
+     "frozen": false,
+     "title": "",
+     "interval": "5",
+     "symbol": "PEPPERSTONE:XAUUSD",
+     "currencyId": null,
+     "unitId": null,
+     "metricId": "price",
+     "visible": true,
+     "adjustedToSplitTime": 1787192648.426
+    },
+    "points": [
+     {
+      "time_t": 1787099100,
+      "offset": 0,
+      "price": 4480,
+      "interval": "5"
+     }
+    ],
+    "zorder": 8750,
+    "ownerSource": "_seriesId",
+    "linkKey": "6UpoEiI4N6ZJ"
+   },
+   "symbol": "PEPPERSTONE:XAUUSD",
+   "currencyId": null,
+   "unitId": null
+  },
+  {
+   "id": "5bRAOh",
+   "ownerSource": "_seriesId",
+   "state": {
+    "type": "LineToolFixedRangeVolumeProfile",
+    "id": "5bRAOh",
+    "state": {
+     "inputs": {
+      "extendToRight": false,
+      "first_bar_time": 0,
+      "last_bar_time": 0,
+      "mapRightBoundaryToBarStartTime": false,
+      "rows": 201,
+      "rowsLayout": "Number Of Rows",
+      "subscribeRealtime": true,
+      "vaVolume": 70,
+      "volume": "Up/Down"
+     },
+     "styles": {
+      "developingPoc": {
+       "color": "#0F0F0F",
+       "display": 0,
+       "linestyle": 0,
+       "linewidth": 1,
+       "plottype": 9,
+       "trackPrice": false,
+       "transparency": 0,
+       "visible": false,
+       "title": "developingPoc"
+      },
+      "developingVAHigh": {
+       "color": "#00bcd4",
+       "display": 0,
+       "linestyle": 0,
+       "linewidth": 1,
+       "plottype": 9,
+       "trackPrice": false,
+       "transparency": 0,
+       "visible": false,
+       "title": "developingVAHigh"
+      },
+      "developingVALow": {
+       "color": "#00bcd4",
+       "display": 0,
+       "linestyle": 0,
+       "linewidth": 1,
+       "plottype": 9,
+       "trackPrice": false,
+       "transparency": 0,
+       "visible": false,
+       "title": "developingVALow"
+      }
+     },
+     "bands": {},
+     "graphics": {
+      "horizlines": {
+       "pocLines": {
+        "color": "rgba(156, 39, 176, 1)",
+        "style": 0,
+        "visible": true,
+        "width": 2
+       },
+       "vahLines": {
+        "color": "rgba(242, 54, 69, 1)",
+        "style": 0,
+        "visible": true,
+        "width": 2
+       },
+       "valLines": {
+        "color": "rgba(56, 142, 60, 1)",
+        "style": 0,
+        "visible": true,
+        "width": 2
+       }
+      },
+      "hhists": {
+       "histBars2": {
+        "colors": [
+         "rgba(38, 198, 218, 0.5)",
+         "rgba(236, 64, 122, 0.5)"
+        ],
+        "valuesColor": "#0F0F0F",
+        "direction": "left_to_right",
+        "percentWidth": 30,
+        "showValues": false,
+        "transparencies": [
+         75,
+         75
+        ],
+        "visible": true
+       },
+       "histBarsVA": {
+        "colors": [
+         "rgba(38, 198, 218, 0.75)",
+         "rgba(236, 64, 122, 0.75)"
+        ],
+        "valuesColor": "#0F0F0F",
+        "direction": "left_to_right",
+        "percentWidth": 30,
+        "showValues": false,
+        "transparencies": [
+         30,
+         30
+        ],
+        "visible": true
+       }
+      },
+      "polygons": {
+       "histBoxBg": {
+        "color": "rgba(38, 198, 218, 0.05)",
+        "transparency": 94
+       }
+      }
+     },
+     "ohlcPlots": {},
+     "palettes": {},
+     "filledAreasStyle": {},
+     "filledAreas": {},
+     "visible": true,
+     "showLabelsOnPriceScale": true,
+     "precision": "default",
+     "adjustedToSplitTime": 1783693274.182,
+     "symbolStateVersion": 2,
+     "zOrderVersion": 2,
+     "frozen": false,
+     "symbol": "PEPPERSTONE:XAUUSD",
+     "currencyId": null,
+     "unitId": null,
+     "metricId": "price",
+     "title": "",
+     "interval": "120"
+    },
+    "points": [
+     {
+      "time_t": 1783692000,
+      "offset": 0,
+      "price": 4203.45,
+      "interval": "120"
+     },
+     {
+      "time_t": 1783036800,
+      "offset": 0,
+      "price": 4021.65,
+      "interval": "120"
+     }
+    ],
+    "zorder": 5000,
+    "ownerSource": "_seriesId",
+    "linkKey": "A7NFRk0Fg6mJ",
+    "metaInfo": {
+     "palettes": {},
+     "inputs": [
+      {
+       "defval": false,
+       "id": "mapRightBoundaryToBarStartTime",
+       "isHidden": true,
+       "name": "mapRightBoundary",
+       "type": "bool",
+       "display": 0
+      },
+      {
+       "defval": "Number Of Rows",
+       "id": "rowsLayout",
+       "name": "Rows Layout",
+       "options": [
+        "Number Of Rows",
+        "Ticks Per Row"
+       ],
+       "type": "text",
+       "display": 15
+      },
+      {
+       "defval": 24,
+       "id": "rows",
+       "max": 1000000,
+       "min": 1,
+       "name": "Row Size",
+       "type": "integer",
+       "display": 15
+      },
+      {
+       "defval": "Up/Down",
+       "id": "volume",
+       "name": "Volume",
+       "options": [
+        "Up/Down",
+        "Total",
+        "Delta"
+       ],
+       "type": "text",
+       "display": 15
+      },
+      {
+       "defval": 0,
+       "id": "first_bar_time",
+       "isHidden": true,
+       "max": 253370764800,
+       "min": -253370764800,
+       "name": "First Bar Time",
+       "type": "time",
+       "display": 0
+      },
+      {
+       "defval": 0,
+       "id": "last_bar_time",
+       "isHidden": true,
+       "max": 253370764800,
+       "min": -253370764800,
+       "name": "Last Bar Time",
+       "type": "time",
+       "display": 0
+      },
+      {
+       "defval": 70,
+       "id": "vaVolume",
+       "max": 100,
+       "min": 0,
+       "name": "Value Area Volume",
+       "type": "integer",
+       "display": 15
+      },
+      {
+       "defval": true,
+       "id": "subscribeRealtime",
+       "isHidden": true,
+       "name": "SubscribeRealtime",
+       "type": "bool",
+       "display": 0
+      },
+      {
+       "defval": false,
+       "id": "extendToRight",
+       "name": "Extend Right",
+       "type": "bool",
+       "display": 0
+      }
+     ],
+     "plots": [
+      {
+       "id": "developingPoc",
+       "type": "line"
+      },
+      {
+       "id": "developingVAHigh",
+       "type": "line"
+      },
+      {
+       "id": "developingVALow",
+       "type": "line"
+      }
+     ],
+     "graphics": {
+      "hhists": {
+       "histBars2": {
+        "location": "absolute",
+        "title": "Volume Profile",
+        "titles": [
+         "Up Volume",
+         "Down Volume"
+        ]
+       },
+       "histBarsVA": {
+        "location": "absolute",
+        "title": "Value Area",
+        "titles": [
+         "Value Area Up",
+         "Value Area Down"
+        ]
+       }
+      },
+      "horizlines": {
+       "pocLines": {
+        "name": "POC",
+        "showPrice": true
+       },
+       "vahLines": {
+        "name": "VAH",
+        "showPrice": true
+       },
+       "valLines": {
+        "name": "VAL",
+        "showPrice": true
+       }
+      },
+      "polygons": {
+       "histBoxBg": {
+        "mouseTouchable": false,
+        "name": "Histogram Box",
+        "showBorder": false
+       }
+      }
+     },
+     "defaults": {
+      "graphics": {
+       "hhists": {
+        "histBars2": {
+         "colors": [
+          "#2962ff",
+          "#fbc02d"
+         ],
+         "direction": "left_to_right",
+         "percentWidth": 30,
+         "showValues": false,
+         "transparencies": [
+          75,
+          75
+         ],
+         "valuesColor": "#424242",
+         "visible": true
+        },
+        "histBarsVA": {
+         "colors": [
+          "#2962ff",
+          "#fbc02d"
+         ],
+         "direction": "left_to_right",
+         "percentWidth": 30,
+         "showValues": false,
+         "transparencies": [
+          30,
+          30
+         ],
+         "valuesColor": "#424242",
+         "visible": true
+        }
+       },
+       "horizlines": {
+        "pocLines": {
+         "color": "#f44336",
+         "style": 0,
+         "visible": true,
+         "width": 2
+        },
+        "vahLines": {
+         "color": "#2962ff",
+         "style": 0,
+         "visible": false,
+         "width": 2
+        },
+        "valLines": {
+         "color": "#2962ff",
+         "style": 0,
+         "visible": false,
+         "width": 2
+        }
+       },
+       "polygons": {
+        "histBoxBg": {
+         "color": "#37a6ef",
+         "transparency": 94
+        }
+       }
+      },
+      "inputs": {
+       "extendToRight": false,
+       "first_bar_time": 0,
+       "last_bar_time": 0,
+       "mapRightBoundaryToBarStartTime": false,
+       "rows": 24,
+       "rowsLayout": "Number Of Rows",
+       "subscribeRealtime": true,
+       "vaVolume": 70,
+       "volume": "Up/Down"
+      },
+      "styles": {
+       "developingPoc": {
+        "color": "#f44336",
+        "display": 0,
+        "linestyle": 0,
+        "linewidth": 1,
+        "plottype": 9,
+        "trackPrice": false,
+        "transparency": 0,
+        "visible": false
+       },
+       "developingVAHigh": {
+        "color": "#2962ff",
+        "display": 0,
+        "linestyle": 0,
+        "linewidth": 1,
+        "plottype": 9,
+        "trackPrice": false,
+        "transparency": 0,
+        "visible": false
+       },
+       "developingVALow": {
+        "color": "#2962ff",
+        "display": 0,
+        "linestyle": 0,
+        "linewidth": 1,
+        "plottype": 9,
+        "trackPrice": false,
+        "transparency": 0,
+        "visible": false
+       }
+      }
+     },
+     "_metainfoVersion": 55,
+     "description": "Fixed Range",
+     "format": {
+      "type": "volume"
+     },
+     "id": "VbPFixed@tv-basicstudies-276",
+     "is_hidden_study": true,
+     "is_price_study": true,
+     "shortDescription": "FRVP",
+     "styles": {
+      "developingPoc": {
+       "format": {
+        "type": "price"
+       },
+       "histogramBase": 0,
+       "title": "Developing POC"
+      },
+      "developingVAHigh": {
+       "format": {
+        "type": "price"
+       },
+       "histogramBase": 0,
+       "title": "Developing VA High"
+      },
+      "developingVALow": {
+       "format": {
+        "type": "price"
+       },
+       "histogramBase": 0,
+       "title": "Developing VA Low"
+      }
+     },
+     "description_localized": "Fixed Range",
+     "shortId": "VbPFixed",
+     "packageId": "tv-basicstudies",
+     "version": 276,
+     "fullId": "VbPFixed@tv-basicstudies-276",
+     "productId": "tv-basicstudies",
+     "_serverMetaInfoVersion": 55
+    }
+   },
+   "symbol": "PEPPERSTONE:XAUUSD",
+   "serverUpdateTime": 1783693663311,
+   "currencyId": null,
+   "unitId": null
+  }
+ ],
+ "shapes": [
+  {
+   "id": "5bRAOh",
+   "name": "fixed_range_volume_profile"
+  },
+  {
+   "id": "wFJZgP",
+   "name": "horizontal_line"
+  },
+  {
+   "id": "nIDzZ6",
+   "name": "horizontal_line"
+  }
+ ]
+}

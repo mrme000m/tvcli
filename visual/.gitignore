@@ -1,0 +1,6 @@
+# runtime artifacts
+__pycache__/
+*.png
+*.log
+.env
+xau-scalp-latest.png

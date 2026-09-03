@@ -76,3 +76,7 @@ accounts.json.bak*
 browser-debug/secrets/runtime/
 .tvcli-autoserve
 !browser-debug/secrets/manifest.json
+
+# vendored tvvisual (visual/) — recipes + example are source, not artifacts
+!visual/recipes/*.json
+!visual/chart.example.json

@@ -1,0 +1,43 @@
+{
+  "name": "indicator",
+  "description": "Generic visual-representation recipe: apply any Pine script via createStudy (WS-equivalent, no indicators dialog) with dynamically resolved inputs, draw the agent-computed levels as labeled horizontal lines, auto-fit the price scale, and screenshot for vision confluence. Inputs, script identity, and levels all come from $params (discovered from tvcli) — nothing is hand-crafted per skill.",
+  "params": {
+    "symbol": "OANDA:XAUUSD",
+    "timeframe": "1",
+    "bars": 90,
+    "script_name": null,
+    "pine_id": null,
+    "pine_version": null,
+    "inputs": {},
+    "levels": [],
+    "checks": [],
+    "shot": "chart-latest.png"
+  },
+  "steps": [
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "relogin", "required": false },
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "add_indicator",
+      "required": false,
+      "args": {
+        "name": "$params.script_name",
+        "inputs": "$params.inputs",
+        "script": { "pineId": "$params.script_pine_id", "pineVersion": "$params.script_version" }
+      } },
+    { "action": "sleep", "args": { "seconds": 4 } },
+    { "action": "draw_levels",
+      "args": { "levels": "$params.levels" } },
+    { "action": "hide_chrome" },
+    { "action": "zoom_bars", "args": { "bars": "$params.bars" } },
+    { "action": "fit_price" },
+    { "action": "screenshot",
+      "args": { "path": "$params.shot", "region": "full" } },
+    { "action": "closed_bar_values" },
+    { "action": "study_values" },
+    { "action": "validate",
+      "required": false,
+      "args": { "checks": "$params.checks" } }
+  ]
+}

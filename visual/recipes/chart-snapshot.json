@@ -1,0 +1,19 @@
+{
+  "name": "chart-snapshot",
+  "description": "Capture the complete current chart as repeatable configuration: full layout JSON export (symbol, resolution, panes, every study's inputs/overrides/styles, all drawings, scales) into ~/.tvvisual/scout/layouts/ plus state, account, and a screenshot. The baseline 'make the whole visual state restorable' artifact.",
+  "params": {
+    "symbol": "OANDA:XAUUSD",
+    "timeframe": "5"
+  },
+  "steps": [
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "relogin", "required": false },
+    { "action": "open",
+      "args": { "symbol": "$params.symbol", "timeframe": "$params.timeframe" } },
+    { "action": "state" },
+    { "action": "layout_export" },
+    { "action": "layout_list", "required": false },
+    { "action": "screenshot", "args": { "region": "chart" }, "required": false }
+  ]
+}

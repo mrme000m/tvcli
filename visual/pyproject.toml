@@ -1,0 +1,16 @@
+[project]
+name = "tv-visual"
+version = "0.3.0"
+description = "Standalone headful CloakBrowser channel for TradingView over CDP"
+requires-python = ">=3.10"
+dependencies = ["cloakbrowser>=0.5.3,<1"]
+
+[project.scripts]
+tvvisual = "tvvisual.__main__:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["tvvisual"]
