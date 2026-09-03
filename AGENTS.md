@@ -24,8 +24,8 @@ agent-friendly JSON. It is packaged for agent consumption two ways:
 
 ## Ground rules for agents
 
-- **Build before use:** `go build -o tvcli ./cmd/tvcli` from this root. A
-  prebuilt `tvcli` binary is checked into the root for convenience.
+- **Build before use:** `go build -o tvcli ./cmd/tvcli` from this root. The
+  binary is a local (gitignored) build — rebuild it after pulling.
 - Auth lives in `.env` (`SESSION`, `SIGNATURE`, `TV_USER`, `DEVICE_T`) and the
   optional multi-account sidecar `accounts.json` — never commit them, never
   print cookie values. `SESSION`/`SIGNATURE` = `sessionid`/`sessionid_sign`,

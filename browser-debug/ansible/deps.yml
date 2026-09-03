@@ -310,7 +310,7 @@
     - name: Check MISTRAL_API_KEY presence (never print value)
       ansible.builtin.shell: |
         if [ -n "${MISTRAL_API_KEY:-}" ]; then echo ENV; exit 0; fi
-        for f in "{{ tv_workspace }}/../go/.env" "{{ tv_workspace }}/.env"; do
+        for f in "{{ tv_workspace }}/../.env" "{{ tv_workspace }}/.env"; do
           if [ -f "$f" ] && grep -q '^MISTRAL_API_KEY=' "$f"; then echo "$f"; exit 0; fi
         done
         exit 1
@@ -322,7 +322,7 @@
     - name: Assert vision key present
       ansible.builtin.assert:
         that: vision_key.rc == 0
-        fail_msg: "MISTRAL_API_KEY not set (env or go/.env or ./.env)"
+        fail_msg: "MISTRAL_API_KEY not set (env or repo-root .env or ./.env)"
       tags: [vision]
 
     - name: Vision smoke test (opt-in)

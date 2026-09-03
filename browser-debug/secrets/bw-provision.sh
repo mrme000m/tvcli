@@ -21,6 +21,9 @@
 #                                   # push FILE's content into vault item ITEM
 #                                   # (notes of a Secure Note; create-or-update)
 #   bw-provision.sh --relock        # provision, then `bw lock` (CI hygiene)
+#   bw-provision.sh --strict        # missing vault items are FATAL (default:
+#                                   # warn + skip, so a partial vault still
+#                                   # provisions everything that exists)
 #
 # Manifest: manifest.json (same dir) — declarative item→target mapping.
 # Exit codes: 0 ok · 1 error · 2 not configured (missing bw credentials).
@@ -35,6 +38,7 @@ MODE="provision"
 EXPORT_ITEM=""
 EXPORT_FILE=""
 RELOCK=0
+STRICT=0
 
 log()  { printf '  [bw] %s\n' "$*" >&2; }
 warn() { printf '  [bw][warn] %s\n' "$*" >&2; }
@@ -51,6 +55,7 @@ while [ $# -gt 0 ]; do
     --dry-run) MODE="dry-run" ;;
     --export)  MODE="export"; EXPORT_ITEM="${2:?--export needs ITEM FILE}"; EXPORT_FILE="${3:?--export needs ITEM FILE}"; shift 2 ;;
     --relock)  RELOCK=1 ;;
+    --strict)  STRICT=1 ;;
     -h|--help) usage ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -164,6 +169,7 @@ provision() {
   bw_ sync >/dev/null
   mkdir -p "$RUNTIME_DIR"
   local n=0
+  local skipped=0
   while IFS= read -r entry; do
     item="$(jq -r '.item' <<<"$entry")"
     target_rel="$(jq -r '.target' <<<"$entry")"
@@ -175,8 +181,14 @@ provision() {
       *)  target="$WS/$target_rel" ;;
     esac
     mkdir -p "$(dirname "$target")"
-    notes="$(bw_ get notes "$item")"
-    [ -n "$notes" ] || die "vault item '$item' is empty or missing (bw get notes)"
+    if ! notes="$(bw_ get notes "$item" 2>/dev/null)" || [ -z "$notes" ]; then
+      if [ "$STRICT" -eq 1 ]; then
+        die "vault item '$item' is empty or missing (bw get notes)"
+      fi
+      warn "vault item '$item' missing — skipped (target kept as-is); --strict makes this fatal"
+      skipped=$((skipped+1))
+      continue
+    fi
     case "$format" in
       env) validate_env "$item" "$notes" ;;
       json) validate_json "$item" "$notes" "$json_validate" ;;
@@ -192,7 +204,7 @@ provision() {
     log "provisioned '$item' → ${target#"$WS"/} ($format, $(wc -c <"$target") bytes)"
     n=$((n+1))
   done < <(jq -c '.provision[]' "$MANIFEST")
-  log "provisioned $n item(s) from vault; all targets are gitignored runtime files"
+  log "provisioned $n item(s) from vault (skipped: $skipped missing); all targets are gitignored runtime files"
   [ "$RELOCK" -eq 1 ] && bw_ lock >/dev/null 2>&1 || true
 }
 
