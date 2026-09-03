@@ -39,11 +39,11 @@ bash browser-debug/secrets/bw-provision.sh || \
 # prime-agent CLI + CF Workers AI model config). Same non-fatal contract as
 # the secrets step: a failed bootstrap never breaks the container build —
 # re-run inside the codespace with:  bash .devcontainer/post-create.sh
-# CF credentials come from the codespace secrets (CLOUDFLARE_ACCOUNT_ID /
-# CLOUDFLARE_API_KEY); when those are absent from the environment, fall back
-# to the bw-provisioned runtime file above (values are sourced, never echoed).
+# CF credentials come from the CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY
+# repo codespace secrets (injected into the lifecycle env). NB: the
+# bw-provisioned opencode.env can NOT substitute — its API-key value is a
+# $-pointer, not a literal token.
 # --skip-tags secrets: bw-provision already ran above in this script.
-set -a; [ -f browser-debug/secrets/runtime/opencode.env ] && . browser-debug/secrets/runtime/opencode.env; set +a
 ansible-playbook bootstrapping/ansible/prime-stack.yml \
   -i localhost, \
   -e ansible_connection=local \

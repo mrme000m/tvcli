@@ -37,14 +37,11 @@ fi
 
 # Optional: auto-start the dsh Web GUI — the Prime fleet column with the
 # prime-orchestrator preset (dsh + dsh-prime-orchestrator plugin, provisioned by
-# bootstrapping/ansible/prime-stack.yml). Needs the Cloudflare credentials
-# (the LLM provider) — from the codespace secrets, or, failing those, the
-# bw-provisioned runtime file (sourced, never echoed). Enable once per
-# workspace with:  touch .dsh-autoweb
+# bootstrapping/ansible/prime-stack.yml). Needs the CLOUDFLARE_ACCOUNT_ID /
+# CLOUDFLARE_API_KEY codespace secrets in env (the LLM provider; the
+# bw-provisioned opencode.env cannot substitute — its key value is a
+# $-pointer). Enable once per workspace with:  touch .dsh-autoweb
 if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
-  [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ -n "${CLOUDFLARE_API_KEY:-}" ] || {
-    set -a; [ -f "$WS/browser-debug/secrets/runtime/opencode.env" ] && . "$WS/browser-debug/secrets/runtime/opencode.env"; set +a
-  }
   if [ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] && [ -n "${CLOUDFLARE_API_KEY:-}" ]; then
     export CLOUDFLARE_AI_TOKEN="$CLOUDFLARE_API_KEY"
     export CF_ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
@@ -58,7 +55,7 @@ if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
       echo "dsh web already running (:3081)"
     fi
   else
-    echo "dsh web autostart: CLOUDFLARE credentials not in env — skipping (set codespace secrets or run bw-provision)"
+    echo "dsh web autostart: CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not in env — skipping (set them as codespace secrets)"
   fi
 fi
 

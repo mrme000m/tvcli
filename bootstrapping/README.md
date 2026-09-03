@@ -16,10 +16,11 @@ bootstrapping/
 secrets` — the Bitwarden step directly above it already ran) after the
 existing browser-debug deps steps; a failure there is a **warning, never a
 build breaker** (re-run by hand inside the codespace: `bash .devcontainer/post-create.sh`).
-Cloudflare credentials are taken from the `CLOUDFLARE_*` codespace secrets;
-when those are not in the environment, `post-create.sh` falls back to
-sourcing the bw-provisioned `browser-debug/secrets/runtime/opencode.env`
-(same values, straight from the vault — never echoed).
+Cloudflare credentials come from the `CLOUDFLARE_ACCOUNT_ID` /
+`CLOUDFLARE_API_KEY` repo codespace secrets, injected into the lifecycle
+env. NB: the bw-provisioned `browser-debug/secrets/runtime/opencode.env`
+can NOT substitute for them — its API-key value is a `$`-pointer, not a
+literal token.
 
 ## The prime stack
 
