@@ -1,0 +1,9 @@
+name: TV Network Investigator
+description: >
+  TradingView network-API + chart-frontend investigator: captures the private
+  chart-data WebSocket protocol with the local bdg `tv` command group, reads
+  the live chart model (studies, drawings, symbols), drives the chart with
+  custom input values of any Pine script, and debugs/extends the Go tvcli
+  network client — for market analysis and frontend tools that show it on the
+  chart.
+order: 20

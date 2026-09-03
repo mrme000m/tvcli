@@ -8,8 +8,15 @@ ansible 7.7 (ansible-core 2.14, builtin modules only).
 ```
 bootstrapping/
 ├── README.md               this file
-└── ansible/
-    └── prime-stack.yml     the DSH prime-orchestrator stack (see below)
+├── ansible/
+│   └── prime-stack.yml     the DSH prime-orchestrator stack (see below)
+├── presets/                vendored specialist agent presets (fleet tag)
+│   ├── tv-scout/           visual confluence on the live chart
+│   ├── tv-investigator/    multi-session TV network-API screening
+│   ├── qd-analyst/         QuantDinger gateway market research
+│   └── wt-investigator/    WunderTrading bot configuration + management
+└── docs/
+    └── grid-fleet.md       the autonomous grid-trading loop blueprint
 ```
 
 `.devcontainer/post-create.sh` invokes the playbook (with `--skip-tags
@@ -71,6 +78,7 @@ Extra knobs:
 | `dsh-config` | `~/.dsh/settings.yaml` |
 | `prime-config` | `~/.prime/agent/{models,auth,settings}.json` (merge, never destroying other providers/keys) |
 | `secrets` | `browser-debug/secrets/bw-provision.sh` (never fatal) |
+| `fleet` | Specialist agent presets (tv-scout, tv-investigator, qd-analyst, wt-investigator — marker-preserved from `bootstrapping/presets/`) + grid-trading wiring: the `mcp-wundertrading` MCP row (keys read from vault item `wundertrading-api` at provision time — never committed), the `wt-tools` cloak-dir override, the tvcli multi-account autoserve marker, and the QuantDinger gateway env bridge. Blueprint: `bootstrapping/docs/grid-fleet.md` |
 | `always` | preflight warnings + final summary |
 
 Example: `ansible-playbook ... --tags plugin,preset`.
@@ -132,6 +140,22 @@ in the Web GUI) when ALL of:
 3. `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_KEY` are in the environment.
 
 Logs go to `/tmp/dsh-web.log`. Remove the marker to disable.
+
+## The specialist fleet (grid trading)
+
+The `fleet` tag installs the four specialist agent presets vendored under
+`bootstrapping/presets/` (consolidated from the production Mac's
+`~/.dsh/.agent-presets/`; Mac paths are `@TV_WORKSPACE@` / `@CLOAK_DIR@`
+placeholders resolved at install time) with the plugin's marker semantics —
+user-edited presets are preserved, unedited ones track the vendored copies.
+
+Together with the plugin-materialized `prime-orchestrator` they form the
+autonomous grid-trading loop — research (qd-analyst), screen (tv-investigator
+fanning tvcli `/hunt` across the `accounts.json` multi-account cookie pool),
+configure (wt-investigator via the wt CLI / REST / MCP / headful UI), manage
+(prime-orchestrator reacting to `tvcli watch` triggers), confirm (tv-scout
+visual confluence). The regime→bot mapping, trigger set, and ops checklist
+live in [docs/grid-fleet.md](docs/grid-fleet.md).
 
 ## Post-run verification checklist
 

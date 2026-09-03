@@ -1,0 +1,9 @@
+name: WunderTrading Investigator
+description: >
+  WunderTrading platform automation + investigation agent: drives the headful
+  CloakBrowser session (bdg) with vault-persisted cookies for web-UI flows
+  (bot configuration, exchange setup, research, backtesting), calls the
+  HMAC-signed REST API and the official MCP server through the wt CLI, and
+  explores the platform's network layer and frontend structure for full
+  programmatic control of trading bots on the allowed exchanges.
+order: 21

@@ -18,7 +18,8 @@ agent-friendly JSON. It is packaged for agent consumption two ways:
    | `tv-scout` | Drive the live TradingView web chart (headful CDP) to visually represent and confirm market understanding with screenshots. |
    | `tv-watch` | Watchtower agent protocol — act on market-watch trigger events (invocation packages from `agents/watchtower/`). |
    | `openknowledge` | Reading/writing the `Wiki/` knowledge base via the `openknowledge` CLI. |
-   | `codespace-prime-stack` | Operate/verify/extend the bootstrapped DSH prime-orchestrator stack in the GitHub Codespace/devcontainer (dsh + dsh-prime-orchestrator + prime-agent + CF Workers AI; the `bootstrapping/` playbook, dsh Web GUI on :3081, secrets contract, verified gotchas). |
+   | `codespace-prime-stack` | Operate/verify/extend the bootstrapped DSH prime-orchestrator stack in the GitHub Codespace/devcontainer (dsh + dsh-prime-orchestrator + prime-agent + CF Workers AI; the `bootstrapping/` playbook, dsh Web GUI on :3081, secrets contract, verified gotchas) — including the specialist fleet (`fleet` tag: tv-scout/tv-investigator/qd-analyst/wt-investigator presets + grid-trading wiring; blueprint `bootstrapping/docs/grid-fleet.md`). |
+   | `wundertrading` | WunderTrading execution layer — classify a token's market regime from public OHLCV, map it to a classic/DCA strategy config (TP ladders, stops, trailing, DCA sizing math), deploy/manage via wun MCP tools or HMAC-signed REST `/open_api`, and prove reliability from exported strategy history. MCP server `wundertrading` is configured in zcode + PrimeAgent. |
 
 2. **Pi package** — `package.json` at the root carries the `pi-package`
    keyword and a `pi.skills` manifest, so `pi install <this repo>` (local path

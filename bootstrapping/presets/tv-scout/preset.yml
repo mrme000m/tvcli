@@ -1,0 +1,7 @@
+name: TV Scout
+description: >
+  TradingView visual-confluence agent: drives the live headful chart via
+  tvvisual (CloakBrowser + CDP), represents agent understanding on the real
+  chart (Pine push, drawings, xau-scalp), confirms it with screenshots for
+  vision-model confluence against tvcli numbers, and progressively scouts the
+  TradingView web interface to grow a verified recipe/code knowledge base.

@@ -23,6 +23,14 @@
 #   extras/mobile  dsh-mobile gateway setup (mobile access in the web UI;
 #                codespace: HTTP gateway behind the forwarded https origin)
 #   extras/mcp     home-level cordis patch mounting code-review-graph MCP
+#   fleet        the specialist agent fleet — vendored presets under
+#                bootstrapping/presets/ (tv-scout, tv-investigator, qd-analyst,
+#                wt-investigator) installed with marker semantics, plus the
+#                grid-trading wiring: the wundertrading MCP row in the web
+#                profile (keys read from the vault at provision time — never
+#                committed), the wt-tools cloak-dir override, the tvcli
+#                multi-account autoserve marker and the QuantDinger gateway
+#                env bridge. Loop blueprint: bootstrapping/docs/grid-fleet.md
 #   secrets      browser-debug/secrets/bw-provision.sh (never fatal)
 #
 # Run (inside the codespace, from the repo root):
@@ -84,6 +92,37 @@
     dsh_profile_dir: "{{ dsh_home }}/profiles/{{ dsh_profile }}"
     preset_root: "{{ dsh_home }}/.agent-presets"
     preset_dir: "{{ preset_root }}/prime-orchestrator"
+
+    # --- fleet: specialist agent presets + grid-trading wiring ---------------
+    # Consolidated from the production Mac's ~/.dsh/.agent-presets/ (Mac paths
+    # in the vendored copies are @TV_WORKSPACE@ / @CLOAK_DIR@ placeholders,
+    # resolved at install time). Together the fleet implements the autonomous
+    # grid-trading loop (see bootstrapping/docs/grid-fleet.md):
+    #   qd-analyst      research (gateway klines/news + tvcli skills)
+    #   tv-investigator screen (tvcli /hunt fan-out across the accounts.json
+    #                   multi-account cookie pool + network-API investigation)
+    #   wt-investigator configure (WunderTrading bots — Grid/DCA/Signal/
+    #                   Multi-Pair Grid — via wt CLI, REST, MCP, headful UI)
+    #   tv-scout        confirm (visual confluence on the live chart)
+    #   prime-orchestrator  coordinate/manage (fleet + prime-agent workers)
+    dsh_fleet_presets: [tv-scout, tv-investigator, qd-analyst, wt-investigator]
+    fleet_managed_by: prime-stack-bootstrap
+    fleet_preset_marker: .plugin-managed.json
+    fleet_preset_src: "{{ playbook_dir | dirname }}/presets"
+    # tvcli multi-account HTTP server (POST /hunt fan-out over the account
+    # pool) — autostart only when the accounts.json registry is provisioned.
+    fleet_enable_tvcli_autoserve: true
+    # WunderTrading runtime env (bw-provision, vault item wundertrading-api —
+    # WT_API_KEY/WT_API_SECRET): the source for the mcp-wundertrading row.
+    # Cloak dir: browser-debug in this workspace hosts bdg + launch.mjs.
+    wt_runtime_env: "{{ tv_workspace }}/browser-debug/secrets/runtime/wt.env"
+    wt_cloak_dir: "{{ tv_workspace }}/browser-debug"
+    wt_mcp_url: "https://wundertrading.com:2083/mcp"
+    # QuantDinger gateway env for qd-analyst (optional: when QD_AGENT_TOKEN is
+    # unset the gateway auto-mints a short-lived read-only token for known
+    # users — the bridge only wires the file when it exists).
+    qd_runtime_env: "{{ tv_workspace }}/browser-debug/secrets/runtime/qd-agent.env"
+    web_profile_patch: "{{ dsh_profile_dir }}/cordis.patch.yml"
 
     # --- secrets: only presence is ever inspected, never the values ---------
     cf_account_id: "{{ lookup('env', 'CLOUDFLARE_ACCOUNT_ID') }}"
@@ -734,6 +773,10 @@
         mkdir -p "$(dirname "$file")"
         [ -f "$file" ] || printf '[]\n' > "$file"
         grep -q 'id: mnemon' "$file" 2>/dev/null && { echo unchanged; exit 0; }
+        # The dsh profile template seeds the patch layer as a comment header
+        # plus a bare []; rows must REPLACE that placeholder, not follow it
+        # (a list after [] is invalid YAML — end-of-stream expected).
+        sed -i '/^\[\][[:space:]]*$/d' "$file"
         cat >> "$file" <<'ROW'
         # dsh-mnemon tuning (managed by bootstrapping/ansible/prime-stack.yml)
         - id: mnemon
@@ -814,10 +857,11 @@
       tags: [extras, mobile]
 
     - name: Point the mobile gateway at the codespace-forwarded origin
-      # In a codespace the https edge + GitHub auth + device pairing provide
-      # what the managed-LAN TLS would: the gateway runs plain HTTP on
-      # loopback (tls disabled is only legal on loopback — enforced by the
-      # plugin) and is published at the forwarded https origin. Non-codespace
+      # The plugin enforces "publicOrigin requires TLS" (parseGatewayConfig),
+      # so the gateway serves the managed self-signed TLS the setup CLI
+      # generated — on loopback — and is published at the forwarded https
+      # origin (portsAttributes protocol "https"). GitHub auth at the edge +
+      # device pairing replace the LAN-trust model. Non-codespace
       # devcontainers keep the managed LAN setup the CLI wrote.
       ansible.builtin.shell: |
         set -e
@@ -841,6 +885,7 @@
             except Exception:
                 doc = {}
         port = os.environ['MOBILE_PORT']
+        tls = doc.get('tls') or {}
         out = {
             'version': 1,
             'publicOrigin': f"https://{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}",
@@ -848,7 +893,11 @@
             'upstreamOrigin': 'http://127.0.0.1:3081',
             'instanceId': doc.get('instanceId') or secrets.token_hex(32),
             'pairingCaFile': str(home / 'tls' / 'ca.pem'),
-            'tls': {'mode': 'disabled'},
+            'tls': {
+                'mode': tls.get('mode') or 'managed',
+                'certFile': tls.get('certFile') or str(home / 'tls' / 'server-cert.pem'),
+                'keyFile': tls.get('keyFile') or str(home / 'tls' / 'server-key.pem'),
+            },
             'allowedCidrs': ['127.0.0.0/8', '::1/128'],
         }
         if json.dumps(doc, sort_keys=True) == json.dumps(out, sort_keys=True):
@@ -941,6 +990,207 @@
       when: bw_provision.rc != 0
       tags: [secrets]
 
+    # ------------------------------------------------------------------ fleet
+    # Specialist agent presets + grid-trading wiring. Runs after `secrets` so
+    # a standalone full run can read the freshly-provisioned wt.env (the
+    # post-create path provisions it even earlier, in bw-provision.sh).
+    - name: Install the specialist fleet presets (marker-preserved)
+      # Copies the vendored presets (bootstrapping/presets/) into
+      # ~/.dsh/.agent-presets/<name>/ with the plugin's marker semantics:
+      #   - no marker + no dir          → install + write the marker
+      #   - marker, sha changed         → update the files + refresh the marker
+      #   - marker, sha identical       → skip
+      #   - dir without OUR marker      → user-owned, preserved untouched
+      # @TV_WORKSPACE@ / @CLOAK_DIR@ placeholders resolve to this workspace.
+      ansible.builtin.shell: |
+        python3 - <<'PYEOF'
+        import hashlib, json, os, pathlib, sys
+        name = os.environ['FLEET_NAME']
+        src = pathlib.Path(os.environ['FLEET_SRC']) / name
+        dst = pathlib.Path(os.environ['FLEET_ROOT']) / name
+        marker = dst / os.environ['FLEET_MARKER']
+        ws, cloak = os.environ['TV_WORKSPACE'], os.environ['CLOAK_DIR']
+        files = ['preset.yml', 'agent.cordis.yml']
+
+        def rendered(f):
+            text = (src / f).read_text()
+            return (text.replace('@TV_WORKSPACE@', ws).replace('@CLOAK_DIR@', cloak))
+
+        hashes = {f: hashlib.sha256(rendered(f).encode()).hexdigest() for f in files}
+        if marker.exists():
+            try:
+                doc = json.loads(marker.read_text() or '{}')
+            except Exception:
+                doc = {}
+            if doc.get('managedBy') == os.environ['FLEET_MANAGED_BY'] and doc.get('files') == hashes:
+                print('unchanged'); raise SystemExit
+            if doc.get('managedBy') != os.environ['FLEET_MANAGED_BY']:
+                print('preserved: user-owned (marker managedBy differs)'); raise SystemExit
+        elif dst.exists():
+            print('preserved: user-owned (no prime-stack marker)'); raise SystemExit
+        dst.mkdir(parents=True, exist_ok=True)
+        for f in files:
+            (dst / f).write_text(rendered(f))
+        marker.write_text(json.dumps(
+            {'managedBy': os.environ['FLEET_MANAGED_BY'], 'version': 1,
+             'files': hashes}, indent=2) + '\n')
+        print('updated' if marker.exists() else 'changed')
+        PYEOF
+      args:
+        executable: /bin/bash
+      environment:
+        FLEET_NAME: "{{ item }}"
+        FLEET_SRC: "{{ fleet_preset_src }}"
+        FLEET_ROOT: "{{ fleet_preset_root }}"
+        FLEET_MARKER: "{{ fleet_preset_marker }}"
+        FLEET_MANAGED_BY: "{{ fleet_managed_by }}"
+        TV_WORKSPACE: "{{ tv_workspace }}"
+        CLOAK_DIR: "{{ wt_cloak_dir }}"
+      register: fleet_preset_install
+      changed_when: fleet_preset_install.stdout is search('updated|changed')
+      loop: "{{ dsh_fleet_presets }}"
+      loop_control:
+        label: "{{ item }}"
+      tags: [fleet]
+
+    - name: Upsert the grid-fleet rows into the web profile cordis patch
+      # Two rows, merged idempotently into ~/.dsh/profiles/web/cordis.patch.yml:
+      #   mcp-wundertrading — the official MCP server. Keys are read at
+      #     PROVISION TIME from the bw-provisioned runtime wt.env (vault item
+      #     wundertrading-api) or the process env; a rotated key pair
+      #     propagates on the next playbook run. Never logged (no_log) and
+      #     never committed — only the row template lives here.
+      #   wt-tools — config.cloakDir → workspace browser-debug (the plugin's
+      #     default is the dev Mac's minimal-mjs path).
+      # A dsh-seeded patch layer may carry a comment header + a bare `[]`
+      # placeholder — stripped before parsing (same remedy as the mnemon row).
+      # Missing keys → the MCP row is skipped with a warning; the wt_* plugin
+      # tools keep working (they read the vault through the credential seam).
+      ansible.builtin.shell: |
+        python3 - <<'PYEOF'
+        import json, os, pathlib, re, sys
+        import yaml
+        patch_file = pathlib.Path(os.environ['PATCH_FILE'])
+        wt_env = pathlib.Path(os.environ['WT_ENV'])
+        keys = {}
+        if wt_env.exists():
+            for line in wt_env.read_text().splitlines():
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    k, v = line.split('=', 1)
+                    keys[k.strip()] = v.strip()
+        keys = {k: keys.get(k) or os.environ.get(k) for k in ('WT_API_KEY', 'WT_API_SECRET')}
+        cloak, mcp_url = os.environ['CLOAK_DIR'], os.environ['WT_MCP_URL']
+        text = patch_file.read_text() if patch_file.exists() else ''
+        text = re.sub(r'(?m)^\[\]\s*$', '', text)
+        doc = []
+        if text.strip():
+            try:
+                loaded = yaml.safe_load(text) or []
+            except Exception as exc:
+                raise SystemExit(f'cannot parse {patch_file}: {exc}')
+            doc = loaded if isinstance(loaded, list) else []
+        before = json.dumps(doc, sort_keys=True)
+        doc = [row for row in doc
+               if not (isinstance(row, dict) and row.get('id') in ('mcp-wundertrading', 'wt-tools'))]
+        updated = []
+        if all(keys.values()):
+            doc.append({
+                'id': 'mcp-wundertrading',
+                'name': '@deepseek-ai/dsh-mcp-client',
+                'config': {
+                    'serverName': 'wundertrading',
+                    'transport': 'streamable-http',
+                    'url': mcp_url,
+                    'toolCallTimeoutMs': 60000,
+                    'headers': {
+                        'X-API-Key': keys['WT_API_KEY'],
+                        'X-Secret-Key': keys['WT_API_SECRET'],
+                    },
+                },
+            })
+            updated.append('mcp-wundertrading')
+        else:
+            print('note: wundertrading keys missing (wt.env not provisioned / env unset) — MCP row skipped',
+                  file=sys.stderr)
+        doc.append({'id': 'wt-tools', 'config': {'cloakDir': cloak}})
+        updated.append('wt-tools')
+        patch_file.parent.mkdir(parents=True, exist_ok=True)
+        patch_file.write_text(yaml.safe_dump(doc, sort_keys=False, allow_unicode=True))
+        os.chmod(patch_file, 0o600)
+        print('unchanged' if json.dumps(doc, sort_keys=True) == before
+              else f"updated: {', '.join(updated)}")
+        PYEOF
+      args:
+        executable: /bin/bash
+      environment:
+        PATCH_FILE: "{{ web_profile_patch }}"
+        WT_ENV: "{{ wt_runtime_env }}"
+        WT_MCP_URL: "{{ wt_mcp_url }}"
+        CLOAK_DIR: "{{ wt_cloak_dir }}"
+        # secrets may ride the process env on standalone runs (no wt.env yet)
+        WT_API_KEY: "{{ lookup('env', 'WT_API_KEY') }}"
+        WT_API_SECRET: "{{ lookup('env', 'WT_API_SECRET') }}"
+      register: fleet_patch_rows
+      changed_when: fleet_patch_rows.stdout is search('updated')
+      no_log: true
+      tags: [fleet]
+
+    - name: Enable the tvcli multi-account server autostart for the fleet
+      # The multi-session TV screening system: POST /hunt fans one skill
+      # across many symbols over the accounts.json cookie pool (round-robin
+      # + failover). Autostart only when the registry is provisioned.
+      ansible.builtin.shell: |
+        ws="{{ tv_workspace }}"
+        [ -f "$ws/accounts.json" ] || {
+          echo "skipped: accounts.json not provisioned yet (bw-provision) — tvcli autoserve stays off"
+          exit 0
+        }
+        if [ -f "$ws/.tvcli-autoserve" ]; then echo unchanged; else touch "$ws/.tvcli-autoserve"; echo enabled; fi
+      register: fleet_tvcli_autoserve
+      changed_when: fleet_tvcli_autoserve.stdout is search('enabled')
+      when: fleet_enable_tvcli_autoserve | bool
+      tags: [fleet]
+
+    - name: Bridge the QuantDinger gateway env for qd-analyst
+      # Guarded source of the optional runtime file so qd-analyst's
+      # $QD_AGENT_BASE_URL / $QD_AGENT_TOKEN resolve in login shells; an
+      # already-set environment (codespace secrets) always wins. When the
+      # gateway is unreachable the backend auto-mints a short-lived read-only
+      # token for known users, so a missing file is a no-op, not an error.
+      ansible.builtin.shell: |
+        set -e
+        file="{{ qd_runtime_env }}"
+        [ -f "$file" ] || { echo "skipped: $file not provisioned (optional)"; exit 0; }
+        changed=no
+        block() {
+          printf '%s\n' \
+            '# prime-stack fleet: guarded source of the QuantDinger gateway env' \
+            '# (a value applies only when the variable is unset — injected env wins).' \
+            'if [ -f "{{ qd_runtime_env }}" ]; then' \
+            '  while IFS= read -r __qd_line; do' \
+            '    [ -n "$__qd_line" ] || continue' \
+            '    [ "${__qd_line#\#}" = "$__qd_line" ] || continue' \
+            '    __qd_k="${__qd_line%%=*}"' \
+            '    case "$__qd_k" in *[!A-Za-z0-9_]*) continue ;; esac' \
+            '    [ -n "${!__qd_k:-}" ] && continue' \
+            '    eval "export $__qd_line"' \
+            '  done < "{{ qd_runtime_env }}"' \
+            'fi'
+        }
+        for rc in "{{ prime_home }}/.profile" "{{ prime_home }}/.bashrc"; do
+          grep -qF "qd-agent.env" "$rc" 2>/dev/null && continue
+          touch "$rc"
+          block >> "$rc"
+          changed=yes
+        done
+        echo "$changed"
+      args:
+        executable: /bin/bash
+      register: fleet_qd_env
+      changed_when: fleet_qd_env.stdout is search('yes')
+      tags: [fleet]
+
     # ------------------------------------------------------------------ summary
     - name: Prime stack summary
       ansible.builtin.debug:
@@ -954,5 +1204,10 @@
           - "mnemon (memory in the web UI): {{ 'configured this run' if (mnemon_row is defined and mnemon_row is changed) else ('configured' if (mnemon_row is defined) else 'not run') }}"
           - "mobile access (gateway :{{ mobile_gateway_port }}): {{ 'configured this run' if (mobile_setup is defined and (mobile_codespace_origin is changed or mobile_setup is changed)) else ('configured' if (mobile_setup is defined) else 'not run') }}"
           - "code-review-graph MCP (home-level patch): {{ 'patched this run' if (mcp_home_patch is defined and mcp_home_patch is changed) else ('present' if (mcp_home_patch is defined) else 'not run') }}"
+          - "fleet presets (tv-scout, tv-investigator, qd-analyst, wt-investigator): {{ 'installed/updated this run' if (fleet_preset_install is defined and fleet_preset_install is changed) else ('present or user-preserved' if (fleet_preset_install is defined) else 'not run (use --tags fleet)') }}"
+          - "wundertrading MCP row + wt-tools cloakDir (web profile patch): {{ 'written this run' if (fleet_patch_rows is defined and fleet_patch_rows is changed) else ('checked (rows current)' if (fleet_patch_rows is defined) else 'not run') }}"
+          - "tvcli multi-account autoserve (.tvcli-autoserve): {{ 'enabled this run' if (fleet_tvcli_autoserve is defined and fleet_tvcli_autoserve is changed) else ('checked' if (fleet_tvcli_autoserve is defined) else 'not run') }}"
+          - "QuantDinger gateway env (qd-analyst): {{ 'bridged this run' if (fleet_qd_env is defined and fleet_qd_env is changed) else ('checked' if (fleet_qd_env is defined) else 'not run') }}"
+          - "grid fleet blueprint: bootstrapping/docs/grid-fleet.md (research → screen → configure → manage loop)"
           - "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace"
       tags: [always]

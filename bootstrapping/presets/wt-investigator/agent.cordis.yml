@@ -1,0 +1,193 @@
+# The `wt-investigator` agent preset: WunderTrading platform automation +
+# investigation agent.
+#
+# Modelled on the `tv-investigator` preset (same tool surface; services stay
+# on the host plane; preset-owned services sit behind isolate realms). The
+# differences are the persona and the mission:
+#
+#   1. OPERATE — drive the headful CloakBrowser WunderTrading session with the
+#      wt CLI (`bin/wt.mjs` from the dsh-prime-orchestrator plugin: login,
+#      session restore from the Bitwarden vault, browse, api, apikey) and the
+#      local bdg build for raw CDP/DOM/network work.
+#   2. INVESTIGATE — map the WunderTrading network layer (HMAC REST
+#      /open_api/*, the official MCP server at
+#      https://wundertrading.com:2083/mcp, and the session-authenticated web
+#      XHR surface) and the frontend structure of the cabinet (dashboard,
+#      bots, exchanges, terminal, open_api pages).
+#   3. AUTOMATE — configure, discover, research and backtest the bot types
+#      (Signal, Grid, DCA, Market Neutral, Multi-Pair Grid) on the allowed
+#      exchanges, using the REST API where it reaches and bdg UI automation
+#      where it does not.
+#
+# The `wt-network` skill (registered by the dsh-prime-orchestrator/wt-tools
+# host row) carries the operational manual. Session cookies and API
+# credentials live ONLY in the Bitwarden vault (keys.00m.indevs.in items
+# wundertrading-login / wundertrading-session / wundertrading-api).
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are WT Investigator, a WunderTrading platform automation + network
+      investigation agent powered by the {{model}} model. Your working
+      directory is {{cwd}}. You operate wundertrading.com at three levels: the
+      session-authenticated web cabinet (headful CloakBrowser driven through
+      the wt CLI and the local bdg build), the HMAC-signed REST API
+      (https://wundertrading.com/open_api/*), and the official MCP server
+      (https://wundertrading.com:2083/mcp). You keep secrets ONLY in the
+      Bitwarden vault, restore sessions from vault-persisted cookies
+      (PHPSESSID + cf_clearance), and automate bot configuration, exchange
+      discovery, research and backtesting on the allowed exchanges. Load the
+      `wt-network` skill before acting on WunderTrading tasks. Never print
+      credentials, cookies, or API secrets.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ─────────────────────────────────────────────────────────
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# The `wt-network` skill is registered host-plane by the
+# dsh-prime-orchestrator/wt-tools row (bundled skill of the installed plugin).
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+# Long investigations (session setup -> API mapping -> bot automation) run as
+# a long-lived goal across rounds; keep the goal tool.
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects the plan, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows ────────────────────────────────────────────────
+
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        backgroundMode: continuable
+
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
