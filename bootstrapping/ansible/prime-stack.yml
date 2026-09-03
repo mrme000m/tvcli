@@ -886,6 +886,28 @@
           exit 0
         fi
         export CS_NAME="$cs_name" CS_DOMAIN="$cs_domain" MOBILE_PORT="{{ mobile_gateway_port }}"
+        # The loader also requires the served cert to cover the public
+        # authority, and the setup CLI only mints a LAN-IP SAN. Sign a
+        # codespace leaf with the plugin CA — the chain stays intact for
+        # devices paired against that CA. Regenerate when the origin
+        # changes or the cert nears expiry.
+        auth="${CS_NAME}-${MOBILE_PORT}.${CS_DOMAIN}"
+        tlsdir="${HOME}/.dsh/mobile-access/tls"
+        cert="$tlsdir/server-cert-codespace.pem"
+        key="$tlsdir/server-key-codespace.pem"
+        if ! { [ -f "$cert" ] && openssl x509 -checkend 86400 -noout -in "$cert" 2>/dev/null \
+               && openssl x509 -noout -ext subjectAltName -in "$cert" 2>/dev/null | grep -q "DNS:${auth}[, ]"; }; then
+          tmp="$(mktemp -d)"
+          openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+            -keyout "$key" -subj "/CN=DeepSeek Harness Mobile" -out "$tmp/csr.pem" 2>/dev/null
+          printf 'subjectAltName=DNS:%s,DNS:localhost,IP:127.0.0.1\n' "$auth" > "$tmp/san.cnf"
+          openssl x509 -req -in "$tmp/csr.pem" -CA "$tlsdir/ca.pem" -CAkey "$tlsdir/ca-key.pem" \
+            -CAcreateserial -days 825 -sha256 -extfile "$tmp/san.cnf" -out "$cert" 2>/dev/null
+          chmod 600 "$cert" "$key"
+          rm -rf "$tmp"
+          echo "minted server cert for ${auth}"
+        fi
+        export CS_CERT="$cert" CS_KEY="$key"
         python3 - <<'PYEOF'
         import base64, hashlib, json, os, pathlib
         home = pathlib.Path(os.path.expanduser('~/.dsh/mobile-access'))
@@ -920,11 +942,12 @@
             'pairingCaFile': str(home / 'tls' / 'ca.pem'),
             'tls': {
                 # parseGatewayConfig requires mode == "provided" whenever a
-                # publicOrigin is set (the CLI's LAN "managed" mode is only
-                # accepted without one); cert/key are the setup CLI's own.
+                # publicOrigin is set; the leaf must also cover the public
+                # authority, so serve the codespace-SAN cert minted above
+                # (signed by the same CA devices pair with).
                 'mode': 'provided',
-                'certFile': tls.get('certFile') or str(home / 'tls' / 'server-cert.pem'),
-                'keyFile': tls.get('keyFile') or str(home / 'tls' / 'server-key.pem'),
+                'certFile': os.environ.get('CS_CERT') or str(home / 'tls' / 'server-cert.pem'),
+                'keyFile': os.environ.get('CS_KEY') or str(home / 'tls' / 'server-key.pem'),
             },
             'allowedCidrs': ['127.0.0.0/8', '::1/128'],
         }
