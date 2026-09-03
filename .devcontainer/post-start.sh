@@ -18,3 +18,13 @@ for i in $(seq 1 20); do pgrep -x websockify >/dev/null && break; sleep 0.5; don
 pgrep -x websockify >/dev/null || { echo "websockify failed to start:"; cat /tmp/websockify.log; exit 1; }
 
 echo "display ready: DISPLAY=:99 (Xvfb $(pgrep -x Xvfb | head -1)), VNC :5900, noVNC http://localhost:6080/vnc.html (websockify $(pgrep -x websockify | head -1))"
+
+# Optional: auto-start the tvcli multi-account HTTP server (parallel
+# multi-symbol analysis via POST /hunt, account pool + failover).
+# Enable once per workspace with:  touch .tvcli-autoserve
+WS="$(cd "$(dirname "$0")/.." && pwd)"
+if [ -f "$WS/.tvcli-autoserve" ] && [ -x "$WS/tvcli" ] && [ -f "$WS/accounts.json" ]; then
+  (cd "$WS" && ./tvcli serve --daemon >/dev/null 2>&1) \
+    && echo "tvcli server ready: http://localhost:8765 (GET /health /skills /accounts /queue-stats; POST /hunt /run-skill)" \
+    || echo "tvcli serve --daemon failed — inspect $WS/.tvcli-server.log"
+fi

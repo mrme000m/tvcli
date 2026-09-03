@@ -23,21 +23,14 @@ ansible-playbook browser-debug/ansible/deps.yml \
   -e tv_workspace="$WS/browser-debug" \
   -e install_xvfb=true \
   -e install_x11vnc=true \
-  --tags display,bdg
+  --tags display,bdg,bw
 
 go build -o tvcli ./cmd/tvcli
 
-curl -fsSL https://opencode.ai/install | bash
+[ -x "$HOME/.opencode/bin/opencode" ] || curl -fsSL https://opencode.ai/install | bash
 
-ACC="${CLOUDFLARE_ACCOUNT_ID:-}"
-KEY="${CLOUDFLARE_API_KEY:-}"
-[ -n "$ACC" ] || ACC="$(sed -n 's/^CLOUDFLARE_ACCOUNT_ID=//p' /workspaces/.codespaces/shared/.env-secrets 2>/dev/null || true)"
-[ -n "$KEY" ] || KEY="$(sed -n 's/^CLOUDFLARE_API_KEY=//p' /workspaces/.codespaces/shared/.env-secrets 2>/dev/null || true)"
-
-grep -q 'opencode/bin' "$HOME/.profile" 2>/dev/null || \
-  printf 'export PATH="$HOME/.opencode/bin:$PATH"\nexport CLOUDFLARE_ACCOUNT_ID="%s"\nexport CLOUDFLARE_API_KEY="%s"\n' \
-    "$ACC" "$KEY" >> "$HOME/.profile"
-
-grep -q 'CLOUDFLARE_ACCOUNT_ID' "$HOME/.bashrc" 2>/dev/null || \
-  printf 'export CLOUDFLARE_ACCOUNT_ID="%s"\nexport CLOUDFLARE_API_KEY="%s"\n' \
-    "$ACC" "$KEY" >> "$HOME/.bashrc"
+# Runtime secrets from the Bitwarden vault (bw CLI + secrets/manifest.json).
+# Idempotent; exit 2 (credentials not configured) is a warning, not a failure
+# — the container builds and runs, just without live credentials.
+bash browser-debug/secrets/bw-provision.sh || \
+  echo "  [post-create] WARN: secrets not provisioned (set BW_CLIENTID / BW_CLIENTSECRET / BW_PASSWORD as codespace secrets) — see browser-debug/secrets/README.md"

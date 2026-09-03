@@ -71,3 +71,8 @@ skill_work/
 /bulk_validate
 /shots/
 accounts.json.bak*
+
+# bw-provision runtime secrets (never commit; values live in Bitwarden)
+browser-debug/secrets/runtime/
+.tvcli-autoserve
+!browser-debug/secrets/manifest.json

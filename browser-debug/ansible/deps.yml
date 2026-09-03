@@ -11,6 +11,7 @@
 #   guacamole Linux-only: clientless VNC/RDP/SSH gateway (docker compose)
 #   kasm    Linux-only: Kasm Workspaces single-server install (opt-in)
 #   vision  Mistral vision key present (never printed)
+#   bw      Bitwarden CLI + jq (secrets provisioning: secrets/bw-provision.sh)
 #
 # Grounded in: launch.mjs, bdg/package.json, .agents/skills/tv-network/SKILL.md,
 # vision.mjs. NO invented package names, URLs, or versions.
@@ -332,3 +333,42 @@
       register: vision_help
       changed_when: false
       tags: [vision]
+
+    # ------------------------------------------------------------------ bw
+    - name: Install jq (bw-provision manifest parsing + validation)
+      ansible.builtin.apt:
+        name: [jq]
+        state: present
+        update_cache: true
+      become: true
+      when: ansible_os_family == 'Debian'
+      tags: [bw]
+
+    - name: Install jq on macOS (best effort)
+      community.general.homebrew:
+        name: jq
+        state: present
+      when: ansible_os_family == 'Darwin'
+      failed_when: false
+      tags: [bw]
+
+    - name: Detect Bitwarden CLI
+      ansible.builtin.command: bw --version
+      register: bw_version
+      failed_when: false
+      changed_when: false
+      tags: [bw, always]
+
+    - name: Install Bitwarden CLI (npm global)
+      ansible.builtin.shell: npm install -g @bitwarden/cli
+      when: bw_version.rc != 0
+      tags: [bw]
+
+    - name: bw-provision dry-run (validates manifest; never fetches or writes secrets)
+      ansible.builtin.command:
+        cmd: bash secrets/bw-provision.sh --dry-run
+        chdir: "{{ tv_workspace }}"
+      register: bw_dryrun
+      changed_when: false
+      failed_when: false
+      tags: [bw]

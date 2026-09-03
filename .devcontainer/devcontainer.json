@@ -15,7 +15,17 @@
   "containerEnv": {
     "DISPLAY": ":99"
   },
-  "forwardPorts": [5900, 6080],
+  "forwardPorts": [5900, 6080, 8765],
+  "portsAttributes": {
+    "5900": { "label": "VNC (x11vnc)" },
+    "6080": { "label": "noVNC web viewer" },
+    "8765": { "label": "tvcli HTTP server (/hunt multi-symbol)" }
+  },
+  "secrets": {
+    "BW_CLIENTID": { "description": "Bitwarden API-key client id (vault: keys.00m.indevs.in)" },
+    "BW_CLIENTSECRET": { "description": "Bitwarden API-key client secret" },
+    "BW_PASSWORD": { "description": "Bitwarden master password — used non-interactively by browser-debug/secrets/bw-provision.sh" }
+  },
   "customizations": {
     "vscode": {
       "extensions": ["golang.Go"],

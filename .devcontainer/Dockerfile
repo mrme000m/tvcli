@@ -4,11 +4,12 @@
 #   - Chromium GUI runtime libs (CloakBrowser stealth build)
 #   - Virtual display Xvfb + x11vnc (VNC :5900) + noVNC viewer (:6080)
 #   - ansible (runs browser-debug/ansible/deps.yml)
+#   - jq (bw-provision manifest parsing; bw CLI itself installs via npm)
 FROM mcr.microsoft.com/devcontainers/go:1.26-bookworm
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    ansible \
+    ansible jq \
     xvfb x11vnc novnc websockify \
     libglib2.0-0 libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
     libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
