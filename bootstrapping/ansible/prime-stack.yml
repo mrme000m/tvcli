@@ -868,13 +868,13 @@
       tags: [extras, mobile]
 
     - name: Point the mobile gateway at the codespace-forwarded origin
-      # The plugin enforces "publicOrigin requires TLS" (parseGatewayConfig
-      # demands tls.mode == "provided"), so the gateway serves the
-      # self-signed cert the setup CLI generated — on loopback — and is
-      # published at the forwarded https origin (portsAttributes protocol
-      # "https"). GitHub auth at the edge + device pairing replace the
-      # LAN-trust model. Non-codespace devcontainers keep the managed LAN
-      # setup the CLI wrote.
+      # The codespace forwarder maps the https://<name>-<port>.<domain> vhost
+      # onto a loopback dial to the container (same as :3081) while keeping
+      # the public Host header. publicOrigin cannot model that (its port IS
+      # the listen port), so the rewrite advertises the forwarded vhost as
+      # the leading public authority instead and serves a CA-signed leaf
+      # carrying the vhost SAN. Non-codespace devcontainers keep the managed
+      # LAN setup the CLI wrote.
       ansible.builtin.shell: |
         set -e
         cs_name="${CODESPACE_NAME:-}"
@@ -935,16 +935,30 @@
             pass  # no readable CA yet — keep whatever the setup CLI wrote
         out = {
             'version': 1,
-            'publicOrigin': f"https://{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}",
             'listenHost': '127.0.0.1',
+            'listenPort': int(port),
             'upstreamOrigin': 'http://127.0.0.1:3081',
+            # No publicOrigin: its port IS the listen port, and the codespace
+            # subdomain port (3443) differs from the public one (443). Instead
+            # advertise the forwarded vhost as a public authority — the
+            # forwarder dials the container over loopback (same as :3081)
+            # but preserves the public Host header, which normalizes to
+            # <domain>:443 under the https scheme the provided TLS keeps in
+            # the trust policy. The FIRST authority is what pairing QR URLs
+            # are built from, so the codespace vhost must lead the list.
+            'publicAuthorities': [
+                f"{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}:443",
+                f"localhost:{port}",
+                f"127.0.0.1:{port}",
+            ],
             'instanceId': instance_id,
             'pairingCaFile': str(home / 'tls' / 'ca.pem'),
             'tls': {
-                # parseGatewayConfig requires mode == "provided" whenever a
-                # publicOrigin is set; the leaf must also cover the public
-                # authority, so serve the codespace-SAN cert minted above
-                # (signed by the same CA devices pair with).
+                # provided keeps the https scheme in the trust policy
+                # (publicTls) so phone-side Origin headers validate; the
+                # leaf must cover every authority above — the minted
+                # codespace cert does (DNS domain, DNS localhost, IP
+                # 127.0.0.1), signed by the same CA devices pair with.
                 'mode': 'provided',
                 'certFile': os.environ.get('CS_CERT') or str(home / 'tls' / 'server-cert.pem'),
                 'keyFile': os.environ.get('CS_KEY') or str(home / 'tls' / 'server-key.pem'),
