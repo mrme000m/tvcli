@@ -76,20 +76,30 @@ ensure_bw() {
 
 bw_() { bw --nointeraction "$@"; }
 
+ensure_server_configured() { # idempotent; errors when already logged in (fine)
+  local server
+  server="$(jq -r '.vault.server // empty' "$MANIFEST")"
+  [ -n "$server" ] || return 0
+  bw_ config server "$server" >/dev/null 2>&1 || warn "bw config server $server failed (already logged in? continuing)"
+}
+
 acquire_session() {
   if [ -n "${BW_SESSION:-}" ]; then
+    ensure_server_configured
     log "using existing BW_SESSION"
     return 0
   fi
   ensure_bw || die_unconfigured "neither bw CLI nor npm (to install it) available"
-  local server
-  server="$(jq -r '.vault.server // empty' "$MANIFEST")"
-  if [ -n "$server" ]; then
-    bw_ config server "$server" >/dev/null 2>&1 || warn "bw config server $server failed (continuing)"
+  ensure_server_configured
+  if [ -n "${BW_CLIENTID:-}" ] && [ -n "${BW_CLIENTSECRET:-}" ]; then
+    : "${BW_PASSWORD:?BW_PASSWORD required with BW_CLIENTID/BW_CLIENTSECRET}"
+    bw_ login --apikey >/dev/null 2>&1 || true # already-logged-in is fine
+  elif [ -n "${BW_EMAIL:-}" ]; then
+    : "${BW_PASSWORD:?BW_PASSWORD required with BW_EMAIL}"
+    bw_ login "$BW_EMAIL" --passwordenv BW_PASSWORD >/dev/null 2>&1 || true
+  else
+    die_unconfigured "no BW_SESSION and no BW_CLIENTID+BW_CLIENTSECRET or BW_EMAIL+BW_PASSWORD (set them as codespace secrets — see README.md)"
   fi
-  [ -n "${BW_CLIENTID:-}" ] && [ -n "${BW_CLIENTSECRET:-}" ] && [ -n "${BW_PASSWORD:-}" ] ||
-    die_unconfigured "no BW_SESSION and missing BW_CLIENTID/BW_CLIENTSECRET/BW_PASSWORD (set them as codespace secrets — see README.md)"
-  bw_ login --apikey >/dev/null 2>&1 || true # already-logged-in is fine
   BW_SESSION="$(bw_ unlock --passwordenv BW_PASSWORD --raw)"
   [ -n "$BW_SESSION" ] || die "bw unlock returned an empty session"
   export BW_SESSION
@@ -143,23 +153,47 @@ dry_run() {
   log "dry-run OK"
 }
 
-export_item() { # push local file content into vault item (Secure Note notes)
+export_item() { # push local file content into vault item (Secure Note)
   [ -s "$EXPORT_FILE" ] || die "source file missing/empty: $EXPORT_FILE"
   acquire_session
   bw_ sync >/dev/null
-  local existing_id
+  local existing_id size base template payload
   existing_id="$(bw_ list items --search "$EXPORT_ITEM" \
     | jq -r --arg n "$EXPORT_ITEM" 'map(select(.name == $n))[0].id // empty')"
-  local template payload
+  size="$(wc -c <"$EXPORT_FILE" | tr -d ' ')"
+  base="$(basename "$EXPORT_FILE")"
   template="$(bw_ get template item)"
-  payload="$(jq --arg n "$EXPORT_ITEM" --rawfile notes "$EXPORT_FILE" \
-    '.name = $n | .notes = $notes | .type = 2' <<<"$template")"
-  if [ -n "$existing_id" ]; then
-    printf '%s' "$payload" | bw_ encode | bw_ edit item "$existing_id" >/dev/null
-    log "updated vault item '$EXPORT_ITEM' (id ${existing_id:0:8}…)"
+  if [ "$size" -le 9500 ]; then
+    payload="$(jq --arg n "$EXPORT_ITEM" --rawfile notes "$EXPORT_FILE" \
+      '.name = $n | .notes = $notes | .type = 2' <<<"$template")"
+    if [ -n "$existing_id" ]; then
+      printf '%s' "$payload" | bw_ encode | bw_ edit item "$existing_id" >/dev/null
+      log "updated vault item '$EXPORT_ITEM' (id ${existing_id:0:8}…)"
+    else
+      printf '%s' "$payload" | bw_ encode | bw_ create item >/dev/null
+      log "created vault item '$EXPORT_ITEM'"
+    fi
   else
-    printf '%s' "$payload" | bw_ encode | bw_ create item >/dev/null
-    log "created vault item '$EXPORT_ITEM'"
+    # Bitwarden caps cipher notes at 10000 characters — large payloads ride
+    # as an ATTACHMENT (up to 100MB), with a marker note.
+    payload="$(jq --arg n "$EXPORT_ITEM" --arg m "payload in attachment: $base" \
+      '.name = $n | .notes = $m | .type = 2' <<<"$template")"
+    if [ -n "$existing_id" ]; then
+      printf '%s' "$payload" | bw_ encode | bw_ edit item "$existing_id" >/dev/null
+    else
+      printf '%s' "$payload" | bw_ encode | bw_ create item >/dev/null
+    fi
+    local item_id att_id
+    item_id="$(bw_ list items --search "$EXPORT_ITEM" \
+      | jq -r --arg n "$EXPORT_ITEM" 'map(select(.name == $n))[0].id // empty')"
+    [ -n "$item_id" ] || die "item '$EXPORT_ITEM' not found after create"
+    # rotation: drop a same-named attachment before re-uploading
+    att_id="$(bw_ list items --search "$EXPORT_ITEM" \
+      | jq -r --arg n "$EXPORT_ITEM" --arg f "$base" \
+      'map(select(.name == $n))[0].attachments // [] | map(select(.fileName == $f))[0].id // empty')"
+    [ -z "$att_id" ] || bw_ delete attachment "$att_id" --itemid "$item_id" >/dev/null 2>&1 || true
+    bw_ create attachment --file "$EXPORT_FILE" --itemid "$item_id" >/dev/null
+    log "vault item '$EXPORT_ITEM' carries attachment '$base' ($size bytes)"
   fi
   [ "$RELOCK" -eq 1 ] && bw_ lock >/dev/null 2>&1 || true
 }
@@ -176,27 +210,59 @@ provision() {
     format="$(jq -r '.format' <<<"$entry")"
     chmod_mode="$(jq -r '.chmod // "600"' <<<"$entry")"
     json_validate="$(jq -r '.jsonValidate // empty' <<<"$entry")"
+    attachment="$(jq -r '.attachment // empty' <<<"$entry")"
     case "$target_rel" in
       /*) target="$target_rel" ;;
       *)  target="$WS/$target_rel" ;;
     esac
     mkdir -p "$(dirname "$target")"
-    if ! notes="$(bw_ get notes "$item" 2>/dev/null)" || [ -z "$notes" ]; then
-      if [ "$STRICT" -eq 1 ]; then
-        die "vault item '$item' is empty or missing (bw get notes)"
+    if [ -n "$attachment" ]; then
+      # Large payload: an item ATTACHMENT (Bitwarden caps notes at 10k chars).
+      item_json="$(bw_ list items --search "$item" 2>/dev/null)"
+      item_id="$(jq -r --arg n "$item" 'map(select(.name == $n))[0].id // empty' <<<"$item_json")"
+      att_id="$(jq -r --arg n "$item" --arg f "$attachment" \
+        'map(select(.name == $n))[0].attachments // [] | map(select(.fileName == $f))[0].id // empty' <<<"$item_json")"
+      if [ -z "$item_id" ] || [ -z "$att_id" ]; then
+        if [ "$STRICT" -eq 1 ]; then
+          die "vault item '$item' or its attachment '$attachment' is missing"
+        fi
+        warn "vault item '$item' (attachment '$attachment') missing — skipped; --strict makes this fatal"
+        skipped=$((skipped+1))
+        continue
       fi
-      warn "vault item '$item' missing — skipped (target kept as-is); --strict makes this fatal"
-      skipped=$((skipped+1))
-      continue
+      if ! bw_ get attachment "$att_id" --itemid "$item_id" --output "$target" >/dev/null 2>&1; then
+        if [ "$STRICT" -eq 1 ]; then
+          die "attachment fetch failed for '$item' → $attachment"
+        fi
+        warn "attachment fetch failed for '$item' — skipped; --strict makes this fatal"
+        skipped=$((skipped+1))
+        continue
+      fi
+      chmod "$chmod_mode" "$target"
+      case "$format" in
+        env) validate_env "$item" "$(cat "$target")" ;;
+        json) validate_json "$item" "$(cat "$target")" "$json_validate" ;;
+        raw) : ;;
+        *) die "unknown format '$format' for item '$item'" ;;
+      esac
+    else
+      if ! notes="$(bw_ get notes "$item" 2>/dev/null)" || [ -z "$notes" ]; then
+        if [ "$STRICT" -eq 1 ]; then
+          die "vault item '$item' is empty or missing (bw get notes)"
+        fi
+        warn "vault item '$item' missing — skipped (target kept as-is); --strict makes this fatal"
+        skipped=$((skipped+1))
+        continue
+      fi
+      case "$format" in
+        env) validate_env "$item" "$notes" ;;
+        json) validate_json "$item" "$notes" "$json_validate" ;;
+        raw) : ;;
+        *) die "unknown format '$format' for item '$item'" ;;
+      esac
+      printf '%s\n' "$notes" > "$target"
+      chmod "$chmod_mode" "$target"
     fi
-    case "$format" in
-      env) validate_env "$item" "$notes" ;;
-      json) validate_json "$item" "$notes" "$json_validate" ;;
-      raw) : ;;
-      *) die "unknown format '$format' for item '$item'" ;;
-    esac
-    printf '%s\n' "$notes" > "$target"
-    chmod "$chmod_mode" "$target"
     while IFS= read -r rc; do
       [ -n "$rc" ] || continue
       wire_source_into "$target" "$(expand_path "$rc")"

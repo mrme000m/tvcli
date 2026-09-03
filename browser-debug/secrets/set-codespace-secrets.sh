@@ -11,7 +11,9 @@
 #
 # Usage (values never echoed; pass via env):
 #   BW_CLIENTID=xxx BW_CLIENTSECRET=yyy BW_PASSWORD=zzz \
-#     bash browser-debug/secrets/set-codespace-secrets.sh [owner/repo]
+#     bash browser-debug/secrets/set-codespace-secrets.sh [owner/repo]   # API key
+#   BW_EMAIL=you@example.com BW_PASSWORD=zzz \
+#     bash browser-debug/secrets/set-codespace-secrets.sh [owner/repo]  # email+password
 #
 # Test mode (--test): round-trips a dummy secret through the real API
 # (PUT + DELETE) to verify connectivity/scopes without touching real values.
@@ -63,12 +65,16 @@ if [ "$MODE" = "test" ]; then
   exit 0
 fi
 
-: "${BW_CLIENTID:?BW_CLIENTID not set (Bitwarden API key client id)}"
-: "${BW_CLIENTSECRET:?BW_CLIENTSECRET not set (Bitwarden API key client secret)}"
-: "${BW_PASSWORD:?BW_PASSWORD not set (vault master password)}"
-
-put_secret BW_CLIENTID "$BW_CLIENTID"
-put_secret BW_CLIENTSECRET "$BW_CLIENTSECRET"
-put_secret BW_PASSWORD "$BW_PASSWORD"
+if [ -n "${BW_CLIENTID:-}" ] && [ -n "${BW_CLIENTSECRET:-}" ] && [ -n "${BW_PASSWORD:-}" ]; then
+  put_secret BW_CLIENTID "$BW_CLIENTID"
+  put_secret BW_CLIENTSECRET "$BW_CLIENTSECRET"
+  put_secret BW_PASSWORD "$BW_PASSWORD"
+elif [ -n "${BW_EMAIL:-}" ] && [ -n "${BW_PASSWORD:-}" ]; then
+  put_secret BW_EMAIL "$BW_EMAIL"
+  put_secret BW_PASSWORD "$BW_PASSWORD"
+  log "email+password mode (bw-provision logs in with 'bw login <email> --passwordenv')"
+else
+  echo "set BW_CLIENTID+BW_CLIENTSECRET+BW_PASSWORD (API key) or BW_EMAIL+BW_PASSWORD" >&2
+  exit 1
+fi
 log "done — rebuild the codespace; post-create will provision from the vault"
-log "(items must exist there: run migrate-local.sh once with the vault unlocked)"
