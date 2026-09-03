@@ -281,10 +281,16 @@
       tags: [agent]
 
     - name: Install prime-agent CLI (official installer, self-contained)
-      # Non-interactive in a TTY-less shell: the installer's prompt helper
-      # falls back to stdin/EOF and takes the defaults. Installs to
-      # ~/.local/bin (bridged into PATH by the env tag).
-      ansible.builtin.shell: curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh | sh
+      # Downloaded to a file and run under `setsid --wait` with stdin closed.
+      # The installer's prompt helper reads /dev/tty whenever one is attached
+      # (the codespace lifecycle runs commands under a pty) and would hang
+      # forever waiting for a keypress; setsid detaches the controlling
+      # terminal so the helper falls back to stdin, and </dev/null makes every
+      # prompt take its default. --wait keeps ansible blocked until the exit
+      # code is available (setsid would otherwise fork away).
+      ansible.builtin.shell: |
+        curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh -o /tmp/prime-agent-install.sh
+        setsid --wait sh /tmp/prime-agent-install.sh </dev/null
       when: prime_agent_detect.rc != 0
       tags: [agent]
 
@@ -307,13 +313,13 @@
       # --no-open: dsh 0.1.1-rc.2 opens the Web UI in a browser by default —
       # pointless (and noisy) headless. timeout sends SIGTERM, which dsh
       # treats as an ordinary stop (exit 0).
-      ansible.builtin.shell: timeout 60 dsh web --port 0 --host 127.0.0.1 --no-open >/tmp/dsh-warmboot.log 2>&1 || true
+      ansible.builtin.shell: timeout 90 dsh web --port 0 --host 127.0.0.1 --no-open >/tmp/dsh-warmboot.log 2>&1 || true
       when: not preset_file.stat.exists
       tags: [preset]
 
-    - name: Wait for the preset to materialize (up to 90s)
+    - name: Wait for the preset to materialize (up to 120s)
       ansible.builtin.shell: |
-        for i in $(seq 1 90); do
+        for i in $(seq 1 120); do
           [ -f "{{ preset_dir }}/preset.yml" ] && exit 0
           sleep 1
         done
@@ -327,7 +333,7 @@
     - name: Fail when the preset did not materialize
       ansible.builtin.fail:
         msg: >-
-          {{ preset_dir }}/preset.yml was not materialized within 90s of a warm
+          {{ preset_dir }}/preset.yml was not materialized within 120s of a warm
           boot. Check /tmp/dsh-warmboot.log and that
           'dsh web' boots cleanly by hand. Note: an existing preset the user
           EDITED is intentionally preserved (marker semantics) — this task only
