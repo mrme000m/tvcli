@@ -141,6 +141,12 @@ func Extract(pineID, symbol, timeframe string, periods []map[string]any, graphic
 			}
 		}
 
+		// Strategies routinely emit zero plot periods — their whole result
+		// (performance + trades) arrives in the du strategy report. Without
+		// this the backtest command sees a nil Report on this (normal for
+		// strategies) path and errors with "no strategy report extracted".
+		s.Report = extractReport(strategyReport)
+
 		if len(s.Events) == 0 && len(s.Levels) == 0 {
 			s.Warnings = append(s.Warnings, "no clean signals/levels extracted; indicator may be graphics-only or noise-heavy")
 		} else {
