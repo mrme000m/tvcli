@@ -867,47 +867,27 @@
       changed_when: mobile_setup.stdout is search('(?m)^changed$')
       tags: [extras, mobile]
 
-    - name: Point the mobile gateway at the codespace-forwarded origin
-      # The codespace forwarder maps the https://<name>-<port>.<domain> vhost
-      # onto a loopback dial to the container (same as :3081) while keeping
-      # the public Host header. publicOrigin cannot model that (its port IS
-      # the listen port), so the rewrite advertises the forwarded vhost as
-      # the leading public authority instead and serves a CA-signed leaf
-      # carrying the vhost SAN. Non-codespace devcontainers keep the managed
-      # LAN setup the CLI wrote.
+    - name: Configure the mobile gateway listener for the codespace
+      # GitHub codespace forwarding terminates TLS at the edge (DigiCert
+      # *.app.github.dev), dials the container over loopback, and rewrites
+      # Host to localhost:<port> — it cannot front the gateway direct
+      # Host/Origin trust model, so the gateway keeps the plugin loopback
+      # shape: tls disabled on 127.0.0.1, loopback authorities (the dsh
+      # web sidebar proxies through here; GETs from the public -<port>
+      # vhost pass too). Phone pairing uses the plugin own remote
+      # providers (Tailscale Funnel / cpolar — enabled from the web UI),
+      # which build a publicTls gateway with matching authorities.
+      # Non-codespace devcontainers keep the managed LAN setup the CLI
+      # wrote.
       ansible.builtin.shell: |
         set -e
         cs_name="${CODESPACE_NAME:-}"
         [ -z "$cs_name" ] && cs_name="$(bash -lc 'printenv CODESPACE_NAME' 2>/dev/null || true)"
-        cs_domain="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}"
-        [ -z "$cs_domain" ] && cs_domain="$(bash -lc 'printenv GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN' 2>/dev/null || true)"
-        if [ -z "$cs_name" ] || [ -z "$cs_domain" ]; then
+        if [ -z "$cs_name" ]; then
           echo "not a codespace — keeping the managed LAN setup"
           exit 0
         fi
-        export CS_NAME="$cs_name" CS_DOMAIN="$cs_domain" MOBILE_PORT="{{ mobile_gateway_port }}"
-        # The loader also requires the served cert to cover the public
-        # authority, and the setup CLI only mints a LAN-IP SAN. Sign a
-        # codespace leaf with the plugin CA — the chain stays intact for
-        # devices paired against that CA. Regenerate when the origin
-        # changes or the cert nears expiry.
-        auth="${CS_NAME}-${MOBILE_PORT}.${CS_DOMAIN}"
-        tlsdir="${HOME}/.dsh/mobile-access/tls"
-        cert="$tlsdir/server-cert-codespace.pem"
-        key="$tlsdir/server-key-codespace.pem"
-        if ! { [ -f "$cert" ] && openssl x509 -checkend 86400 -noout -in "$cert" 2>/dev/null \
-               && openssl x509 -noout -ext subjectAltName -in "$cert" 2>/dev/null | grep -q "DNS:${auth}[, ]"; }; then
-          tmp="$(mktemp -d)"
-          openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
-            -keyout "$key" -subj "/CN=DeepSeek Harness Mobile" -out "$tmp/csr.pem" 2>/dev/null
-          printf 'subjectAltName=DNS:%s,DNS:localhost,IP:127.0.0.1\n' "$auth" > "$tmp/san.cnf"
-          openssl x509 -req -in "$tmp/csr.pem" -CA "$tlsdir/ca.pem" -CAkey "$tlsdir/ca-key.pem" \
-            -CAcreateserial -days 825 -sha256 -extfile "$tmp/san.cnf" -out "$cert" 2>/dev/null
-          chmod 600 "$cert" "$key"
-          rm -rf "$tmp"
-          echo "minted server cert for ${auth}"
-        fi
-        export CS_CERT="$cert" CS_KEY="$key"
+        export MOBILE_PORT="{{ mobile_gateway_port }}"
         python3 - <<'PYEOF'
         import base64, hashlib, json, os, pathlib
         home = pathlib.Path(os.path.expanduser('~/.dsh/mobile-access'))
@@ -918,13 +898,11 @@
                 doc = json.loads(setup.read_text())
             except Exception:
                 doc = {}
-        port = os.environ['MOBILE_PORT']
-        tls = doc.get('tls') or {}
+        port = int(os.environ['MOBILE_PORT'])
         # instanceId is NOT a free token: the gateway verifies it equals
         # the fingerprint256 of the pairing CA (sha256 of the cert DER,
-        # hex, lowercase, no colons) at boot ("pairingCaFile must be the
-        # self-signed CA identified by instanceId"). Derive it from the
-        # actual CA so a drifted value self-heals.
+        # hex, lowercase, no colons) at boot. Derive it from the actual
+        # CA so a drifted value self-heals.
         instance_id = doc.get('instanceId')
         try:
             pem = (home / 'tls' / 'ca.pem').read_text()
@@ -936,33 +914,15 @@
         out = {
             'version': 1,
             'listenHost': '127.0.0.1',
-            'listenPort': int(port),
+            'listenPort': port,
             'upstreamOrigin': 'http://127.0.0.1:3081',
-            # No publicOrigin: its port IS the listen port, and the codespace
-            # subdomain port (3443) differs from the public one (443). Instead
-            # advertise the forwarded vhost as a public authority — the
-            # forwarder dials the container over loopback (same as :3081)
-            # but preserves the public Host header, which normalizes to
-            # <domain>:443 under the https scheme the provided TLS keeps in
-            # the trust policy. The FIRST authority is what pairing QR URLs
-            # are built from, so the codespace vhost must lead the list.
             'publicAuthorities': [
-                f"{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}:443",
                 f"localhost:{port}",
                 f"127.0.0.1:{port}",
             ],
             'instanceId': instance_id,
             'pairingCaFile': str(home / 'tls' / 'ca.pem'),
-            'tls': {
-                # provided keeps the https scheme in the trust policy
-                # (publicTls) so phone-side Origin headers validate; the
-                # leaf must cover every authority above — the minted
-                # codespace cert does (DNS domain, DNS localhost, IP
-                # 127.0.0.1), signed by the same CA devices pair with.
-                'mode': 'provided',
-                'certFile': os.environ.get('CS_CERT') or str(home / 'tls' / 'server-cert.pem'),
-                'keyFile': os.environ.get('CS_KEY') or str(home / 'tls' / 'server-key.pem'),
-            },
+            'tls': {'mode': 'disabled'},
             'allowedCidrs': ['127.0.0.0/8', '::1/128'],
         }
         if json.dumps(doc, sort_keys=True) == json.dumps(out, sort_keys=True):
