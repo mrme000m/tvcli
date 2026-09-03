@@ -291,6 +291,7 @@
       ansible.builtin.shell: |
         curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh -o /tmp/prime-agent-install.sh
         setsid --wait sh /tmp/prime-agent-install.sh </dev/null
+      register: prime_agent_install
       when: prime_agent_detect.rc != 0
       tags: [agent]
 
@@ -614,7 +615,7 @@
           - "dsh CLI: {{ 'installed ' + (dsh_detect.stdout | trim) if dsh_detect.stdout != 'MISSING' else 'FAILED to install' }}"
           - "plugin {{ dsh_plugin_package }}: {{ 'present in profile ' ~ dsh_profile if (plugin_installed.rc | default(1)) == 0 or ((plugin_add_retry.rc | default(1)) == 0) else 'FAILED' }}"
           - "preset prime-orchestrator: {{ 'materialized' if (preset_file.stat.exists | default(false)) or ((preset_wait.rc | default(1)) == 0) else 'NOT materialized' }}"
-          - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 else 'FAILED to install' }}"
+          - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 or ((prime_agent_install.rc | default(1)) == 0) else 'FAILED to install' }}"
           - "CF model config: {{ 'written' if (cf_secrets_present | bool) else 'SKIPPED (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set)' }}"
           - "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace"
       tags: [always]
