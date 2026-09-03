@@ -146,6 +146,13 @@ engine.
 5. **Codespace rebuild keeps `~` but resets npm globals** — dsh and
    prime-agent reinstall automatically on each rebuild via post-create;
    `~/.dsh`, `~/.prime`, and the pnpm store survive.
+6. **A crashed npm replace corrupts the dsh global tree** — `dsh` vanishes
+   while `$ npm root -g`/`@deepseek-ai/dsh` keeps ENOTEMPTY leftovers;
+   reinstalling over that fails (koffi wants cmake). The install task now
+   removes the leftover tree first (safe: it only runs when the binary is
+   MISSING). Node 24's npm also blocks dependency install scripts
+   (`npm warn install-scripts`) — verified harmless: koffi's prebuilt
+   binary loads without its script; do NOT pass `--allow-scripts`.
 
 ## Extending
 

@@ -219,7 +219,17 @@
       tags: [dsh, always]
 
     - name: Install dsh CLI at the exact supported version (npm global)
-      ansible.builtin.shell: npm install -g @deepseek-ai/dsh@{{ dsh_version }}
+      # Self-heal: a crashed npm replace can leave a half-removed global tree
+      # (ENOTEMPTY dirs, no bin symlink). Installing over that fails and
+      # pushes koffi into a cmake source build the container lacks. This
+      # task only runs when the dsh binary is MISSING, so removing the
+      # leftover tree first is always safe — the prebuilt koffi that ships
+      # in the tarball loads without its (npm-blocked) install script.
+      ansible.builtin.shell: |
+        set -e
+        groot="$(npm root -g)"
+        rm -rf "$groot/@deepseek-ai/dsh"
+        npm install -g @deepseek-ai/dsh@{{ dsh_version }}
       register: dsh_install
       when: dsh_detect.stdout == 'MISSING'
       tags: [dsh]
