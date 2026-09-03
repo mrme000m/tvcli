@@ -1,0 +1,4 @@
+# Mount the /restart command into a DSH profile.
+- insert:
+    - id: restart
+      name: dsh-restart

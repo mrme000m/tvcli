@@ -16,6 +16,13 @@
 #   dsh-config   ~/.dsh/settings.yaml (CF Workers AI as the default LLM)
 #   prime-config ~/.prime/agent/{models,auth,settings}.json (merged, never
 #                destroying other providers/keys)
+#   extras/plugins  web-profile parity with the production Mac: dsh-mnemon,
+#                pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client,
+#                pi-agent-memory + the vendored dsh-restart (plugins/)
+#   extras/mnemon  mnemon settings + profile patch row (memory in the web UI)
+#   extras/mobile  dsh-mobile gateway setup (mobile access in the web UI;
+#                codespace: HTTP gateway behind the forwarded https origin)
+#   extras/mcp     home-level cordis patch mounting code-review-graph MCP
 #   secrets      browser-debug/secrets/bw-provision.sh (never fatal)
 #
 # Run (inside the codespace, from the repo root):
@@ -51,6 +58,24 @@
     dsh_plugin_spec: github:mrme000m/dsh-prime-orchestrator
     dsh_plugin_package: dsh-prime-orchestrator
     prime_agent_bin: "{{ lookup('env', 'HOME') }}/.local/bin/prime-agent"
+
+    # Web-profile parity with the production Mac (~/.dsh/profiles/web):
+    # dsh-mnemon (memory), pi2dsh (Pi extension bridge), dsh-mobile (mobile
+    # access), @deepseek-ai/dsh-mcp-client + pi-agent-memory (plain deps),
+    # dsh-restart (vendored at plugins/dsh-restart — /restart reloads plugins
+    # without a manual stop). Versions pinned to the Mac's working set.
+    dsh_parity_plugins:
+      - { package: dsh-mnemon, spec: "dsh-mnemon@0.3.2" }
+      - { package: pi2dsh, spec: "pi2dsh@0.19.0" }
+      - { package: dsh-mobile, spec: "dsh-mobile@0.2.0" }
+      - { package: "@deepseek-ai/dsh-mcp-client", spec: "@deepseek-ai/dsh-mcp-client@0.0.1-rc.1" }
+      - { package: pi-agent-memory, spec: "pi-agent-memory@0.3.4" }
+      - { package: dsh-restart, spec: "./plugins/dsh-restart" }
+    # Registry packages whose native build scripts pnpm must be allowed to
+    # run (dsh-mobile deps; verified set from the production Mac profile).
+    dsh_native_build_keys: [node-pty, ssh2, cloudflared, cpu-features]
+    # dsh-mobile gateway: loopback HTTP behind the codespace https forward.
+    mobile_gateway_port: 3443
 
     # --- runtime locations ---------------------------------------------------
     prime_home: "{{ lookup('env', 'HOME') }}"
@@ -585,6 +610,312 @@
       when: cf_secrets_present | bool
       tags: [prime-config]
 
+    # ------------------------------------------------------------------ extras/plugins
+    # Web-profile parity with the production Mac: the same plugin set, pinned
+    # to the Mac's working versions. Each install reuses the allowBuilds
+    # remedy from the dsh-prime-orchestrator section (inline, per item).
+    - name: Pre-seed allowBuilds for the known native build scripts
+      # pnpm >= 10 skips the postinstall builds of registry packages silently
+      # unless allowlisted — node-pty/ssh2/cloudflared/cpu-features (dsh-mobile
+      # deps) NEED their builds to function. Plain-name keys work for registry
+      # packages (verified on the production Mac profile).
+      ansible.builtin.shell: |
+        set -e
+        file="{{ dsh_profile_dir }}/pnpm-workspace.yaml"
+        [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
+        changed=no
+        for key in {{ dsh_native_build_keys | join(' ') }}; do
+          grep -qE "^[[:space:]]*[\"']?${key}[\"']?: true" "$file" && continue
+          if grep -q '^allowBuilds:' "$file"; then
+            ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
+            sed -i "${ln}a\\  \"${key}\": true" "$file"
+          else
+            printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
+          fi
+          changed=yes
+        done
+        echo "$changed"
+      args:
+        executable: /bin/bash
+      register: parity_allowbuilds_seed
+      changed_when: parity_allowbuilds_seed.stdout is search('yes')
+      tags: [extras, plugins]
+
+    - name: Install the parity plugins into the web profile
+      # Skip when the package is already a dependency; on the pnpm >= 11
+      # git-dep build block, parse the allowBuilds key pnpm demands, merge it
+      # into the profile workspace, retry once (same remedy as above).
+      ansible.builtin.shell: |
+        set -u
+        pkg="{{ item.package }}"
+        spec="{{ item.spec }}"
+        profile_dir="{{ dsh_profile_dir }}"
+        if grep -q "\"$pkg\"" "$profile_dir/package.json" 2>/dev/null; then
+          echo "already present: $pkg"
+          exit 0
+        fi
+        dsh plugin --profile {{ dsh_profile }} add "$spec" >/tmp/prime-stack-plugin-add.log 2>&1
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+          echo "installed: $pkg"
+          exit 0
+        fi
+        cat /tmp/prime-stack-plugin-add.log >&2
+        file="$profile_dir/pnpm-workspace.yaml"
+        [ -f "$file" ] || printf 'packages:\n  - .\nnodeLinker: hoisted\n' > "$file"
+        keys="$(sed -n '/^allowBuilds:/,$p' /tmp/prime-stack-plugin-add.log 2>/dev/null \
+                | grep -E ': true$' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*: true$//' || true)"
+        if [ -n "$keys" ]; then
+          for key in $keys; do
+            grep -qF "\"$key\": true" "$file" && continue
+            if grep -q '^allowBuilds:' "$file"; then
+              ln="$(grep -n '^allowBuilds:' "$file" | head -1 | cut -d: -f1)"
+              sed -i "${ln}a\\  \"${key}\": true" "$file"
+            else
+              printf 'allowBuilds:\n  "%s": true\n' "$key" >> "$file"
+            fi
+          done
+          if dsh plugin --profile {{ dsh_profile }} add "$spec" >/tmp/prime-stack-plugin-add.log 2>&1; then
+            echo "installed: $pkg (after allowBuilds remedy)"
+            exit 0
+          fi
+          cat /tmp/prime-stack-plugin-add.log >&2
+        fi
+        echo "FAILED: $pkg" >&2
+        exit 1
+      args:
+        executable: /bin/bash
+        chdir: "{{ tv_workspace }}"
+      register: parity_plugins
+      failed_when: false
+      changed_when: parity_plugins.stdout is search('installed')
+      loop: "{{ dsh_parity_plugins }}"
+      loop_control:
+        label: "{{ item.package }}"
+      tags: [extras, plugins]
+
+    - name: Fail when a parity plugin refused to install
+      ansible.builtin.fail:
+        msg: >-
+          parity plugin install failed — see the pnpm output above the failing
+          item ({{ parity_plugins.results
+                  | selectattr('rc', 'defined')
+                  | selectattr('rc', 'ne', 0)
+                  | map(attribute='item')
+                  | map(attribute='package')
+                  | join(', ') }}).
+      when: parity_plugins.results | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0) | list | length > 0
+      tags: [extras, plugins]
+
+    - name: Rebuild the profile so native build scripts run
+      # `dsh plugin exec`/add is a pnpm forwarder; rebuild re-runs the
+      # postinstall builds allowBuilds permits (node-pty, ssh2, …). Cheap
+      # when everything is already built.
+      ansible.builtin.shell: |
+        dsh plugin --profile {{ dsh_profile }} rebuild >/tmp/prime-stack-plugin-rebuild.log 2>&1
+        rc=$?
+        [ "$rc" -eq 0 ] || cat /tmp/prime-stack-plugin-rebuild.log >&2
+        exit "$rc"
+      args:
+        executable: /bin/bash
+        chdir: "{{ tv_workspace }}"
+      register: parity_rebuild
+      changed_when: false
+      when: parity_plugins is changed or parity_allowbuilds_seed is changed
+      tags: [extras, plugins]
+
+    # ------------------------------------------------------------------ extras/mnemon
+    - name: Apply the mnemon user-patch row to the web profile
+      # dsh-mnemon ships sane defaults; this replicates the production Mac's
+      # profile patch layer (remoteAccess trusted-host, guided modes).
+      ansible.builtin.shell: |
+        set -e
+        file="{{ dsh_profile_dir }}/cordis.patch.yml"
+        mkdir -p "$(dirname "$file")"
+        [ -f "$file" ] || printf '[]\n' > "$file"
+        grep -q 'id: mnemon' "$file" 2>/dev/null && { echo unchanged; exit 0; }
+        cat >> "$file" <<'ROW'
+        # dsh-mnemon tuning (managed by bootstrapping/ansible/prime-stack.yml)
+        - id: mnemon
+          config:
+            routingGuidance: true
+            displayMode: sidebar
+            lifecycleEnabled: true
+            recallMode: guided
+            writebackMode: guided
+            idleReviewMs: 30000
+            tabEnabled: true
+            writeEnabled: true
+            remoteAccess: trusted-host
+            timeoutMs: 10000
+            defaultRecallLimit: 10
+            embedding:
+              enabled: false
+              endpoint: http://localhost:11434
+              model: nomic-embed-text
+            recallQuality:
+              policy: strict-v1
+              lowScoreThreshold: 0.25
+              highScoreThreshold: 0.6
+              candidateMultiplier: 3
+              maxMediumResults: 4
+              maxUnknownResults: 2
+        ROW
+        echo changed
+      args:
+        executable: /bin/bash
+      register: mnemon_row
+      changed_when: mnemon_row.stdout is search('changed')
+      tags: [extras, mnemon]
+
+    - name: Add the mnemon section to dsh settings.yaml
+      # taskAgentModel rides the CF Workers AI provider (the production Mac
+      # points it at its own cf provider; no honcho connection is provisioned
+      # here — Mnemon Native is the default space and needs no credentials).
+      ansible.builtin.shell: |
+        set -e
+        file="{{ dsh_settings }}"
+        # settings.yaml may be absent when CF secrets were missing at first
+        # boot (the dsh-config section skips then) — create it so mnemon
+        # still lands; chmod 600 matches the dsh-config writer.
+        [ -f "$file" ] || { touch "$file"; chmod 600 "$file"; }
+        grep -q '^mnemon:' "$file" 2>/dev/null && { echo unchanged; exit 0; }
+        cat >> "$file" <<'SECTION'
+        mnemon:
+          taskAgentModel:
+            mode: fixed
+            provider: cloudflare-workers-ai
+            model: "@cf/zai-org/glm-5.2"
+        SECTION
+        echo changed
+      args:
+        executable: /bin/bash
+      register: mnemon_settings
+      changed_when: mnemon_settings.stdout is search('changed')
+      tags: [extras, mnemon]
+
+    # ------------------------------------------------------------------ extras/mobile
+    - name: Run the dsh-mobile setup (pairing CA, scaffolds, control)
+      # Official CLI setup: creates $DSH_HOME/mobile-access/{tls CA, mobile.css,
+      # mobile.js, extensions}, enables the gateway (control.json). Idempotent
+      # guard: the CA is the expensive artifact.
+      ansible.builtin.shell: |
+        set -e
+        [ -f "{{ dsh_home }}/mobile-access/tls/ca.pem" ] && { echo unchanged; exit 0; }
+        dsh plugin --profile {{ dsh_profile }} exec dsh-mobile setup --yes \
+          --port {{ mobile_gateway_port }} --dsh-port 3081 </dev/null
+        echo changed
+      args:
+        executable: /bin/bash
+        chdir: "{{ tv_workspace }}"
+      register: mobile_setup
+      changed_when: mobile_setup.stdout is search('changed')
+      tags: [extras, mobile]
+
+    - name: Point the mobile gateway at the codespace-forwarded origin
+      # In a codespace the https edge + GitHub auth + device pairing provide
+      # what the managed-LAN TLS would: the gateway runs plain HTTP on
+      # loopback (tls disabled is only legal on loopback — enforced by the
+      # plugin) and is published at the forwarded https origin. Non-codespace
+      # devcontainers keep the managed LAN setup the CLI wrote.
+      ansible.builtin.shell: |
+        set -e
+        cs_name="${CODESPACE_NAME:-}"
+        [ -z "$cs_name" ] && cs_name="$(bash -lc 'printenv CODESPACE_NAME' 2>/dev/null || true)"
+        cs_domain="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-}"
+        [ -z "$cs_domain" ] && cs_domain="$(bash -lc 'printenv GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN' 2>/dev/null || true)"
+        if [ -z "$cs_name" ] || [ -z "$cs_domain" ]; then
+          echo "not a codespace — keeping the managed LAN setup"
+          exit 0
+        fi
+        export CS_NAME="$cs_name" CS_DOMAIN="$cs_domain" MOBILE_PORT="{{ mobile_gateway_port }}"
+        python3 - <<'PYEOF'
+        import json, os, pathlib, secrets
+        home = pathlib.Path(os.path.expanduser('~/.dsh/mobile-access'))
+        setup = home / 'setup.json'
+        doc = {}
+        if setup.exists():
+            try:
+                doc = json.loads(setup.read_text())
+            except Exception:
+                doc = {}
+        port = os.environ['MOBILE_PORT']
+        out = {
+            'version': 1,
+            'publicOrigin': f"https://{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}",
+            'listenHost': '127.0.0.1',
+            'upstreamOrigin': 'http://127.0.0.1:3081',
+            'instanceId': doc.get('instanceId') or secrets.token_hex(32),
+            'pairingCaFile': str(home / 'tls' / 'ca.pem'),
+            'tls': {'mode': 'disabled'},
+            'allowedCidrs': ['127.0.0.0/8', '::1/128'],
+        }
+        if json.dumps(doc, sort_keys=True) == json.dumps(out, sort_keys=True):
+            print('unchanged'); raise SystemExit
+        tmp = str(setup) + '.tmp'
+        with open(tmp, 'w') as f:
+            json.dump(out, f, indent=2)
+            f.write('\n')
+        os.replace(tmp, setup)
+        os.chmod(setup, 0o600)
+        print('changed')
+        PYEOF
+      args:
+        executable: /bin/bash
+      register: mobile_codespace_origin
+      changed_when: mobile_codespace_origin.stdout is search('changed')
+      tags: [extras, mobile]
+
+    - name: Ensure the mobile gateway control file exists
+      # Create-only: a control.json the user turned OFF from the web UI is
+      # never force-re-enabled.
+      ansible.builtin.shell: |
+        set -e
+        file="{{ dsh_home }}/mobile-access/control.json"
+        [ -f "$file" ] && { echo unchanged; exit 0; }
+        printf '{"version":1,"enabled":true}\n' > "$file"
+        chmod 600 "$file"
+        echo changed
+      args:
+        executable: /bin/bash
+      register: mobile_control
+      changed_when: mobile_control.stdout is search('changed')
+      tags: [extras, mobile]
+
+    # ------------------------------------------------------------------ extras/mcp
+    - name: Write the home-level cordis patch (code-review-graph MCP)
+      # Parity with the production Mac's ~/.dsh/cordis.patch.yml: mounts the
+      # code-review-graph MCP server into every profile. Skipped (not failed)
+      # when the CLI is absent or the user already has a home-level patch.
+      ansible.builtin.shell: |
+        set -e
+        command -v code-review-graph >/dev/null 2>&1 || { echo "skipped: code-review-graph not installed"; exit 0; }
+        file="{{ dsh_home }}/cordis.patch.yml"
+        [ -f "$file" ] && { echo unchanged; exit 0; }
+        cat > "$file" <<'ROW'
+        # DSH home-level patch: applies to every profile.
+        # Loads the code-review-graph MCP server via @deepseek-ai/dsh-mcp-client.
+        # Set CODE_REVIEW_GRAPH_REPO to the project that has a .code-review-graph/ build.
+
+        - insert:
+            - id: mcp-code-review-graph
+              name: '@deepseek-ai/dsh-mcp-client'
+              config:
+                serverName: code-review-graph
+                transport: stdio
+                command: code-review-graph
+                args: !!js '["serve", "--repo", process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()]'
+                cwd: !!js 'process.env.CODE_REVIEW_GRAPH_REPO || process.cwd()'
+                toolCallTimeoutMs: 60000
+                failOnStartupError: false
+        ROW
+        echo changed
+      args:
+        executable: /bin/bash
+      register: mcp_home_patch
+      changed_when: mcp_home_patch.stdout is search('changed')
+      tags: [extras, mcp]
+
     # ------------------------------------------------------------------ secrets
     - name: Provision runtime secrets from the Bitwarden vault (never fatal)
       # Same contract as .devcontainer/post-create.sh: exit 2 (credentials not
@@ -618,5 +949,9 @@
           - "preset prime-orchestrator: {{ 'materialized' if (preset_file.stat.exists | default(false)) or ((preset_wait.rc | default(1)) == 0) else 'NOT materialized' }}"
           - "prime-agent CLI: {{ 'installed' if (prime_agent_detect.rc | default(1)) == 0 or ((prime_agent_install.rc | default(1)) == 0) else 'FAILED to install' }}"
           - "CF model config: {{ 'written' if (cf_secrets_present | bool) else 'SKIPPED (CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not set)' }}"
+          - "parity plugins (mnemon, pi2dsh, mobile, mcp-client, agent-memory, restart): {{ 'installed this run' if (parity_plugins is defined and parity_plugins is changed) else ('checked (already present)' if (parity_plugins is defined) else 'not run (use --tags extras)') }}"
+          - "mnemon (memory in the web UI): {{ 'configured this run' if (mnemon_row is defined and mnemon_row is changed) else ('configured' if (mnemon_row is defined) else 'not run') }}"
+          - "mobile access (gateway :{{ mobile_gateway_port }}): {{ 'configured this run' if (mobile_setup is defined and (mobile_codespace_origin is changed or mobile_setup is changed)) else ('configured' if (mobile_setup is defined) else 'not run') }}"
+          - "code-review-graph MCP (home-level patch): {{ 'patched this run' if (mcp_home_patch is defined and mcp_home_patch is changed) else ('present' if (mcp_home_patch is defined) else 'not run') }}"
           - "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace"
       tags: [always]

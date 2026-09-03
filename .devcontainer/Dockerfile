@@ -15,4 +15,9 @@ RUN apt-get update \
     libdrm2 libdbus-1-3 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 \
     libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libatspi2.0-0 \
     libgtk-3-0 fonts-liberation \
+    python3-pip \
     && rm -rf /var/lib/apt/lists/*
+
+# code-review-graph CLI — mounted into dsh via the home-level MCP patch
+# (~/.dsh/cordis.patch.yml, written by bootstrapping/ansible/prime-stack.yml).
+RUN pip3 install --break-system-packages --no-cache-dir code-review-graph
