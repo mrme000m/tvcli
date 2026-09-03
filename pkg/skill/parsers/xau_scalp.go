@@ -10,7 +10,7 @@ import (
 var XauScalpSkill = &skill.Skill{
 	Name:     "xau-scalp",
 	Synopsis: "XAUUSD Scalping Confluence Engine — all-in-one EMA+ST+RSI+Squeeze+Volume+BB",
-	PineID:   "USER;ed4cf60ef3fb43f6b91565afe52a3a4b",
+	PineID:   "USER;1b74eeeeb6f643e89afd765f863c5f96",
 	Inputs: []skill.InputDef{
 		{Name: "ema1Len", TVInputID: "in_0", Type: "int", Default: 3},
 		{Name: "ema2Len", TVInputID: "in_1", Type: "int", Default: 8},
