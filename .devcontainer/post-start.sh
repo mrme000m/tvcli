@@ -41,7 +41,8 @@ fi
 if [ -f "$WS/.tv-autobrowser" ] && command -v node >/dev/null 2>&1; then
   if ! curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
     (cd "$WS/browser-debug" && setsid nohup node launch.mjs >/dev/null 2>&1 &)
-    for i in $(seq 1 30); do curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
+    # Cold start (version resolution + first Chromium boot) can take ~60s.
+    for i in $(seq 1 60); do curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1 && break; sleep 1; done
     curl -sf http://127.0.0.1:9222/json/version >/dev/null 2>&1 \
       && echo "CloakBrowser ready on CDP :9222 (authenticate with browser-debug/tv.mjs)" \
       || echo "CloakBrowser pre-launch failed — run browser-debug/launch.mjs manually"
