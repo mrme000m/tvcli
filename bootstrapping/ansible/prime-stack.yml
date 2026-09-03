@@ -887,7 +887,7 @@
         fi
         export CS_NAME="$cs_name" CS_DOMAIN="$cs_domain" MOBILE_PORT="{{ mobile_gateway_port }}"
         python3 - <<'PYEOF'
-        import json, os, pathlib, secrets
+        import base64, hashlib, json, os, pathlib
         home = pathlib.Path(os.path.expanduser('~/.dsh/mobile-access'))
         setup = home / 'setup.json'
         doc = {}
@@ -898,12 +898,25 @@
                 doc = {}
         port = os.environ['MOBILE_PORT']
         tls = doc.get('tls') or {}
+        # instanceId is NOT a free token: the gateway verifies it equals
+        # the fingerprint256 of the pairing CA (sha256 of the cert DER,
+        # hex, lowercase, no colons) at boot ("pairingCaFile must be the
+        # self-signed CA identified by instanceId"). Derive it from the
+        # actual CA so a drifted value self-heals.
+        instance_id = doc.get('instanceId')
+        try:
+            pem = (home / 'tls' / 'ca.pem').read_text()
+            der = base64.b64decode(''.join(
+                l for l in pem.splitlines() if not l.startswith('---')))
+            instance_id = hashlib.sha256(der).hexdigest()
+        except Exception:
+            pass  # no readable CA yet — keep whatever the setup CLI wrote
         out = {
             'version': 1,
             'publicOrigin': f"https://{os.environ['CS_NAME']}-{port}.{os.environ['CS_DOMAIN']}",
             'listenHost': '127.0.0.1',
             'upstreamOrigin': 'http://127.0.0.1:3081',
-            'instanceId': doc.get('instanceId') or secrets.token_hex(32),
+            'instanceId': instance_id,
             'pairingCaFile': str(home / 'tls' / 'ca.pem'),
             'tls': {
                 # parseGatewayConfig requires mode == "provided" whenever a
