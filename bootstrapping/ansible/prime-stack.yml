@@ -109,6 +109,7 @@
     fleet_managed_by: prime-stack-bootstrap
     fleet_preset_marker: .plugin-managed.json
     fleet_preset_src: "{{ playbook_dir | dirname }}/presets"
+    fleet_preset_root: "{{ preset_root }}"
     # tvcli multi-account HTTP server (POST /hunt fan-out over the account
     # pool) — autostart only when the accounts.json registry is provisioned.
     fleet_enable_tvcli_autoserve: true
