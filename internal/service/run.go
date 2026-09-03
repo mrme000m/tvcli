@@ -26,7 +26,7 @@ type RunRequest struct {
 	ForceCleanup bool
 	CalcTimeout  time.Duration // 0 → 120s
 	Debug        bool
-	Source       string // raw Pine source; when set, bypasses Pine Facade LoadIndicator
+	Source       string // raw Pine source; when set, RunScript compiles+saves it via Pine Facade first (eval semantics)
 }
 
 // RunResult is the raw output of one indicator run.
@@ -58,6 +58,81 @@ func PreCheckScriptOwnership(cfg *config.Config, pineID string) error {
 			"private script %s is not among the current user's saved scripts — it belongs to a different account or was deleted; re-upload with `tvcli create <file.pine>` and update the skill's PineID", pineID)
 	}
 	return nil
+}
+
+// ResolveSourceScript compiles raw Pine source via the Pine Facade and saves
+// it as a temporary script, returning the real saved pineID plus a cleanup
+// func that best-effort deletes the temp script. Callers MUST invoke cleanup
+// when done with the pineID.
+//
+// This is the "eval semantics" path (compile → save → run → delete): the WS
+// create_study `text` field requires the compiled IL blob that the facade
+// returns for a SAVED script, so raw source must first be saved under the
+// current account and then run by its real pineID. It keeps embedded-source
+// skills (e.g. mtf-confluence) self-contained on any fresh account — no
+// manual upload step and no dependence on pre-existing saved scripts.
+func ResolveSourceScript(cfg *config.Config, source string) (string, func(), error) {
+	pfClient := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond, pinefacade.WithProxy(cfg.ProxyURL))
+	cookie := cfg.CookieHeaderOrEmpty()
+
+	if _, err := pfClient.Compile(source, cookie); err != nil {
+		return "", nil, fmt.Errorf("compile embedded source: %w", err)
+	}
+
+	tempName := "agent_skill_" + pinefacade.SHA256(source)[:12]
+	saveResp, saveErr := pfClient.SaveNew(source, tempName, cookie)
+	if saveErr != nil {
+		return "", nil, fmt.Errorf("save embedded source: %w", saveErr)
+	}
+	pineID := extractPineIDFromSave(saveResp)
+	if pineID == "" {
+		return "", nil, fmt.Errorf("save embedded source: no pineId in SaveNew response")
+	}
+	fmt.Fprintf(os.Stderr, "✓ Embedded source saved as temp script: %s\n", pineID)
+
+	cleanup := func() {
+		if _, derr := pfClient.Delete(pineID, cookie); derr != nil {
+			fmt.Fprintf(os.Stderr, "⚠ Failed to delete temp script %s: %v\n", pineID, derr)
+		} else {
+			fmt.Fprintf(os.Stderr, "✓ Temp script deleted: %s\n", pineID)
+		}
+	}
+	return pineID, cleanup, nil
+}
+
+// extractPineIDFromSave pulls the pineId out of a Pine Facade SaveNew
+// response. Matches internal/server's extractPineID logic: checks pineId, id,
+// scriptIdPart at the top level, inside "response", and inside
+// "result.metaInfo.scriptIdPart" (URL-decoding %3B).
+func extractPineIDFromSave(resp any) string {
+	m, ok := resp.(map[string]any)
+	if !ok {
+		return ""
+	}
+	decode := func(s string) string { return strings.ReplaceAll(s, "%3B", ";") }
+	for _, key := range []string{"pineId", "id", "scriptIdPart"} {
+		if s, ok := m[key].(string); ok && strings.Contains(s, ";") {
+			return decode(s)
+		}
+	}
+	if inner, ok := m["response"].(map[string]any); ok {
+		for _, key := range []string{"pineId", "id", "scriptIdPart"} {
+			if s, ok := inner[key].(string); ok && strings.Contains(s, ";") {
+				return decode(s)
+			}
+		}
+	}
+	if result, ok := m["result"].(map[string]any); ok {
+		if mi, ok := result["metaInfo"].(map[string]any); ok {
+			if s, ok := mi["scriptIdPart"].(string); ok && s != "" {
+				if strings.Contains(s, ";") {
+					return decode(s)
+				}
+				return "USER;" + decode(s)
+			}
+		}
+	}
+	return ""
 }
 
 // LoadIndicator fetches the script source + metaInfo from Pine Facade and
@@ -147,48 +222,31 @@ func RunScript(ctx context.Context, cfg *config.Config, req RunRequest) (*RunRes
 		calcTimeout = 120 * time.Second
 	}
 
-	// When Source is provided (private scripts with raw Pine source),
-	// build the indicator directly without Pine Facade.
-	//
-	// KNOWN-BROKEN, kept for API compatibility: TradingView stores private
-	// script source ENCRYPTED (the facade Get returns a `key_cipher` blob, not
-	// plaintext), so a plaintext `text` field fails server-side lexing
-	// ("line 1:12 no viable alternative at character '\n'"). No caller sets
-	// Source today; embedded-source skills are saved per account and run by
-	// PineID instead (see the server's script cache).
+	// When Source is provided (raw Pine source, e.g. an embedded-source
+	// skill), it cannot be sent to create_study directly: the WS study `text`
+	// field must carry the COMPILED IL blob that Pine Facade returns for a
+	// SAVED script, not raw Pine source (raw source fails server-side lexing
+	// with "line 1:12 no viable alternative at character '\n'"). So we use
+	// eval semantics: compile the source via Pine Facade, save it as a temp
+	// script, run by the real saved pineID (LoadIndicator then fetches the
+	// compiled IL + metaInfo), and delete the temp script afterwards. This
+	// keeps embedded-source skills self-contained on any fresh account.
 	var indicator *tradingview.PineIndicator
 	var err error
 	if req.Source != "" {
-		indicatorOpts := map[string]any{
-			"pineId":      req.PineID,
-			"script":      req.Source,
-			"metaInfo":    map[string]any{"inputs": []any{}},
-			"pineVersion": "1.0",
+		resolvedID, cleanup, rerr := ResolveSourceScript(cfg, req.Source)
+		if rerr != nil {
+			return nil, rerr
 		}
-		indicator = tradingview.NewPineIndicator(indicatorOpts)
-		for k, v := range req.Inputs {
-			skip := false
-			for _, r := range req.ReservedKeys {
-				if k == r {
-					skip = true
-					break
-				}
-			}
-			if skip {
-				continue
-			}
-			if sErr := indicator.SetOption(k, v); sErr != nil {
-				fmt.Fprintf(os.Stderr, "⚠ Input '%s': %v\n", k, sErr)
-			}
-		}
-		fmt.Fprintf(os.Stderr, "Indicator built from source: %d inputs defined\n", len(indicator.Inputs))
-	} else {
-		indicator, err = LoadIndicator(cfg, req.PineID, req.Inputs, req.ReservedKeys)
-		if err != nil {
-			return nil, err
-		}
-		fmt.Fprintf(os.Stderr, "Indicator loaded: %d inputs defined\n", len(indicator.Inputs))
+		defer cleanup()
+		req.PineID = resolvedID
+		req.Source = ""
 	}
+	indicator, err = LoadIndicator(cfg, req.PineID, req.Inputs, req.ReservedKeys)
+	if err != nil {
+		return nil, err
+	}
+	fmt.Fprintf(os.Stderr, "Indicator loaded: %d inputs defined\n", len(indicator.Inputs))
 
 	// Connect fresh — helper that reconnects a client.
 	var client tradingview.Client

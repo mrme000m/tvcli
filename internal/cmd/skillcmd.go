@@ -49,7 +49,9 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	// invitation, so we dynamically detect them (via the Pine ID prefix and,
 	// when reachable, the public script library search) and negate them
 	// before attempting a run. PUB scripts are never blocked on this check.
-	if !pinefacade.IsPublicPineID(c.skill.PineID) {
+	// Embedded-source skills are self-contained: they compile and save their
+	// own source at run time, so there is no external script to gate on.
+	if !pinefacade.IsPublicPineID(c.skill.PineID) && c.skill.Source == "" {
 		facade := pinefacade.NewClient(cfg.PineFacadeURL, cfg.UserName, time.Duration(cfg.Timeout)*time.Millisecond)
 		sa, saErr := facade.GetScriptAccess(c.skill.PineID, cfg.CookieHeaderOrEmpty())
 		if flags.Has("verify-access") {
@@ -97,7 +99,18 @@ func (c *skillCmd) Run(env *cli.Env) error {
 	inputs := c.resolveInputs(flags)
 
 	if flags.Has("schema") {
-		indicator, err := service.LoadIndicator(cfg, c.skill.PineID, inputs, reservedSkillKeys)
+		schemaPineID := c.skill.PineID
+		if c.skill.Source != "" {
+			// Embedded source: save it as a temp script first so the facade
+			// can return real metaInfo (same eval semantics as RunScript).
+			resolvedID, cleanup, rerr := service.ResolveSourceScript(cfg, c.skill.Source)
+			if rerr != nil {
+				return fmt.Errorf("%s: %w", c.skill.Name, rerr)
+			}
+			defer cleanup()
+			schemaPineID = resolvedID
+		}
+		indicator, err := service.LoadIndicator(cfg, schemaPineID, inputs, reservedSkillKeys)
 		if err != nil {
 			return fmt.Errorf("%s: %w", c.skill.Name, err)
 		}
