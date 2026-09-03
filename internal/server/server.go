@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/mrme000m/tvcli/pkg/account"
 	"github.com/mrme000m/tvcli/internal/config"
 	"github.com/mrme000m/tvcli/internal/service"
 	"github.com/mrme000m/tvcli/pkg/pinefacade"
@@ -1433,12 +1434,17 @@ func (s *Server) handleSkills(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleCheckAuth verifies TradingView auth cookies and subscription tier.
-// GET /check-auth → { "configured", "authenticated", "pro", "plan", "canRunStudies", "error" }
-// GET /check-auth?account=NAME → probe that specific registry account instead
-// of the active one (so operators can pin a validated primary after import).
+// handleCheckAuth verifies TradingView auth cookies and subscription tier via
+// the cookies-only JSON profile APIs (no HTML scrape).
+//
+//   GET /check-auth            → { "count", "results": [ { name, configured,
+//                                 authenticated, pro, plan, username, statusCode,
+//                                 canRunStudies, error }, ... ] }
+//   GET /check-auth?account=N  → single-account result (same shape, no "count")
+//
+// With a registry loaded and no ?account=, every registry account is validated
+// in one pass (batch). With ?account=NAME, only that account is probed.
 func (s *Server) handleCheckAuth(w http.ResponseWriter, r *http.Request) {
-	cfg := s.cfg
 	if name := r.URL.Query().Get("account"); name != "" {
 		if s.cfg.Accounts == nil {
 			writeJSON(w, http.StatusNotFound, map[string]any{
@@ -1449,7 +1455,8 @@ func (s *Server) handleCheckAuth(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		if _, ok := s.cfg.Accounts.Get(name); !ok {
+		acc, ok := s.cfg.Accounts.Get(name)
+		if !ok {
 			writeJSON(w, http.StatusNotFound, map[string]any{
 				"configured":    false,
 				"authenticated": false,
@@ -1458,40 +1465,75 @@ func (s *Server) handleCheckAuth(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		cfg = cfgForAccount(s.cfg, name)
-	}
-
-	if !cfg.HasAuth() {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"configured":    false,
-			"authenticated": false,
-			"canRunStudies": false,
-			"error":         "no SESSION cookie configured",
-		})
+		writeJSON(w, http.StatusOK, accountAuthResult(name, acc))
 		return
 	}
+	// No ?account= — batch the whole registry when available.
+	if s.cfg.Accounts == nil {
+		writeJSON(w, http.StatusOK, accountAuthResult("", legacyAccount(s.cfg)))
+		return
+	}
+	reg := s.cfg.Accounts
+	names := reg.Names()
+	results := make([]map[string]any, 0, len(names))
+	for _, name := range names {
+		results = append(results, accountAuthResult(name, reg.Accounts[name]))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"count":   len(results),
+		"results": results,
+	})
+}
 
-	info := auth.FetchAuthInfo(cfg.SessionID, cfg.Signature, "", cfg.DeviceToken, auth.WithProxy(cfg.ProxyURL))
+// legacyAccount synthesizes a one-entry account from the legacy single-account
+// config fields (SESSION/SIGNATURE/DEVICE_T/COOKIES/EXTRA_COOKIES/PROXY), so
+// the batch validator can treat both modes uniformly.
+func legacyAccount(cfg *config.Config) account.Account {
+	return account.Account{
+		SessionID:    cfg.SessionID,
+		Signature:    cfg.Signature,
+		DeviceToken:  cfg.DeviceToken,
+		Cookies:      cfg.Cookies,
+		ExtraCookies: cfg.ExtraCookies,
+		ProxyURL:     cfg.ProxyURL,
+	}
+}
 
+// accountAuthResult validates one account's cookies against the JSON profile
+// APIs and returns its auth state as a JSON-ready map. username comes from the
+// API response, not the stored UserName field.
+func accountAuthResult(name string, acc account.Account) map[string]any {
+	configured := acc.HasAuth()
+	if !configured {
+		return map[string]any{
+			"name":          name,
+			"configured":    false,
+			"authenticated": false,
+			"pro":           false,
+			"plan":          "",
+			"canRunStudies": false,
+			"error":         "no SESSION cookie configured",
+		}
+	}
+	info := auth.FetchAccountStateWithCookies(acc.CookieHeader(), auth.WithProxy(acc.ProxyURL))
 	result := map[string]any{
+		"name":          name,
 		"configured":    true,
 		"authenticated": info.Authenticated,
 		"pro":           info.Pro,
 		"plan":          info.Plan,
 		"canRunStudies": info.Authenticated,
 	}
-	if info.Error != nil {
-		result["error"] = info.Error.Error()
+	if info.StatusCode != 0 {
+		result["statusCode"] = info.StatusCode
 	}
 	if info.Username != "" {
 		result["username"] = info.Username
 	}
-
-	status := http.StatusOK
-	if !info.Authenticated {
-		status = http.StatusUnauthorized
+	if info.Error != nil {
+		result["error"] = info.Error.Error()
 	}
-	writeJSON(w, status, result)
+	return result
 }
 
 // handleAccounts lists the account registry masked (no credentials). Mirrors the

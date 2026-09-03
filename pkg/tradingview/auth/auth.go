@@ -232,3 +232,115 @@ func FetchAuthInfo(session, signature, location, deviceT string, opts ...Option)
 
 	return info
 }
+
+// FetchAccountState validates session cookies against TradingView's JSON
+// profile APIs (no HTML scraping, no auth_token extraction). It is the
+// reliable batch-validation path for the multi-account pool: cookies alone
+// determine (a) authenticated, (b) plan/tier, and (c) username — the last is
+// returned by the API response, not read from any stored field.
+//
+// Endpoints:
+//   - GET /api/v1/user/profile/subscriptions/ → {account_type, is_pro, profile_pro_plan}
+//     200 = authenticated; 403 = {"detail":"Login required.","code":"login_required"}.
+//   - GET /api/v1/user/profile/me/            → {username, uri}
+//     200 = authenticated; 403 = {"code":"not_authenticated"}.
+//
+// Token stays empty on this path (the WS auth_token lives only on the chart
+// HTML page, which FetchAuthInfo scrapes); callers that need a WS token must
+// keep using FetchAuthInfo/FetchToken.
+func FetchAccountState(session, signature, deviceT string, opts ...Option) AuthInfo {
+	return fetchAccountState(GenCookies(session, signature, deviceT), opts...)
+}
+
+// FetchAccountStateWithCookies is FetchAccountState but takes a raw Cookie
+// header value, honoring the full-Cookies override and ExtraCookies precedence
+// (see account.Account.CookieHeader and config.CookieHeaderOrEmpty).
+func FetchAccountStateWithCookies(cookie string, opts ...Option) AuthInfo {
+	return fetchAccountState(cookie, opts...)
+}
+
+func fetchAccountState(cookie string, opts ...Option) AuthInfo {
+	if cookie == "" {
+		return AuthInfo{Error: fmt.Errorf("no session cookies")}
+	}
+
+	status, body, err := doJSON("/api/v1/user/profile/subscriptions/", cookie, opts...)
+	if err != nil {
+		return AuthInfo{Error: err}
+	}
+	info := AuthInfo{StatusCode: status}
+	if status != http.StatusOK {
+		info.Error = authErrorFromBody(status, body)
+		return info
+	}
+
+	var sub struct {
+		AccountType    string `json:"account_type"`
+		IsPro          bool   `json:"is_pro"`
+		ProfileProPlan string `json:"profile_pro_plan"`
+	}
+	if err := json.Unmarshal(body, &sub); err != nil {
+		// 200 is still a valid authentication signal; only the plan failed to parse.
+		info.Authenticated = true
+		info.Error = fmt.Errorf("parse subscriptions: %w", err)
+		return info
+	}
+	info.Authenticated = true
+	info.Plan = sub.AccountType
+	if info.Plan == "" {
+		info.Plan = sub.ProfileProPlan
+	}
+	info.Pro = sub.IsPro
+
+	// Username is best-effort: a failure here must not flip Authenticated.
+	if mstatus, mbody, merr := doJSON("/api/v1/user/profile/me/", cookie, opts...); merr == nil && mstatus == http.StatusOK {
+		var me struct {
+			Username string `json:"username"`
+		}
+		if json.Unmarshal(mbody, &me) == nil {
+			info.Username = me.Username
+		}
+	}
+	return info
+}
+
+// doJSON performs a cookies-only GET against a TradingView JSON endpoint with
+// the same XHR headers the chart page sends, mirroring layout.go.
+func doJSON(path, cookie string, opts ...Option) (int, []byte, error) {
+	req, err := http.NewRequest("GET", "https://www.tradingview.com"+path, nil)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Cookie", cookie)
+	req.Header.Set("X-Requested-With", "XMLHttpRequest")
+	req.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	req.Header.Set("Origin", "https://www.tradingview.com")
+	req.Header.Set("Referer", "https://www.tradingview.com/chart/")
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36")
+
+	resp, err := httpClient(opts...).Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("fetch %s: %w", path, err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, body, nil
+}
+
+// authErrorFromBody turns a non-200 auth response into a concise error using
+// the JSON code/detail fields when present (login_required / not_authenticated).
+func authErrorFromBody(status int, body []byte) error {
+	var e struct {
+		Detail string `json:"detail"`
+		Code   string `json:"code"`
+	}
+	_ = json.Unmarshal(body, &e)
+	switch {
+	case e.Code != "":
+		return fmt.Errorf("cookies expired: %s", e.Code)
+	case e.Detail != "":
+		return fmt.Errorf("cookies expired: %s", e.Detail)
+	default:
+		return fmt.Errorf("auth fetch status %d", status)
+	}
+}

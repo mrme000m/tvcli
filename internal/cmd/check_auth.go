@@ -28,6 +28,13 @@ func (c *checkAuthCmd) Run(env *cli.Env) error {
 
 	jsonOut := flags.Has("json")
 
+	// --all validates every registry account against the cookies-only JSON
+	// profile APIs (batch). Username is returned by the API, not the stored
+	// UserName field.
+	if flags.Has("all") && cfg.Accounts != nil {
+		return c.runBatch(env, cfg, jsonOut)
+	}
+
 	// Step 1: Check if cookies are configured at all.
 	if !cfg.HasAuth() {
 		return reportAuthResult(jsonOut, &authResult{
@@ -171,6 +178,69 @@ func reportAuthResult(jsonOut bool, r *authResult) error {
 	fmt.Fprintf(os.Stderr, "Can run studies: %s\n", boolStr(r.CanRunStudies))
 	if r.WSError != "" {
 		fmt.Fprintf(os.Stderr, "WS Error: %s\n", r.WSError)
+	}
+	return nil
+}
+
+// batchAuthRow is one account's validation result for --all output.
+type batchAuthRow struct {
+	Name          string `json:"name"`
+	Configured    bool   `json:"configured"`
+	Authenticated bool   `json:"authenticated"`
+	Pro           bool   `json:"pro"`
+	Plan          string `json:"plan,omitempty"`
+	Username      string `json:"username,omitempty"`
+	StatusCode    int    `json:"statusCode,omitempty"`
+	Error         string `json:"error,omitempty"`
+}
+
+// runBatch validates every registry account and reports the result as either
+// a JSON array (--json) or a human table (stderr). Returns an error only on
+// output failure; per-account auth failures are reported per-row, not fatal.
+func (c *checkAuthCmd) runBatch(env *cli.Env, cfg *config.Config, jsonOut bool) error {
+	reg := cfg.Accounts
+	names := reg.Names()
+	rows := make([]batchAuthRow, 0, len(names))
+	for _, name := range names {
+		acc := reg.Accounts[name]
+		row := batchAuthRow{Name: name, Configured: acc.HasAuth()}
+		if !acc.HasAuth() {
+			row.Error = "no session cookies"
+			rows = append(rows, row)
+			continue
+		}
+		info := auth.FetchAccountStateWithCookies(acc.CookieHeader(), auth.WithProxy(acc.ProxyURL))
+		row.Authenticated = info.Authenticated
+		row.Pro = info.Pro
+		row.Plan = info.Plan
+		row.Username = info.Username
+		row.StatusCode = info.StatusCode
+		if info.Error != nil {
+			row.Error = info.Error.Error()
+		}
+		rows = append(rows, row)
+	}
+
+	if jsonOut {
+		enc := json.NewEncoder(env.Stdout)
+		enc.SetIndent("", "  ")
+		return enc.Encode(map[string]any{"count": len(rows), "results": rows})
+	}
+
+	fmt.Fprintf(env.Stderr, "─── Account Pool Validation (%d) ───\n", len(rows))
+	for _, r := range rows {
+		status := "INVALID"
+		if r.Authenticated {
+			status = "VALID"
+		} else if !r.Configured {
+			status = "NO-AUTH"
+		}
+		line := fmt.Sprintf("  %-20s %-8s plan=%-12s pro=%s user=%-16s",
+			r.Name, status, orDash(r.Plan), boolStr(r.Pro), orDash(r.Username))
+		if r.Error != "" {
+			line += fmt.Sprintf(" err=%s", r.Error)
+		}
+		fmt.Fprintln(env.Stderr, line)
 	}
 	return nil
 }

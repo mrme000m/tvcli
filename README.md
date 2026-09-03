@@ -28,7 +28,7 @@ EOF
 # 5. Run a pre-published script by Pine ID
 ./tvcli run "PUB;6daafb2cabe6419d98ae25229d2327f8" --signals --agent --json --symbol BTCUSDT --tf 1H
 
-# 6. Run a built-in skill (19 indicator skills pre-configured)
+# 6. Run a built-in skill (20 indicator skills pre-configured)
 ./tvcli smc --symbol BTCUSDT --tf 1H --agent --json
 
 # 7. Search TradingView's public script library
@@ -45,7 +45,7 @@ tvcli/
 ├── cmd/tvcli/          CLI entry point
 ├── internal/           Application glue (not importable by other modules)
 │   ├── cli/            CLI framework (routing, flags)
-│   ├── cmd/            Command implementations (23 commands)
+│   ├── cmd/            Command implementations (~30 commands + skill subcommands)
 │   ├── config/         Env/.env config, cookie auth, tier limits
 │   ├── metadb/         Local script metadata database
 │   ├── server/         HTTP server for AI agent integration
@@ -56,7 +56,7 @@ tvcli/
 │   ├── pipeline/       Signal extractor (periods → events/levels/report)
 │   ├── runner/         WS orchestration (one-shot, persistent, loop, sweep)
 │   ├── schema/         PineScript metaInfo schema parsing
-│   ├── skill/          Skill registry, types, 19 per-script parsers
+│   ├── skill/          Skill registry, types, 20 per-script parsers
 │   └── tradingview/    WebSocket client: protocol, chart/study lifecycle
 ├── docs/
 │   ├── skills/         Per-skill documentation (21 files)
@@ -86,7 +86,7 @@ replace github.com/mrme000m/tvcli => /path/to/tvcli   # local development
 | `pkg/schema` | Parse Pine metaInfo into typed inputs/plots for schema-driven parsing |
 | `pkg/pipeline` | Script-agnostic signal extraction (order blocks, levels, FVGs, ...) from raw study output |
 | `pkg/runner` | High-level study orchestration (persistent WS, input sweeps) + `ParseOutput` |
-| `pkg/skill` | The 19-skill registry with per-script parsers and agent-ready result types |
+| `pkg/skill` | The 20-skill registry with per-script parsers and agent-ready result types |
 | `pkg/account` | Optional multi-account credential registry + per-account tier limits |
 
 Minimal study run:
@@ -136,32 +136,39 @@ See [docs/MULTI_ACCOUNT.md](docs/MULTI_ACCOUNT.md).
 | `clean` | Clean chart sessions to free indicator slots | SESSION+SIGNATURE |
 | `serve` | Start HTTP server for AI agent integration | SESSION+SIGNATURE |
 
-## Built-in Skills (22 Indicators)
+## Built-in Skills (20 Indicators)
+
+The live registry is the source of truth — run `tvcli skills` (or query the
+server `GET /skills`) for the authoritative list. The 20 currently registered
+skills (`pkg/skill/parsers/`):
 
 | Command | Skill | Category |
 |---------|-------|----------|
-| `cust` | ScalpQuant v2 (private) | Scalping |
-| `bsv` | Buy/Sell Volume | Volume |
-| `dvi` | Delta Volume Intensity | Volume |
-| `vgaps` | Volume Gaps & Imbalances | Volume |
-| `anchored-vp` | Anchored Volume Profile | Volume |
-| `vp` | Volume Profile Fixed Range | Volume |
-| `order-flow` | Volume Spike Order Flow | Volume |
 | `smc` | Smart Money Concepts | Market Structure |
-| `ict` | ICT Auto-Validated SMC | Market Structure |
 | `liq-sweep` | Institutional Liquidity Sweep | Market Structure |
-| `sr-breaks` | Support/Resistance Breaks | Market Structure |
-| `sniper` | Precision Sniper | Price Action |
-| `swingarm` | SwingArm ATR Trend | Trend |
-| `ema-atr` | EMA + ATR Pro Engine | Trend |
-| `quantum` | EMA Ribbon | Trend |
+| `swingarm` | SwingArm ATR Trend | Market Structure |
+| `vp` | Volume Profile Zones (POC/VAH/VAL) | Volume |
+| `vp-pro` | Fixed-Range + Anchored Volume Profile | Volume |
+| `cvd` | Cumulative Delta Volume | Volume |
+| `dvi` | Delta Volume Intensity | Volume |
 | `ust` | Ultra Sensitive SuperTrend | Trend |
-| `trend` | Self-Aware Trend System | Trend |
-| `golden` | Golden Rule Strategy | Strategy |
-| `shemar` | SHEMAR HMA + SMC Confidence | Confluence |
-| `mtf` | XAUUSD MTF Trend Dashboard | Multi-Timeframe |
-| `gold-divergence` | Gold RSI Divergence | Divergence |
 | `xau-trend` | XAUUSD EMA + Bollinger Trend | Trend |
+| `mtf-confluence` | MTF Confluence Engine (chart TF + 2 HTF) | Trend |
+| `camarilla` | Camarilla Pivot Points V2 | Price Action |
+| `choppiness` | Choppiness Index | Price Action |
+| `ichimoku` | Ichimoku Cloud (CM Enhanced V5) | Price Action |
+| `quantum` | EMA Ribbon [Krypt] | Trend |
+| `sniper` | BS Buy & Sell Signals with EMA | Price Action |
+| `squeeze` | Squeeze Momentum [LazyBear] | Volatility |
+| `sr-breaks` | Support/Resistance Breaks | Levels |
+| `golden` | Golden Rule Strategy | Strategy |
+| `gold-divergence` | Gold RSI Divergence | Divergence |
+| `xau-scalp` | XAUUSD Scalping Confluence Engine (all-in-one) | Confluence |
+
+> Several retired skills (e.g. `bsv`, `ict`, `ema-atr`, `anchored-vp`, `mtf`,
+> `order-flow`, `shemar`, `trend`, `vgaps`, `cust`) still have parser files in
+> `pkg/skill/parsers/` with their `func init()` commented out — they are kept
+> for reference only and are NOT in the live registry.
 
 ## Output Formats
 
@@ -265,14 +272,19 @@ for the full, current subscription feature/price matrix (scraped from
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
-| `/health` | GET | Status check (tier, user, endpoint) |
+| `/health` | GET | Status: tier, auth, plan, accounts, per-account usage, script cache |
 | `/compile` | POST | Compile Pine Script source |
 | `/fetch` | POST | Fetch OHLCV data |
-| `/clean` | POST | Clean chart sessions |
-| `/check-auth` | GET | Verify auth cookies & subscription tier |
-| `/run` | POST | Compile + run Pine Script |
+| `/clean` | POST | Clean chart sessions to free indicator slots |
+| `/run` | POST | Compile + save + run arbitrary Pine source (LRU saved-script cache) |
+| `/run-skill` | POST | Run a registered skill by name (per-account failover) |
+| `/hunt` | POST | Fan one skill across many symbols over the account pool |
+| `/skills` | GET | List registered skill names + count |
+| `/check-auth` | GET | Verify auth cookies & tier (?account=NAME probes a specific account) |
+| `/accounts` | GET | Masked account-registry view (role/tier/auth/proxy) |
+| `/queue-stats` | GET | Current per-account concurrency usage |
 
-All data endpoints (`/fetch`, `/run`, `/run-skill`) accept an optional
+All data endpoints (`/fetch`, `/run`, `/run-skill`, `/hunt`) accept an optional
 `"to": <unix-seconds>` field that anchors the chart window at a **past
 moment**: the window's last bar closes at `to`, and studies compute over
 the anchored (historical) window — a point-in-time market read with no

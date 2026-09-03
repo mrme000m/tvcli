@@ -121,7 +121,7 @@ Commands:
     --daemon / -d    Start in background (non-blocking)
     --stop           Stop background server
     --status         Check server status + health
-    Endpoints: /health /compile /fetch /clean /run
+    Endpoints: /health /compile /fetch /clean /run /run-skill /hunt /skills /check-auth /accounts /queue-stats
   inputs <pineId|skillName>     Inspect Pine inputs (Pine-actual vs Go-declared)
     --json                      Structured JSON output
     --raw                       Raw Pine input list (id/name/type/defval/options)
@@ -187,27 +187,27 @@ Commands:
     --out FILE                  Save output to file
     --verbose                   Verbose output
 
-  Indicator Skills (run with tv <skill>):
-    tv bsv          Buy/Sell Volume analysis
-    tv dvi          Delta Volume Intensity
-    tv ust          Ultra Sensitive SuperTrend
-    tv swingarm     SwingArm ATR Trend
-    tv ema-atr      EMA + ATR Pro Engine
-    tv sr-breaks    Support/Resistance Breaks
-    tv shemar       SHEMAR HMA ST + SMC Confidence
-    tv quantum      Quantum Ribbon Lite
-    tv vgaps        Volume Gaps & Imbalances
-    tv anchored-vp  Anchored Volume Profile
-    tv mtf          XAUUSD MTF Trend Dashboard
-    tv sniper       Precision Sniper
-    tv smc          Smart Money Concepts
-    tv golden       Golden Rule Strategy
-    tv trend        Self-Aware Trend System
-    tv ict          ICT Auto-Validated SMC
-    tv liq-sweep    Institutional Liquidity Sweep & Volume Breakout
-    tv order-flow   Volume Spike Order Flow
+  Indicator Skills (run with tv <skill>) — 20 registered; run 'tvcli skills' for the live list:
+    tv smc            Smart Money Concepts
+    tv liq-sweep      Institutional Liquidity Sweep & Volume Breakout
+    tv swingarm       SwingArm ATR Trend
+    tv vp             Volume Profile Zones (POC/VAH/VAL)
+    tv vp-pro         Fixed-Range + Anchored Volume Profile
+    tv cvd            Cumulative Delta Volume
+    tv dvi            Delta Volume Intensity
+    tv ust            Ultra Sensitive SuperTrend
+    tv xau-trend      XAUUSD EMA + Bollinger Trend
+    tv mtf-confluence MTF Confluence Engine (chart TF + 2 HTF)
+    tv camarilla      Camarilla Pivot Points V2
+    tv choppiness     Choppiness Index
+    tv ichimoku       Ichimoku Cloud (CM Enhanced V5)
+    tv quantum        EMA Ribbon [Krypt]
+    tv sniper         BS Buy & Sell Signals with EMA
+    tv squeeze        Squeeze Momentum [LazyBear]
+    tv sr-breaks      Support/Resistance Breaks
+    tv golden         Golden Rule Strategy
     tv gold-divergence  Gold RSI Divergence
-    tv xau-trend    XAUUSD EMA + Bollinger Trend
+    tv xau-scalp      XAUUSD Scalping Confluence Engine (all-in-one)
 
     Use --help on any skill for details (e.g. tv sniper --help)
     Use --json --agent for agent-ready JSON output

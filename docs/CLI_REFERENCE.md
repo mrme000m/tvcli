@@ -392,7 +392,7 @@ anchored window, giving a point-in-time market read with no lookahead
 
 ---
 
-## Skill Commands (19 indicator skills)
+## Skill Commands (20 indicator skills)
 
 Each skill is a shortcut for `run` with a pre-configured Pine ID and custom output parser.
 
