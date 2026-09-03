@@ -39,6 +39,7 @@ Commands:
     --dir <dir>                 Output directory (default: .)
     --json-out <file>           Custom JSON output path
     --csv-out <file>            Custom CSV output path
+  watch --spec <spec.json>      Spec-driven market watch: poll price, evaluate triggers, journal events
   sync                          Fetch + compress OHLCV to .json.gz (gap-fills existing)
     --symbol EXCHANGE:SYMBOL     Market symbol (default: OANDA:XAUUSD)
     --tf 5m                     Timeframe (default: 5m)

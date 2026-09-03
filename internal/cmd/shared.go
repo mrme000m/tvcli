@@ -59,6 +59,7 @@ func RegisterAll(root *cli.Root, app *App) {
 	root.Add(&symCmd{app: app})
 	root.Add(&studyCmd{app: app})
 	root.Add(&scanCmd{app: app})
+	root.Add(&watchCmd{app: app})
 	RegisterSkills(root, app)
 }
 
