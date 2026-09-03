@@ -568,7 +568,7 @@
       environment:
         PRIME_PROVIDER_JSON: "{{ prime_cf_provider | to_json }}"
       register: prime_models_merge
-      changed_when: prime_models_merge.stdout is search('changed')
+      changed_when: prime_models_merge.stdout is search('(?m)^changed$')
       when: cf_secrets_present | bool
       tags: [prime-config]
 
@@ -603,7 +603,7 @@
       args:
         executable: /bin/bash
       register: prime_auth_merge
-      changed_when: prime_auth_merge.stdout is search('changed')
+      changed_when: prime_auth_merge.stdout is search('(?m)^changed$')
       no_log: true
       when: cf_secrets_present | bool
       tags: [prime-config]
@@ -656,7 +656,7 @@
       environment:
         PRIME_CF_MODELS_JSON: "{{ prime_cf_enabled_models | to_json }}"
       register: prime_settings_merge
-      changed_when: prime_settings_merge.stdout is search('changed')
+      changed_when: prime_settings_merge.stdout is search('(?m)^changed$')
       when: cf_secrets_present | bool
       tags: [prime-config]
 
@@ -819,7 +819,7 @@
       args:
         executable: /bin/bash
       register: mnemon_row
-      changed_when: mnemon_row.stdout is search('changed')
+      changed_when: mnemon_row.stdout is search('(?m)^changed$')
       tags: [extras, mnemon]
 
     - name: Add the mnemon section to dsh settings.yaml
@@ -845,7 +845,7 @@
       args:
         executable: /bin/bash
       register: mnemon_settings
-      changed_when: mnemon_settings.stdout is search('changed')
+      changed_when: mnemon_settings.stdout is search('(?m)^changed$')
       tags: [extras, mnemon]
 
     # ------------------------------------------------------------------ extras/mobile
@@ -864,7 +864,7 @@
         executable: /bin/bash
         chdir: "{{ tv_workspace }}"
       register: mobile_setup
-      changed_when: mobile_setup.stdout is search('changed')
+      changed_when: mobile_setup.stdout is search('(?m)^changed$')
       tags: [extras, mobile]
 
     - name: Point the mobile gateway at the codespace-forwarded origin
@@ -924,7 +924,7 @@
       args:
         executable: /bin/bash
       register: mobile_codespace_origin
-      changed_when: mobile_codespace_origin.stdout is search('changed')
+      changed_when: mobile_codespace_origin.stdout is search('(?m)^changed$')
       tags: [extras, mobile]
 
     - name: Ensure the mobile gateway control file exists
@@ -940,7 +940,7 @@
       args:
         executable: /bin/bash
       register: mobile_control
-      changed_when: mobile_control.stdout is search('changed')
+      changed_when: mobile_control.stdout is search('(?m)^changed$')
       tags: [extras, mobile]
 
     # ------------------------------------------------------------------ extras/mcp
@@ -974,7 +974,7 @@
       args:
         executable: /bin/bash
       register: mcp_home_patch
-      changed_when: mcp_home_patch.stdout is search('changed')
+      changed_when: mcp_home_patch.stdout is search('(?m)^changed$')
       tags: [extras, mcp]
 
     # ------------------------------------------------------------------ secrets
@@ -1058,7 +1058,7 @@
         TV_WORKSPACE: "{{ tv_workspace }}"
         CLOAK_DIR: "{{ wt_cloak_dir }}"
       register: fleet_preset_install
-      changed_when: fleet_preset_install.stdout is search('updated|changed')
+      changed_when: fleet_preset_install.stdout is search('(?m)^(updated|changed)$')
       loop: "{{ dsh_fleet_presets }}"
       loop_control:
         label: "{{ item }}"
