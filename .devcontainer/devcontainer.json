@@ -1,6 +1,8 @@
 {
   "name": "tvcli",
-  "image": "mcr.microsoft.com/devcontainers/go:1.26-bookworm",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
   "features": {
     "ghcr.io/devcontainers/features/github-cli:1": {},
     "ghcr.io/devcontainers/features/node:1": {
@@ -10,6 +12,10 @@
       "version": "latest"
     }
   },
+  "containerEnv": {
+    "DISPLAY": ":99"
+  },
+  "forwardPorts": [5900, 6080],
   "customizations": {
     "vscode": {
       "extensions": ["golang.Go"],
@@ -19,6 +25,7 @@
       }
     }
   },
-  "postCreateCommand": "go build -o tvcli ./cmd/tvcli && [ -x \"$HOME/.opencode/bin/opencode\" ] || curl -fsSL https://opencode.ai/install | bash && for f in \"$HOME/.profile\" \"$HOME/.bashrc\"; do grep -qs 'opencode/bin' \"$f\" 2>/dev/null || printf 'export PATH=\"$HOME/.opencode/bin:$PATH\"\\n' >> \"$f\"; done",
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
+  "postStartCommand": "bash .devcontainer/post-start.sh",
   "remoteUser": "vscode"
 }

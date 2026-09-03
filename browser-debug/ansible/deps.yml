@@ -23,7 +23,11 @@
   tasks:
     # ------------------------------------------------------------------ node
     - name: Detect Node.js version
-      ansible.builtin.shell: node --version 2>/dev/null || echo MISSING
+      # Strip the leading "v" (node prints "v24.20.0") — ansible-core 2.14's
+      # version test cannot compare "v"-prefixed strings.
+      ansible.builtin.shell: |
+        v=$(node --version 2>/dev/null || echo MISSING)
+        printf '%s' "${v#v}"
       register: node_version
       changed_when: false
       tags: [node, always]
@@ -66,6 +70,22 @@
       tags: [node, always]
 
     # ------------------------------------------------------------------ browser
+    - name: Install Chromium runtime libraries (Debian/Ubuntu)
+      # CloakBrowser ships a bare Chromium binary — the GUI/X11 runtime it links
+      # against is absent on headless servers (symptom: chrome fails with
+      # "error while loading shared libraries: libglib-2.0.so.0").
+      ansible.builtin.apt:
+        name: [libglib2.0-0, libnss3, libnspr4, libatk1.0-0, libatk-bridge2.0-0,
+               libcups2, libdrm2, libdbus-1-3, libxkbcommon0, libxcomposite1,
+               libxdamage1, libxfixes3, libxrandr2, libgbm1, libpango-1.0-0,
+               libcairo2, libasound2, libatspi2.0-0, libgtk-3-0, fonts-liberation]
+        state: present
+        update_cache: true
+      become: true
+      when:
+        - ansible_os_family == 'Debian'
+      tags: [browser]
+
     - name: Check CloakBrowser binary presence
       ansible.builtin.find:
         paths: "{{ tv_workspace }}/cloakbrowser"
@@ -195,19 +215,25 @@
       tags: [display]
 
     - name: Start Xvfb virtual display
+      # pgrep -x (exact process name): pgrep -f would match this task's own
+      # shell (the script text contains the pattern) and no-op forever.
       ansible.builtin.shell: |
-        if ! pgrep -f "Xvfb {{ xvfb_display }}" >/dev/null; then
+        if ! pgrep -x Xvfb >/dev/null; then
           nohup Xvfb {{ xvfb_display }} -screen 0 {{ xvfb_screen }} >/tmp/xvfb.log 2>&1 &
         fi
+        for i in $(seq 1 20); do pgrep -x Xvfb >/dev/null && break; sleep 0.5; done
+        pgrep -x Xvfb >/dev/null || { echo "Xvfb failed to start:"; cat /tmp/xvfb.log; exit 1; }
       become: true
       when: install_xvfb | bool
       tags: [display]
 
     - name: Start x11vnc export
       ansible.builtin.shell: |
-        if ! pgrep -f "x11vnc.*{{ x11vnc_port }}" >/dev/null; then
+        if ! pgrep -x x11vnc >/dev/null; then
           nohup x11vnc -display {{ xvfb_display }} -forever -nopw -rfbport {{ x11vnc_port }} >/tmp/x11vnc.log 2>&1 &
         fi
+        for i in $(seq 1 20); do pgrep -x x11vnc >/dev/null && break; sleep 0.5; done
+        pgrep -x x11vnc >/dev/null || { echo "x11vnc failed to start:"; cat /tmp/x11vnc.log; exit 1; }
       become: true
       when: install_x11vnc | bool
       tags: [display]
