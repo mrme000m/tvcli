@@ -111,8 +111,12 @@ tok="$(jq -r '.["cloudflare-workers-ai"].key' ~/.prime/agent/auth.json)"
 acct="$(grep -oE 'accounts/[0-9a-f]{24,}/ai/v1' ~/.dsh/settings.yaml | cut -d/ -f2)"
 curl -s "https://api.cloudflare.com/client/v4/accounts/$acct/ai/v1/chat/completions" \
   -H "Authorization: Bearer $tok" -H 'Content-Type: application/json' \
-  -d '{"model":"@cf/zai-org/glm-5.2","max_tokens":100,"messages":[{"role":"user","content":"Say ok"}]}'
+  -d '{"model":"@cf/zai-org/glm-5.2","max_tokens":300,"messages":[{"role":"user","content":"Say ok"}]}'
 ```
+
+(Reasoning models burn tokens on `reasoning_content` before the visible
+answer — with too small a budget you get `content: ""` and
+`finish_reason: length`; 300 is the safe floor.)
 
 ## dsh Web GUI
 
@@ -152,13 +156,35 @@ engine.
    MISSING). Node 24's npm also blocks dependency install scripts
    (`npm warn install-scripts`) — verified harmless: koffi's prebuilt
    binary loads without its script; do NOT pass `--allow-scripts`.
+7. **The codespace edge cannot front the dsh-mobile gateway** (probed live
+   with a public port + header logger, 2026-09-04): GitHub terminates TLS
+   at the edge (DigiCert `*.app.github.dev`), dials the container over
+   loopback with PLAIN http, and rewrites `Host` to `localhost:<port>`
+   (the public vhost rides only in `X-Forwarded-Host`). dsh-mobile's trust
+   model (direct Host/Origin matching) cannot work through that under any
+   setup.json shape — `publicOrigin` forces the listen port to the URL
+   port (443 → EACCES) while the edge dials the subdomain port; explicit
+   authority ports must equal `listenPort`; tls-disabled flips the trust
+   scheme to http so phone-side https Origin headers 403. The engine pins
+   the loopback shape (tls disabled, `localhost`/`127.0.0.1` authorities,
+   `instanceId` = pairing CA fingerprint256) and phone pairing goes
+   through the plugin's own remote providers (Tailscale Funnel / cpolar,
+   publicTls gateways) enabled from the web UI. Local check:
+   `curl -s http://127.0.0.1:3443/` → `401 {"error":"authentication_failed"}`
+   is the HEALTHY unpaired response.
 
 ## Extending
 
 - More dsh plugins: `dsh plugin --profile web add <spec>` (mind gotcha 1).
-- More Workers AI models: add entries to the `prime_cf_models` catalog in
-  the playbook AND the `models:` list in the settings.yaml template (caps
-  differ per surface — copy from the production Mac config if unsure).
+- More Workers AI models: edit `MODEL_CATALOG` in
+  `bootstrapping/python/prime_stack/config.py` (the single source of truth;
+  surface-specific deltas are the `DSH_MODEL_ORDER`/`DSH_MODEL_OVERRIDES`
+  tables there). Both the ansible playbook and the standalone
+  `bootstrapping/python/bin/prime-stack` runner pick it up.
+- New engine stages: one module in `bootstrapping/python/prime_stack/stages/`,
+  registered in `stages/__init__.py`, one `python3 -m prime_stack <stage>`
+  task in the playbook, a unit test in `bootstrapping/python/tests/`, and
+  the stage list in `bootstrapping/README.md`.
 - The playbook lives in `bootstrapping/` (not `browser-debug/ansible/`,
   which owns the CloakBrowser/debug stack only). See
   `bootstrapping/README.md` for the full operator manual.
