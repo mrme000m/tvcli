@@ -30,6 +30,7 @@ items --search <domain>` returns the whole family).
 | `wundertrading-session` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/wt-session.env` |
 | `kimi` | **login** (username/password/TOTP) | manual Google OAuth login (`vb.mrme00@gmail.com`); not provisioned |
 | `kimi-session` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/kimi-session.env` |
+| `opencode-session` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/opencode-session.env` |
 | `cloudflare-tunnels` | **fields** (live-read, §3) | `cf` skill (`scripts/cf.py`) |
 | `provider-keys` | **fields** (live-read, §3) | `provider-limits.py` (read) · `kimi-keys.py --update-vault` (write `KIMI_CODE_API_KEY`; do not provision) |
 | `wundertrading-login` | notes (manual/headful login, not provisioned) | docs only (`wt-investigator` preset) |
