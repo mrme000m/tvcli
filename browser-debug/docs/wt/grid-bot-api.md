@@ -137,6 +137,10 @@ node browser-debug/wt-backtest.mjs backtest  cfg.json            # one run (UI p
 node browser-debug/wt-backtest.mjs optimize  cfg.json           # platform sweep: step 1.2→3.0 %, best totalResult
 node browser-debug/wt-backtest.mjs sweep     cfg.json --step 0.2:5:0.1 --widths 0.1,0.2,0.3
 # agent sweep over profit-per-grid and channel half-widths; --rank-by totalResult|pnl
+
+# DCA engine (same file): config = the wt-bots dca create payload
+node browser-debug/wt-backtest.mjs dca       cfg.json            # one run
+node browser-debug/wt-backtest.mjs dca-sweep cfg.json --dev 1:4:1 --tp 1:3:1
 ```
 
 Engine semantics (extracted from the minified bundle — keep them when editing):

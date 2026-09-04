@@ -32,6 +32,28 @@ The ranked output gives symbol, regime, ADX/ATR, real spread (venue L2 book),
 and the ATR-derived step. Pick the token whose regime you have a working grid
 archetype for — a `chop_high_volatility` name beats a choppy favorite.
 
+### 1b. Backtest & optimize before creating (programmatic, UI-parity)
+
+`wt-backtest.mjs` ports the platform's own client-side backtest engine —
+numbers match the configurator's Backtest panel digit-for-digit (verified
+2026-09-04). Run it on candidate configs **before** creating anything:
+
+```bash
+cd browser-debug
+# one run (grid): config = the same JSON you would POST to upsert
+node wt-backtest.mjs backtest ../wt-grid-cfg.json
+# platform-parity optimize (step 1.2-3.0%) + agent sweeps:
+node wt-backtest.mjs optimize ../wt-grid-cfg.json
+node wt-backtest.mjs sweep   ../wt-grid-cfg.json --step 0.3:5:0.25 --widths 0.15,0.3 --rank-by pnl
+# DCA archetypes:
+node wt-backtest.mjs dca       ../wt-dca-cfg.json
+node wt-backtest.mjs dca-sweep ../wt-dca-cfg.json --dev 1:4:1 --tp 1:3:1
+```
+
+`--rank-by pnl` ranks by realized profit only (avoids the unrealized-heavy
+directional bias that `totalResult` favors). The browser must be up
+(`node wt.mjs`) — OHLC is fetched through the logged-in page.
+
 ### 2. Configure — derive the exact config
 
 ```bash

@@ -264,6 +264,272 @@ async function buildInput(cfg, { percents, width } = {}) {
   };
 }
 
+
+// ---------- DCA backtest engine (verbatim port of SPA module 909695) ----------
+const FEE = 0.002; // X in the bundle
+
+// indicator primitives (technicalindicators-style, as vendored by the SPA)
+class RSI {
+  constructor(period = 14) { this.period = period; this.prices = []; this.avgG = null; this.avgL = null; }
+  nextValue(close) {
+    this.prices.push(close);
+    if (this.prices.length < this.period + 1) return undefined;
+    if (this.avgG === null) {
+      let g = 0, l = 0;
+      for (let i = 1; i <= this.period; i++) { const d = this.prices[i] - this.prices[i - 1]; if (d >= 0) g += d; else l -= d; }
+      this.avgG = g / this.period; this.avgL = l / this.period;
+    } else {
+      const d = close - this.prices[this.prices.length - 2];
+      this.avgG = (this.avgG * (this.period - 1) + Math.max(d, 0)) / this.period;
+      this.avgL = (this.avgL * (this.period - 1) + Math.max(-d, 0)) / this.period;
+    }
+    if (this.prices.length > this.period + 1) this.prices.shift();
+    if (this.avgL === 0) return 100;
+    return 100 - 100 / (1 + this.avgG / this.avgL);
+  }
+}
+class BollingerBands {
+  constructor(period = 21, stdDev = 2) { this.period = period; this.stdDev = stdDev; this.prices = []; }
+  nextValue(close) {
+    this.prices.push(close);
+    if (this.prices.length < this.period) return undefined;
+    if (this.prices.length > this.period) this.prices.shift();
+    const mean = this.prices.reduce((a, b) => a + b, 0) / this.period;
+    const variance = this.prices.reduce((a, b) => a + (b - mean) ** 2, 0) / this.period;
+    const sd = Math.sqrt(variance);
+    return { middle: mean, upper: mean + this.stdDev * sd, lower: mean - this.stdDev * sd };
+  }
+}
+class MACD {
+  constructor(fast = 3, slow = 21, signal = 9) {
+    this.fast = fast; this.slow = slow; this.signal = signal;
+    this.emaFast = null; this.emaSlow = null; this.emaSignal = null; this.macds = [];
+  }
+  #ema(prev, val, n) { const k = 2 / (n + 1); return prev === null ? val : val * k + prev * (1 - k); }
+  nextValue(close) {
+    this.emaFast = this.#ema(this.emaFast, close, this.fast);
+    this.emaSlow = this.#ema(this.emaSlow, close, this.slow);
+    if (this.emaFast === null || this.emaSlow === null) return undefined;
+    const macd = this.emaFast - this.emaSlow;
+    this.emaSignal = this.#ema(this.emaSignal, macd, this.signal);
+    if (this.emaSignal === null || this.macds.length < 1) { this.macds.push(macd); return undefined; }
+    this.macds.push(macd);
+    return { macd, signal: this.emaSignal };
+  }
+}
+
+// entry-signal wrappers (direction: 'long' | 'short' | 'both')
+function makeIndicator(kind, direction, priceChangeDeviation) {
+  if (kind === 'rsi') {
+    const rsi = new RSI(14); let activate = null;
+    return (candle, canEnter) => {
+      const o = rsi.nextValue(candle.close);
+      if (o === undefined || !canEnter) return false;
+      if (activate) {
+        if (activate === 'long' && o >= 25) { activate = null; return 'long'; }
+        if (activate === 'short' && o <= 75) { activate = null; return 'short'; }
+      } else {
+        if (o < 25 && (direction === 'both' || direction === 'long')) activate = 'long';
+        if (o > 75 && (direction === 'both' || direction === 'short')) activate = 'short';
+      }
+      return false;
+    };
+  }
+  if (kind === 'bb') {
+    const bb = new BollingerBands(21, 2.5); let activate = null;
+    return (candle, canEnter) => {
+      const o = bb.nextValue(candle.close);
+      if (o === undefined || !canEnter) return false;
+      if (activate) {
+        if (activate === 'long' && o.lower < candle.close) { activate = null; return 'long'; }
+        if (activate === 'short' && candle.close < o.upper) { activate = null; return 'short'; }
+      } else {
+        if ((direction === 'long' || direction === 'both') && o.lower > candle.close) activate = 'long';
+        if ((direction === 'short' || direction === 'both') && candle.close > o.upper) activate = 'short';
+      }
+      return false;
+    };
+  }
+  if (kind === 'macd') {
+    const macd = new MACD(3, 21, 9); let activate = null;
+    return (candle, canEnter) => {
+      const o = macd.nextValue(candle.close);
+      if (o === undefined || !canEnter) return false;
+      if (activate) {
+        let a = false;
+        if (activate === 'long') a = o.signal < o.macd && o.macd < 0;
+        if (activate === 'short') a = 0 < o.macd && o.macd < o.signal;
+        const c = activate; activate = null;
+        return a ? c : false;
+      }
+      let i = null;
+      if ((direction === 'both' || direction === 'long') && o.macd < o.signal && o.signal < 0) i = 'long';
+      if ((direction === 'both' || direction === 'short') && 0 < o.signal && o.signal < o.macd) i = 'short';
+      activate = i;
+      return false;
+    };
+  }
+  if (kind === 'price_change') {
+    const div = priceChangeDeviation ?? 0.02;
+    return (candle, canEnter) => {
+      const i = candle.open, c = candle.close;
+      if (i === c || !canEnter) return false;
+      let o, a;
+      if (i > c) { o = (i - c) / i; a = 'long'; } else { o = (c - i) / c * 0 + (c - i) / i; a = 'short'; }
+      if (o > div) return direction === 'both' ? a : (direction === a ? direction : false);
+      return false;
+    };
+  }
+  return null;
+}
+
+// DCA ladder builder (verbatim port of module 75976)
+function buildDcaLadder(amountPerTrade, amountPerTradeType, requiredCurrency, currentPrice, dcaObject, balance) {
+  const costAveragingType = dcaObject.costAveragingType;
+  const dcaMode = dcaObject.dcaMode;
+  const g = +dcaObject.dcaOrdersCount;
+  let m = +dcaObject.dcaOrderPriceDeviation;
+  const v = +dcaObject.dcaOrderPriceDeviationMultiplier;
+  const b = +dcaObject.dcaOrderVolumeMultiplier;
+  const y = [];
+  const c = currentPrice;
+  let h = +amountPerTrade, f;
+  if (amountPerTradeType === 'percents') {
+    if (requiredCurrency) { h = requiredCurrency.base / 100 * h; f = requiredCurrency.ref / 100 * +amountPerTrade; }
+    if (costAveragingType === 'base') h /= c; else if (f) f *= c;
+  }
+  const w = amountPerTradeType !== 'percents' && costAveragingType === 'base' && false; // l===BASE&&p===BASE only for percents paths
+  const x = amountPerTradeType !== 'percents' && costAveragingType === 'quote' && false;
+  if (w) h /= c; else if (x) h *= c;
+  let O = 0, j = 0, S = 0, A = 0, P = 0;
+  let k = c, T = c;
+  m = m / 100;
+  for (let E = dcaMode === 'order_averaging' ? 0 : 1; O < g;) {
+    const _ = O !== 0 ? m * Math.pow(v, O) : 0;
+    let C = h, D = f || h;
+    if (b !== 1 && O > E) {
+      const N = costAveragingType === 'base' ? 'ref' : 'base';
+      C = y[O - 1].long[N] * b; D = y[O - 1].short[N] * b;
+    }
+    k -= k * _; T += T * _;
+    if (costAveragingType === 'base') {
+      j += C * k; S += C; A += D * T; P += D;
+      y.push({
+        long: { ref: C, totalValue: j, base: C * k, price: k, deviation: S ? round2(100 * (c - j / S) / c, 2) : 0 },
+        short: { ref: D, totalValue: A, base: D * T, price: T, deviation: P ? round2(100 * (A / P - c) / c, 2) : 0 },
+      });
+    } else {
+      j += C / k; A += D / T; S += C; P += D;
+      y.push({
+        long: { ref: C / k, totalValue: j, base: C, price: k, deviation: S ? round2(100 * (c - j / S) / c, 2) : 0 },
+        short: { ref: D / T, totalValue: A, base: D, price: T, deviation: P ? round2(100 * (A / P - c) / c, 2) : 0 },
+      });
+    }
+    O++;
+  }
+  return y;
+}
+const round2 = (v, d) => { const f = 10 ** d; return Math.round(v * f) / f; };
+
+// the DCA backtest engine (verbatim port of Z in module 909695)
+function dcaBacktest(e) {
+  const t = e.candles, r = e.takeProfit, a = e.stopLoss, i = e.direction, c = +e.amountPerTrade,
+        s = e.amountPerTradeType, u = e.requiredCurrency, l = e.dcaObject, p = e.indicator,
+        d = e.botStartCondition, g = e.priceChangePriceDeviation, m = e.pairCode, v = e.balance;
+  const y = l.dcaOrdersCount, h = l.dcaOrderPriceDeviation,
+        w = l.takeProfitTypeValue, x = l.stopLossTypeValue;
+  if (!t || t.length === 0) throw new Error('No candles!');
+  const A = new Date(t[0].time).toISOString();
+  const P = [];
+  let S;
+  if (d === 'indicator') {
+    switch (p) {
+      case 'price_change': S = makeIndicator('price_change', i, g); break;
+      case 'rsi': S = makeIndicator('rsi', i); break;
+      case 'bb': S = makeIndicator('bb', i); break;
+      case 'macd': S = makeIndicator('macd', i); break;
+    }
+  }
+  const tpDec = r !== null && r !== undefined ? r / 100 : null;
+  const slDec = a ? a / 100 : null;
+  const hDec = h !== null && h !== undefined ? h / 100 : null;
+  let T, D, N, I, G, O, L = 0, q = 0, U = 0, H = 0, Q = 0, Z = 0;
+  let k = [];
+  const J = () => { U = 0; H = 0; q = 0; Z = 0; Q++; T = null; D = null; N = null; G = null; I = null; k = []; };
+  const $ = (e, t2, unrealized) => {
+    let o = H / T * e - H;
+    if (t2 === 'short') o = -o;
+    return unrealized ? o : o - H * FEE - (H + o) * FEE;
+  };
+  const te = () => { U++; if (k[U]) { G = k[U][O].price; I = k[U][O].base; } };
+  const re = (e) => { const t2 = e * tpDec; D = O === 'long' ? e + t2 : e - t2; };
+  const ne = (e) => { const t2 = e * slDec; N = O === 'long' ? e - t2 : e + t2; };
+  for (const [ie, ceRaw] of t.entries()) {
+    const ce = { ...ceRaw, index: ie };
+    const ue = ce.high, le = ce.close, fe = ce.low, pe = ce.time / 1e3;
+    if (U < y && T && ((O === 'long' && fe <= G) || (O === 'short' && ue >= G))) {
+      T = (H + I) / (H / T + I / G);
+      if (w === 'average_price') re(T);
+      if (x === 'average_price' && a) ne(T);
+      H += I;
+      P.push({ type: 'extra - ' + O, side: O, timestamp: pe, price: G, amount: I });
+      te();
+    }
+    if (T && ((N && O === 'long' && fe <= N) || (N && O === 'short' && ue >= N))) {
+      L += $(N, O);
+      P.push({ type: 'sl - ' + O, side: O === 'short' ? 'long' : 'short', timestamp: pe, price: N });
+      J();
+    } else if (T && ((D && O === 'long' && ue >= D) || (D && O === 'short' && fe <= D))) {
+      L += $(D, O);
+      P.push({ type: 'tp - ' + O, side: O === 'short' ? 'long' : 'short', timestamp: pe, price: D });
+      J();
+    } else {
+      const de = S ? S.nextValue(ce, !T) : i;
+      if (T || !de) {
+        if (T) { q = $(le, O, true); q -= H * FEE; }
+      } else {
+        k = buildDcaLadder(c, s, u, le, l, v);
+        T = le; G = le; H = c; I = c; O = de;
+        P.push({ type: 'entry - ' + O, side: O, timestamp: pe, price: le, amount: c });
+        Z++;
+        re(le);
+        if (a) ne(le);
+        te();
+      }
+    }
+  }
+  return { profit: round2(L, 2), unrealizedProfit: round2(q, 2), realizedTrades: Q, unrealizedTrades: Z, dateStarted: A, tradesArray: P, pairCode: m };
+}
+
+
+async function dcaRun(cfg) {
+  const code = cfg.pairCode || `${cfg.exchangeCode}:${cfg.pairsCodes?.[0] || cfg.pairCode}`;
+  const limit = Math.round(days * 24 * 60 / tf);
+  const bars = await getBars(code, tf, limit);
+  const last = bars[bars.length - 1].close;
+  return dcaBacktest({
+    pairCode: code, candles: bars,
+    takeProfit: cfg.takeProfit ?? (cfg.takeProfits?.[0]?.priceDeviation * 100 ?? null),
+    stopLoss: cfg.stopLoss ?? null,
+    direction: cfg.dcaTradingType ?? 'long',
+    amountPerTrade: cfg.amountPerTrade, amountPerTradeType: cfg.amountPerTradeType ?? 'base',
+    requiredCurrency: { base: last, ref: last }, // price for percents conversion
+    dcaObject: {
+      dcaOrdersCount: cfg.extraOrderCount ?? 3,
+      dcaOrderPriceDeviation: cfg.dcaObject?.dcaOrderPriceDeviation ?? cfg.extraOrderDeviation * 100 ?? 2,
+      dcaOrderVolumeMultiplier: cfg.dcaObject?.dcaOrderVolumeMultiplier ?? cfg.extraOrderVolumeMultiplier ?? 1.4,
+      dcaOrderPriceDeviationMultiplier: cfg.dcaObject?.dcaOrderPriceDeviationMultiplier ?? cfg.extraOrderDeviationMultiplier ?? 1,
+      dcaMode: cfg.dcaObject?.dcaMode ?? (cfg.applyDcaForFirstSafetyOrder ? 'order_averaging' : 'position_averaging'),
+      costAveragingType: cfg.dcaObject?.costAveragingType ?? cfg.extraOrderCostAveraging ?? 'base',
+      takeProfitTypeValue: cfg.takeProfitBaseOn ?? 'average_price',
+      stopLossTypeValue: cfg.stopLossBaseOn ?? 'average_price',
+    },
+    indicator: cfg.indicator ?? null,
+    botStartCondition: cfg.entrySignalCondition ?? 'immediate',
+    balance: cfg.balance ?? 10000,
+  });
+}
+
 (async () => {
   if (cmd === 'backtest') {
     const cfg = JSON.parse(readFileSync(rest[0], 'utf8'));
@@ -299,8 +565,30 @@ async function buildInput(cfg, { percents, width } = {}) {
     }
     runs.sort((a, b2) => b2.totalResult - a.totalResult);
     console.log(JSON.stringify({ params: { timeframe: tf, days, stepSpec, widthsSpec }, best: runs[0], top10: runs.slice(0, 10) }, null, 1));
+  } else if (cmd === 'dca') {
+    const cfg = JSON.parse(readFileSync(rest[0], 'utf8'));
+    const r = await dcaRun(cfg);
+    const sum = { profit: r.profit, unrealizedProfit: r.unrealizedProfit, realizedTrades: r.realizedTrades, unrealizedTrades: r.unrealizedTrades, dateStarted: r.dateStarted, tradesCount: r.tradesArray.length, trades: r.tradesArray.slice(0, 60) };
+    console.log(JSON.stringify(sum, null, 1));
+  } else if (cmd === 'dca-sweep') {
+    const cfg = JSON.parse(readFileSync(rest[0], 'utf8'));
+    const devSpec = arg('--dev', '0.5:5:0.5');     // dcaOrderPriceDeviation sweep (%)
+    const tpSpec = arg('--tp', '0.5:3:0.5');        // takeProfit sweep (%)
+    const [df, dt, ds] = devSpec.split(':').map(Number);
+    const [tfp, tpt, tps] = tpSpec.split(':').map(Number);
+    const runs = [];
+    for (let dev = df; dev <= dt + 1e-9; dev = round2(dev + ds, 2)) {
+      for (let tp = tfp; tp <= tpt + 1e-9; tp = round2(tp + tps, 2)) {
+        const c2 = { ...cfg, dcaObject: { ...cfg.dcaObject, dcaOrderPriceDeviation: dev }, takeProfit: tp };
+        const r = await dcaRun(c2);
+        runs.push({ dev, tp, profit: r.profit, unrealizedProfit: r.unrealizedProfit, realizedTrades: r.realizedTrades, tradesCount: r.tradesArray.length });
+      }
+    }
+    const rankBy = arg('--rank-by', 'profit');
+    runs.sort((a2, b2) => (b2[rankBy] ?? 0) - (a2[rankBy] ?? 0));
+    console.log(JSON.stringify({ params: { devSpec, tpSpec }, best: runs[0], top10: runs.slice(0, 10) }, null, 1));
   } else {
-    console.error('usage: node wt-backtest.mjs <backtest|optimize|sweep> <config.json> [--tf 15] [--days 31] [--step 0.2:5:0.1] [--widths 0.1,0.2,0.3]');
+    console.error('usage: node wt-backtest.mjs <backtest|optimize|sweep|dca|dca-sweep> <config.json> [--tf 15] [--days 31] [--step 0.2:5:0.1] [--widths ..] [--dev 0.5:5:0.5] [--tp 0.5:3:0.5] [--rank-by profit]');
     process.exit(2);
   }
 })().catch(e => { console.error('FAIL: ' + e.message); process.exit(1); });

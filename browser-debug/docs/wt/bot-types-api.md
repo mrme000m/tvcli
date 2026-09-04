@@ -49,11 +49,25 @@ direction (violation: "stopCondition should not be blank").
 Init data (`GET …/dca_bots/upsert`): supportedExchanges, exchangesProfiles,
 activeDcaBots, maxActiveDcaBots, platformMinTradeAmountInUSD. Statuses seen:
 `active`, `paused`, `paused_with_unrealized`.
-The DCA backtest engine also exists client-side (thunk `DCABot/runBacktest`,
-module 909695: RSI/BB/MACD/PriceChange entry indicators + the DCA ladder) —
-inputs: pairCode, candles, takeProfit, stopLoss, direction, amountPerTrade,
-amountPerTradeType, dcaObject, indicator, botStartCondition, balance,
-requiredCurrency.
+**Programmatic DCA backtest/optimization** — the client-side engine
+(`DCABot/runBacktest` → module 909695) is ported verbatim into
+`wt-backtest.mjs` (DCA ladder from module 75976, RSI/BB/MACD/PriceChange
+entry-indicator wrappers, 0.2% fee per round trip, TP/SL on average vs entry
+price, same input mapping as the thunk):
+
+```bash
+node browser-debug/wt-backtest.mjs dca <dca-config.json>          # one run
+node browser-debug/wt-backtest.mjs dca-sweep <cfg.json> --dev 1:4:1 --tp 1:3:1 [--rank-by profit]
+# sweeps dcaOrderPriceDeviation x takeProfit; ranked by realized profit
+```
+The config is the same JSON as `wt-bots.mjs dca create` (extraOrderCount,
+extraOrderDeviation, extraOrderVolumeMultiplier, takeProfits[0].priceDeviation,
+takeProfitBaseOn…). Verified sample (HYPE-USDC long, 20 USDC, 3×2%/×1.4 DCA,
+TP 1.5% avg): 81 realized trades / 844.77 USDC over 31 days; sweep best
+dev 2% × TP 3% → 1191.62 USDC. Parity basis: same engine module + same input
+mapping as the UI thunk (the DCA configurator tab crashed the renderer
+repeatedly during live diffing, so numbers were not cross-checked digit-for-
+digit — trust the grid engine's exact-parity precedent).
 
 ## Market Neutral Bot — `POST /en/trader/market_neutral/upsert` (verified create)
 
