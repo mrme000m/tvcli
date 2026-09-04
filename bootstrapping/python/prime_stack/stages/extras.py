@@ -5,7 +5,12 @@ Four independent sub-stages (one CLI stage each, one playbook tag each):
   extras-plugins  dsh-mnemon, pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client,
                   pi-agent-memory + the vendored dsh-restart. Each install
                   reuses the allowBuilds remedy from stages/plugin.py.
-  extras-mnemon   mnemon settings + profile patch row (memory in the web UI)
+  extras-mnemon   mnemon CLI (native provider, via go install) + settings
+                  + profile patch row (memory in the web UI). The plugin
+                  installs without the binary but shows "NATIVE PROVIDER
+                  Mnemon CLI not found / Connection needs attention /
+                  Waiting for version · 0 / 0 Memory Spaces" until the
+                  binary is on PATH — this stage self-heals that.
   extras-mobile   dsh-mobile gateway (mobile access in the web UI; loopback
                   listener — the codespace edge terminates TLS and rewrites
                   Host, so phone pairing goes through the plugin's own
@@ -21,7 +26,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from ..config import Config
+from ..config import MNEMON_SPEC, Config
 from ..core import Context, StageResult, StageFailure, pem_sha256_fingerprint
 from .plugin import PLUGIN_ADD_LOG, merge_allowbuilds_lines, parse_allowbuilds_keys
 
@@ -139,8 +144,60 @@ def _strip_placeholder_lists(text: str) -> str:
     return re.sub(r"(?m)^\[\]\s*$", "", text)
 
 
+def _mnemon_present(ctx: Context) -> bool:
+    return ctx.exec("command -v mnemon >/dev/null 2>&1").returncode == 0
+
+
+def _install_mnemon_cli(ctx: Context) -> bool:
+    """Install the Mnemon native CLI via `go install`.
+
+    Uses GOBIN=$HOME/.local/bin so the binary lands on the PATH added by
+    the env-bridge stage (~/.local/bin is already on PATH in this image).
+    Returns True on success, False on failure (caller turns failure into a
+    warning — the profile patch + settings still land).
+    """
+    # Verify Go is available; without it we cannot build from source.
+    if ctx.exec("command -v go >/dev/null 2>&1").returncode != 0:
+        return False
+    proc = ctx.mutate(f'GOBIN="$HOME/.local/bin" go install {MNEMON_SPEC}')
+    if proc.returncode != 0:
+        return False
+    if ctx.dry_run:
+        # mutate was a no-op in dry-run; assume it would succeed.
+        return True
+    # Verify the binary is now resolvable.
+    return _mnemon_present(ctx)
+
+
 def run_mnemon(cfg: Config, ctx: Context) -> StageResult:
     changed = False
+    warnings: list[str] = []
+    details: dict = {}
+
+    # 1. Ensure the native CLI is on PATH — without it the dsh-mnemon
+    # plugin shows "NATIVE PROVIDER Mnemon CLI not found / Connection
+    # needs attention / 0 / 0 Memory Spaces" in the web UI Status page.
+    if _mnemon_present(ctx):
+        details["cli"] = "present"
+    else:
+        details["cli"] = "missing — installing"
+        ok = _install_mnemon_cli(ctx)
+        if ok:
+            details["cli"] = "installed this run"
+            changed = True
+        else:
+            # Non-fatal: the web-UI patch + settings still configure the
+            # plugin; the next bootstrap run will retry the CLI install.
+            proc = ctx.exec("command -v go >/dev/null 2>&1; echo GO:$?")
+            has_go = "GO:0" in (proc.stdout or "")
+            if not has_go:
+                warnings.append("mnemon CLI not installed — Go toolchain not found on PATH")
+            else:
+                warnings.append(
+                    f"mnemon CLI install failed (go install {MNEMON_SPEC}); "
+                    "check network access to proxy.golang.org / github.com"
+                )
+            details["cli"] = "install failed"
 
     patch = cfg.web_profile_patch
     text = patch.read_text() if patch.exists() else "[]\n"
@@ -165,10 +222,15 @@ def run_mnemon(cfg: Config, ctx: Context) -> StageResult:
         if ctx.write_text(settings, new_text, mode=0o600):
             changed = True
 
+    summary = "mnemon (memory in the web UI): " + ("configured this run" if changed else "configured")
+    if details.get("cli") == "installed this run":
+        summary = "mnemon (native CLI + memory in the web UI): installed + configured this run"
+    elif details.get("cli") == "install failed":
+        summary += " (CLI install FAILED)"
+
     return StageResult(
-        STAGE_MNEMON, changed=changed,
-        summary_line="mnemon (memory in the web UI): "
-        + ("configured this run" if changed else "configured"),
+        STAGE_MNEMON, changed=changed, warnings=warnings, details=details,
+        summary_line=summary,
     )
 
 

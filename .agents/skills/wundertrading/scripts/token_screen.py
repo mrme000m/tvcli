@@ -36,7 +36,9 @@ def wunder_spreads(exchange_code):
     """{viewSymbol: spread_pct} from the WunderTrading MCP (optional, keys via
     WUN_API_KEY / WUN_SECRET_KEY). Returns {} when keys are missing or the
     call fails — spread data is a bonus, never a hard dependency."""
-    key, secret = os.environ.get("WUN_API_KEY"), os.environ.get("WUN_SECRET_KEY")
+    key = os.environ.get("WUN_API_KEY") or os.environ.get("WT_API_KEY")
+    secret = (os.environ.get("WUN_SECRET_KEY")
+              or os.environ.get("WT_API_SECRET"))
     if not (key and secret):
         return {}
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call",

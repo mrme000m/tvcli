@@ -57,6 +57,17 @@ if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
     else
       echo "dsh web already running (:3081)"
     fi
+    # Codespace port visibility: the forwarded https://<name>-3081.app.github.dev
+    # was returning 302 → github.dev/pf-signin when the port was private and the
+    # request had no GitHub auth cookie (curl, shared URLs, unauthenticated
+    # browser). The devcontainer's portsAttributes now uses onAutoForward but the
+    # live visibility still defaults to private — flip it to public so the URL
+    # returns 200 without a login redirect (the URL itself is the secret).
+    if command -v gh >/dev/null 2>&1 && [ -n "${CODESPACE_NAME:-}" ]; then
+      gh codespace ports visibility 3081:public -c "$CODESPACE_NAME" >/dev/null 2>&1 \
+        && echo "dsh web port 3081 visibility → public (https://${CODESPACE_NAME}-3081.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}/)" \
+        || true
+    fi
   else
     echo "dsh web autostart: CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY not in env — skipping (set them as codespace secrets)"
   fi

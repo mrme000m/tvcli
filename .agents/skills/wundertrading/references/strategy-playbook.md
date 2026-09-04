@@ -102,6 +102,29 @@ before the ladder completes — on 1h majors it can, so respect it.
 exchange). Set actual leverage on the exchange/position; 2–3× is the sane
 ceiling for these archetypes.
 
+### Grid bots (separate configurator — not the MCP/REST surface)
+
+The Grid bot is configured in the web UI (headful `wt-investigator` + bdg) or
+armed/triggered via its **webhook start condition** (TradingView-compatible
+alerts — the clean tvcli→grid bridge). It is **not** reachable through
+`place_strategy_trade` / `edit_trade_strategy`. Full mechanics, sizing, risk
+controls and the regime→grid-type matrix are in
+[grid-bot.md](grid-bot.md). Quick map:
+
+| Regime | Grid type | Note |
+|---|---|---|
+| `trend_up` | `Long GRID` | limit buys on pullbacks; TP each leg |
+| `trend_down` | `Short GRID` (futures) / flat (spot) | mirror of Long |
+| `chop_high_volatility` | `Neutral GRID` centered at mid | the canonical grid regime |
+| `squeeze` | `Neutral GRID` + tight channel + `Stop Trigger` | range-fade; stop on breakout |
+| `neutral` | small probe `Neutral`/`Infinite` grid | half size |
+
+Grid sizing differs from DCA: spot long ≈ `amountPerTrade × numberOfGrids`
+(Neutral/Short/Hedge add the base-currency side; Hedge doubles exposure).
+The platform's **Optimize** already sweeps Profit-per-GRID over 30 days and
+**Profit-Optimized Pairs** ranks pairs by ROI on a `$500`/`$50` benchmark —
+use it for the step, but keep the regime decision in `market_regime.py`.
+
 ## 4. Reliability — proving a strategy before scaling it
 
 "Reliable" = positive expectancy across ≥ 30 closed samples, surviving both

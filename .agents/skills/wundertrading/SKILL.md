@@ -146,8 +146,12 @@ squeeze breakout, funding extremes) — details in the playbook.
 | [references/mcp-tools.md](references/mcp-tools.md) | All 15 MCP tools, full schemas, live-verified quirks, curl transport |
 | [references/rest-api.md](references/rest-api.md) | HMAC signing recipe, endpoint list, rate limits, gotchas |
 | [references/strategy-playbook.md](references/strategy-playbook.md) | Token selection, regime classification, config matrix + sizing math, reliability ladder, adaptation triggers |
+| [references/grid-bot.md](references/grid-bot.md) | Grid bot mechanics (Long/Neutral/Short/Hedge), profit-per-grid, mid price, sizing, Stop Trigger/Pump Protection, start conditions + the webhook path (tvcli→grid), backtest/Optimize/Profit-Optimized Pairs, regime→grid-type mapping |
 | [scripts/market_regime.py](scripts/market_regime.py) | Executable regime classifier → config skeleton |
 | [scripts/token_screen.py](scripts/token_screen.py) | Candidate ranking across tokens (+ live spreads via MCP) → top pick + config |
+| [scripts/universe_screen.py](scripts/universe_screen.py) | Full-universe liquidity-filtered screener with configurable scan presets (`scan_presets.json`: grid-neutral, grid-directional, trend-classic, squeeze, all) → ranked candidates with spreads |
+| [scripts/grid_config.py](scripts/grid_config.py) | Per-symbol config generator — web-UI Grid-bot config + API-reachable `place_strategy_trade` DCA/classic payload (`--send --yes` to submit) |
+| [scripts/reliability.py](scripts/reliability.py) | Phase G reliability report — export closed history, score archetypes (win rate / PF / expectancy) |
 | [examples/2026-09-04-btc-trendup.md](examples/2026-09-04-btc-trendup.md) | Complete worked run (Phase A–D) with real numbers — use as a template |
 
 Official docs: `wundertrading.com/docs/mcp`, `/docs/rest-api`,

@@ -74,13 +74,25 @@ The tvcli multi-account pool is the TradingView screening engine:
 
 ## Regime → grid configuration
 
-The wundertrading skill's playbook (§3) maps the classified regime to the
-bot archetype. On WunderTrading the **classic/DCA strategy surface is fully
-API/MCP-reachable** (`place_strategy_trade`, `edit_trade_strategy`); the
-multi-level **Grid / Multi-Pair Grid / Signal bot configurators are web-UI
-flows** — wt-investigator drives them headful via bdg with vault-persisted
-cookies (the wt-network skill carries the verified selectors), and uses
-REST/MCP for everything they expose.
+The wundertrading skill's playbook (§3) and
+[grid-bot.md](../../.agents/skills/wundertrading/references/grid-bot.md) map
+the classified regime to the bot archetype. On WunderTrading the
+**classic/DCA strategy surface is fully API/MCP-reachable**
+(`place_strategy_trade`, `edit_trade_strategy`); the multi-level
+**Grid / Multi-Pair Grid / Signal bot configurators are web-UI flows** —
+wt-investigator drives them headful via bdg with vault-persisted cookies (the
+wt-network skill carries the verified selectors), and uses REST/MCP for
+everything they expose.
+
+The Grid bot also carries a **webhook start condition**: a
+TradingView-compatible `Entry` / `Exit` alert message starts or stops the bot,
+so the consolidated grid-candidate tvcli skill can **arm/trigger a grid
+headlessly** — no browser, no MCP call. That is the preferred tvcli→grid
+bridge and closes the loop between analysis and execution. For the grid step,
+prefer the platform's built-in **Optimize** (a 30-day Profit-per-GRID sweep)
+and **Profit-Optimized Pairs** (ROI-ranked on a `$500`/`$50` benchmark) over a
+hand-rolled parameter search; keep the regime/grid-type decision in
+`market_regime.py`.
 
 | Regime | Bot archetype | Core config guidance |
 |---|---|---|

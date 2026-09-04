@@ -42,6 +42,10 @@ PARITY_PLUGINS = [
 # parsed from the failure output at install time — see stages/plugin.py).
 NATIVE_BUILD_KEYS = ["node-pty", "ssh2", "cloudflared", "cpu-features"]
 
+# mnemon native provider — the dsh-mnemon plugin requires this CLI on PATH.
+MNEMON_SPEC = "github.com/mnemon-dev/mnemon@latest"
+MNEMON_BIN_NAME = "mnemon"
+
 # dsh-mobile gateway: loopback HTTP behind the codespace https forward.
 MOBILE_GATEWAY_PORT = 3443
 
