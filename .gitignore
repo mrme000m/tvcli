@@ -63,6 +63,9 @@ skill_work/
 *.json
 !.devcontainer/devcontainer.json
 !package.json
+# source config (not data artifacts): skill scan presets + watch specs
+!.agents/skills/wundertrading/scripts/scan_presets.json
+!.agents/skills/wundertrading/watch/*.json
 
 # Background server state
 .tvcli-server.pid

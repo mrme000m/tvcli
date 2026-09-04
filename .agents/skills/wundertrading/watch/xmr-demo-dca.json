@@ -1,0 +1,55 @@
+{
+  "episode": 1,
+  "id": "xmr-demo-dca-001",
+  "mission": "XMR chop_high_volatility DCA LONG on demo-hype (paper). Watch TP zone, DCA ladder depth, and a periodic regime recheck reminder.",
+  "status": "active",
+  "created": "2026-09-04T01:16:25Z",
+  "symbol": "KRAKEN:XMRUSDT",
+  "tf": "5m",
+  "baseline": {
+    "time": 1788484585,
+    "price": 517.38,
+    "at": "2026-09-04T01:16:25Z"
+  },
+  "triggers": [
+    {
+      "id": "tp-hit",
+      "type": "level",
+      "dir": "up",
+      "level": 525.14,
+      "label": "TP 1.5% zone reached (avg-price)",
+      "action": "L2"
+    },
+    {
+      "id": "dca1",
+      "type": "level",
+      "dir": "down",
+      "level": 505.18,
+      "label": "First DCA safety order filled (-2.36%)",
+      "action": "L1"
+    },
+    {
+      "id": "dca3",
+      "type": "level",
+      "dir": "down",
+      "level": 461.45,
+      "label": "3rd safety order filled (-10.8%) — deep deployment",
+      "action": "L2"
+    },
+    {
+      "id": "dca-full",
+      "type": "level",
+      "dir": "down",
+      "level": 374.02,
+      "label": "Full DCA ladder deployed (~-28%) — regime likely flipped",
+      "action": "L2"
+    },
+    {
+      "id": "recheck",
+      "type": "time",
+      "afterMin": 60,
+      "label": "Re-run regime classifier (universe_screen / market_regime)",
+      "action": "L1"
+    }
+  ]
+}

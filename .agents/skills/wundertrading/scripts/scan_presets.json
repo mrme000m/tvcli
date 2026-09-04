@@ -1,0 +1,100 @@
+{
+  "_comment": "Scan presets for universe_screen.py. Edit/add entries here (or pass --presets-file). Keys: regime_weights (base score per regime; 0 = excluded), min_volume_usd (liquidity floor), max_symbols (how many to scan after liquidity filter), interval (15m|1h|4h|1d), limit (candle window), exclude (substring, case-insensitive), atr_min/atr_max (range window for harvest regimes), step_atr_factor/step_min/step_max (grid step = clamp(ATR% * factor, min, max) in %; spread > step/2 is flagged, spread >= step is unharvestable).",
+  "grid-neutral": {
+    "description": "Neutral / mean-reversion grid candidates (chop + squeeze + neutral); trending names scored 0",
+    "regime_weights": {
+      "chop_high_volatility": 100,
+      "squeeze": 82,
+      "neutral": 45,
+      "trend_up": 0,
+      "trend_down": 0
+    },
+    "min_volume_usd": 5000000,
+    "max_symbols": 60,
+    "interval": "1h",
+    "limit": 300,
+    "exclude": [],
+    "atr_min": 0.8,
+    "atr_max": 4.0,
+    "step_atr_factor": 0.5,
+    "step_min": 0.1,
+    "step_max": 2.0
+  },
+  "grid-directional": {
+    "description": "Directional grid candidates (trend_up -> Long grid, trend_down -> Short grid)",
+    "regime_weights": {
+      "trend_up": 100,
+      "trend_down": 90,
+      "chop_high_volatility": 20,
+      "squeeze": 10,
+      "neutral": 0
+    },
+    "min_volume_usd": 10000000,
+    "max_symbols": 60,
+    "interval": "1h",
+    "limit": 300,
+    "exclude": [],
+    "atr_min": 0,
+    "atr_max": 6.0,
+    "step_atr_factor": 0.5,
+    "step_min": 0.1,
+    "step_max": 2.0
+  },
+  "trend-classic": {
+    "description": "Classic / DCA trend candidates for the MCP strategy surface (place_strategy_trade)",
+    "regime_weights": {
+      "trend_up": 100,
+      "trend_down": 85,
+      "chop_high_volatility": 40,
+      "squeeze": 20,
+      "neutral": 0
+    },
+    "min_volume_usd": 10000000,
+    "max_symbols": 60,
+    "interval": "1h",
+    "limit": 300,
+    "exclude": [],
+    "atr_min": 0,
+    "atr_max": 4.0
+  },
+  "squeeze": {
+    "description": "Squeeze (breakout-pending) candidates — tight range grid with Stop Trigger, or breakout entry",
+    "regime_weights": {
+      "squeeze": 100,
+      "chop_high_volatility": 60,
+      "neutral": 20,
+      "trend_up": 0,
+      "trend_down": 0
+    },
+    "min_volume_usd": 5000000,
+    "max_symbols": 60,
+    "interval": "1h",
+    "limit": 300,
+    "exclude": [],
+    "atr_min": 0,
+    "atr_max": 3.0,
+    "step_atr_factor": 0.4,
+    "step_min": 0.1,
+    "step_max": 1.5
+  },
+  "all": {
+    "description": "Full ranking across all regimes (overview)",
+    "regime_weights": {
+      "chop_high_volatility": 100,
+      "squeeze": 82,
+      "neutral": 45,
+      "trend_up": 30,
+      "trend_down": 25
+    },
+    "min_volume_usd": 5000000,
+    "max_symbols": 100,
+    "interval": "1h",
+    "limit": 300,
+    "exclude": [],
+    "atr_min": 0,
+    "atr_max": 6.0,
+    "step_atr_factor": 0.5,
+    "step_min": 0.1,
+    "step_max": 2.0
+  }
+}
