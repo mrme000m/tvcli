@@ -65,7 +65,8 @@ class ManageTestCase(unittest.TestCase):
 
         def fake_build(ticket, brief, balance, mult, profile_code, pair_code,
                        exchange_code=None, amount_precision=None,
-                       max_affordable_grids=None, min_cost=None):
+                       max_affordable_grids=None, min_cost=None,
+                       min_grids=None):
             self.ops.append(("build", pair_code, round(mult, 4)))
             return make_payloads(pair=pair_code)
 
@@ -181,6 +182,77 @@ class ManageTestCase(unittest.TestCase):
         self.assertFalse(ok)
         self.assertEqual(self.ops, [])  # no build/stop/delete ever ran
         self.assertEqual(d.state["active_bots"]["1"]["symbol"], "PUMP")
+
+    def _seed_rotating_bot(self, d):
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0,
+            "stagnation_policy": {
+                "regime": "neutral",
+                "stagnant_if": {"min_fills_24h": 1.0, "min_realized_ratio": 0.4},
+                "score_drop_rotate": 12.0, "hysteresis_score": 5.0,
+                "cooldown_h": 12.0},
+            "observed": {"fills_24h": 0.0, "realized_ratio": 0.0},
+            "decision_id": "OLD1",
+        }
+
+    def _challenger(self):
+        return {"venue": "hyperliquid", "symbol": "SOL",
+                "tv_symbol": "HYPE:SOL", "regime": "neutral",
+                "score_final": 60.0,
+                "archetype": "Neutral Grid (mean-reversion)"}
+
+    def test_rotation_aborts_when_stop_fails(self):
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        with mock.patch("daemon.grid_adapter.grid_stop",
+                        side_effect=lambda bc, mode="stop_and_close_all",
+                        dry_run=True: {"ok": False, "error": "cf 403"}), \
+             mock.patch("daemon.time.sleep"):
+            ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertFalse(ok)
+        self.assertNotIn(("delete", "OLDBOT", False), self.ops)
+        self.assertNotIn(("create", "hyperliquid", False), self.ops)
+        self.assertEqual(d.state["active_bots"]["1"]["symbol"], "PUMP")
+
+    def test_rotation_aborts_when_stop_not_verified(self):
+        # stop reported ok but the bot is listed as still running → the
+        # incumbent must never be deleted
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "active"}]
+        ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertFalse(ok)
+        self.assertNotIn(("delete", "OLDBOT", False), self.ops)
+        self.assertEqual(d.state["active_bots"]["1"]["symbol"], "PUMP")
+
+    def test_rotation_proceeds_when_stopped_bot_unlisted(self):
+        # stop ok and the bot no longer appears in the status list →
+        # deleting an already-gone bot is harmless; rotation proceeds
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        self.grid_status_ret = []
+        ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertTrue(ok)
+        self.assertIn(("delete", "OLDBOT", False), self.ops)
+        self.assertIn(("create", "hyperliquid", False), self.ops)
+
+    def test_challenger_deploy_failure_after_delete_empties_slot(self):
+        # incumbent already removed; challenger create fails → rotation
+        # completes with a visible rotation-error and an empty slot that the
+        # next rescreen refills
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
+        with mock.patch("daemon.grid_adapter.grid_create",
+                        side_effect=lambda u, v, dry_run=True:
+                        {"ok": False, "error": "create rejected"}), \
+             mock.patch("daemon.time.sleep"):
+            ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertTrue(ok)  # incumbent WAS rotated out
+        self.assertNotIn("1", d.state["active_bots"])  # slot left empty
+        self.assertTrue(any(e.get("kind") == "rotation-error"
+                            for e in d.state["journal"]))
 
     # ── escalation ladder ────────────────────────────────────────────────
     def test_escalation_ladder_transitions(self):

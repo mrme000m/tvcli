@@ -41,7 +41,6 @@ llm:
   nvidia_model: "meta/llama-3.3-70b-instruct"
   openrouter_model: "arcee-ai/trinity-large-preview:free"
   max_calls_per_decision: 8
-  debate_rounds: 3
 
 policy:                        # history-derived per token; values here are bounds
   cooldown_min_h: 12.0

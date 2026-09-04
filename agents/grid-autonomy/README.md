@@ -128,7 +128,9 @@ Accuracy note: every fact below is verified against the code at
 
 | Path | Role |
 |------|------|
-| `daemon.py` | Scheduler + orchestrator + HTTP control plane (stdlib only). |
+| `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
+| `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
+| `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
 | `config.yaml` | Contract: portfolio, venues, providers, policy defaults. |
 | `screen/merge.py` | Parallel HL+Binance screen, confluence, 4h confirm. |
 | `agents/swarm.py` | TradingAgents deliberation swarm (rule fallback). |
@@ -144,7 +146,8 @@ Accuracy note: every fact below is verified against the code at
 | `policy/stagnation.py` | Per-token stagnation policy + slot allocator. |
 | `watch/spec.py` | Per-bot tvcli watch spec generator. |
 | `scripts/start.sh` / `stop.sh` | Start (CF env from `dsh web`) / stop (POST /kill). |
-| `tests/` | 125 offline unit tests (`python3 -m unittest`). |
+| `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
+| `tests/` | 129 offline unit tests (`python3 -m unittest`). |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -176,7 +179,7 @@ whether the daemon actually reads it:
 | `grid_defaults.band_atr` | ATR-band width `3.0`. | doc only (`grid_args` default) |
 | `grid_defaults.step_factor` | ATR→step multiplier `0.5`. | doc only (`grid_args` default) |
 | `grid_defaults.step_min` / `step_max` | Profit-per-grid clamp `0.1`–`2.0`. | doc only (`grid_args` default) |
-| `grid_defaults.min_grids` / `max_grids` | Grid-count bounds `5`–`30`. | doc only (`grid_args` default) |
+| `grid_defaults.min_grids` / `max_grids` | Grid-count bounds `5`–`30`, threaded into `grid_adapter.grid_args` by the daemon's density sizing. | yes (`min_grids`) / doc only (`max_grids`) |
 | `grid_defaults.dca_factor` | DCA order factor `1.5`. | doc only (`grid_args` default) |
 | `grid_defaults.stop_trigger` | `"stop_and_close_all"`. | doc only (hardcoded in `compute_upsert`) |
 | `grid_defaults.pump_protection` | `true`. | doc only (hardcoded `pumpProtection: true`) |
@@ -185,7 +188,6 @@ whether the daemon actually reads it:
 | `llm.nvidia_model` | `meta/llama-3.3-70b-instruct`. | env only (`NVIDIA_MODEL`) |
 | `llm.openrouter_model` | `arcee-ai/trinity-large-preview:free`. | env only (`OPENROUTER_MODEL`) |
 | `llm.max_calls_per_decision` | 8-call budget. | doc only (swarm hardcodes) |
-| `llm.debate_rounds` | `3`. | doc only (daemon uses 1 round) |
 | `policy.cooldown_min_h` / `cooldown_max_h` | 12–72h clamp. | doc only (stagnation.py constants) |
 | `policy.fill_ratio_stagnant` | `0.3` fill threshold. | doc only (stagnation.py constant) |
 | `policy.realized_ratio_stagnant` | `0.4` realized threshold. | doc only (stagnation.py constant) |
@@ -236,9 +238,15 @@ scripts/start.sh --live-paper
 **Smoke / one-shot:**
 
 ```sh
+scripts/smoke.sh                                          # dry-run E2E (wraps the line below)
 python3 daemon.py --once --no-confluence --top 5          # dry-run
 python3 daemon.py --once --live-paper --top 5             # paper
 ```
+
+`smoke.sh` is the repeatable dry-run E2E check: one full cycle (screen →
+deliberate → guard → deploy-plan) against live public market data with zero
+WunderTrading mutations. Use it after any config or code change before
+starting the daemon.
 
 CLI flags: `--once`, `--dry-run` (default on), `--live-paper`,
 `--no-confluence`, `--top N`, `--port N`.
@@ -364,11 +372,11 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-125 tests, all offline (network/browser calls are mocked or stubbed; state is
+129 tests, all offline (network/browser calls are mocked or stubbed; state is
 isolated in temp dirs). Expected output:
 
 ```
-Ran 125 tests in …
+Ran 129 tests in …
 OK
 ```
 

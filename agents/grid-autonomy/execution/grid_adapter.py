@@ -52,13 +52,16 @@ def market_for_exchange(exchange_code):
 
 
 def grid_args(symbol, venue, step_pct, slot_balance, max_alloc,
-              band_atr=3.0, step_factor=0.5):
-    """argparse-compatible namespace mirroring grid_config.py defaults."""
+              band_atr=3.0, step_factor=0.5, min_grids=5, max_grids=30):
+    """argparse-compatible namespace mirroring grid_config.py defaults.
+
+    `min_grids`/`max_grids` are the grid-count bounds the daemon threads
+    from config `grid_defaults` so adapter and daemon share one source."""
     return types.SimpleNamespace(
         symbol=symbol, exchange=venue, interval="1h", limit=300,
         market="futures" if venue == "hyperliquid" else "spot",
         band_atr=band_atr, step_factor=step_factor,
-        step_min=0.1, step_max=2.0, min_grids=5, max_grids=30,
+        step_min=0.1, step_max=2.0, min_grids=min_grids, max_grids=max_grids,
         balance=slot_balance, max_alloc=max_alloc,
         dca_factor=1.5, dca_orders=6, dca_vol_mult=1.4, dca_dev_mult=1.5,
         dca_tp=1.5, ttl=1440, client_id=None, pair_code=None, profiles=None,
@@ -121,7 +124,7 @@ def compute_upsert(symbol, venue, price, atr_pct, step_pct, grids,
 def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
                           profile_code, pair_code, exchange_code=None,
                           amount_precision=None, max_affordable_grids=None,
-                          min_cost=None):
+                          min_cost=None, min_grids=None):
     """grid_config math (ATR channel, step, sizing) + upsert translation.
 
     `exchange_code` (from the selected profile's exchange) overrides the
@@ -142,7 +145,8 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
     atr = m.get("atr_pct") or 0.0
     step_mult = ticket.get("step_mult", 1.0) or 1.0
     alloc_mult = ticket.get("max_alloc_mult", 1.0) or 1.0
-    args = grid_args(symbol, venue, 0, slot_balance, max_alloc * alloc_mult)
+    args = grid_args(symbol, venue, 0, slot_balance, max_alloc * alloc_mult,
+                     min_grids=5 if min_grids is None else min_grids)
     # regime evidence path: reuse build_grid/build_mcp shapes with live metrics
     spread = brief.get("spread_pct")
     grid = grid_config.build_grid(symbol, args, m, ticket.get("regime", "neutral"),

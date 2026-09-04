@@ -40,7 +40,8 @@ All commands from `agents/grid-autonomy/`.
 scripts/start.sh                # dry-run planning (default; creates nothing)
 scripts/start.sh --live-paper   # actually create paper bots
 scripts/stop.sh                 # POST /kill + SIGTERM (escalates to SIGKILL)
-python3 daemon.py --once --no-confluence --top 5   # one-shot smoke (dry-run)
+scripts/smoke.sh                # one-shot dry-run E2E smoke (live public data)
+python3 daemon.py --once --no-confluence --top 5   # one-shot smoke (same, explicit)
 ```
 
 Control plane on `:8799`:
@@ -80,7 +81,9 @@ from the `dsh web` process env and refuses to start without them.
 
 | Path | Role |
 |------|------|
-| `daemon.py` | Scheduler + orchestrator + HTTP ctl. |
+| `daemon.py` | Scheduler + orchestrator (Daemon class, the manage loop). |
+| `config_lite.py` | Stdlib-only YAML-subset parser. |
+| `ctl_http.py` | HTTP ctl plane on :8799 (health/status/rotate/kill). |
 | `config.yaml` | Portfolio, venues, policy defaults, port 8799. |
 | `screen/merge.py` | Parallel screen + confluence + 4h confirm. |
 | `agents/swarm.py`, `agents/reflect.py` | Deliberation + memory/run cards. |
@@ -89,7 +92,7 @@ from the `dsh web` process env and refuses to start without them.
 | `execution/grid_adapter.py`, `resolve.py` | Deploy payloads + pairCode. |
 | `execution/observe.py`, `reliability_grid.py` | Watch + reliability ledger. |
 | `policy/stagnation.py` | Stagnation policy + slot allocator. |
-| `scripts/start.sh`, `stop.sh` | Start/stop. |
+| `scripts/start.sh`, `stop.sh`, `smoke.sh` | Start / stop / one-shot dry-run smoke. |
 | `state/` | Runtime state, journal, reports, caches (not source). |
 
 ## Safety rails
@@ -105,4 +108,4 @@ from the `dsh web` process env and refuses to start without them.
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` → 125 offline tests.
+- Tests: `python3 -m unittest discover -s tests -t .` → 129 offline tests.

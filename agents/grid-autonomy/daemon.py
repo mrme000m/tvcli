@@ -35,7 +35,6 @@ import threading
 import time
 import traceback
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, HTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -54,6 +53,8 @@ from swarm import deliberate  # noqa: E402
 from guardrails import deploy as guard_deploy  # noqa: E402
 import grid_adapter  # noqa: E402
 from spec import build_spec  # noqa: E402
+from config_lite import deep_merge, load_yaml  # noqa: E402
+from ctl_http import serve_ctl  # noqa: E402
 
 # ── Worker A defensive imports ────────────────────────────────────────
 try:
@@ -132,6 +133,10 @@ PROFILE_DENYLIST = {"c629f5ba3a643a82137e7864"}
 # Hyperliquid, 5-50 USDT on Binance markets).
 MIN_USD_PER_GRID = 10.0
 
+# Bot statuses accepted as "verified stopped" before a rotation may delete
+# the incumbent. Anything else (active, stopping, …) keeps it alive.
+STOPPED_STATES = {"stopped", "stopped_and_close_all", "closed"}
+
 STATE_PATH = os.path.join(HERE, "state", "state.json")
 SPECS_DIR = os.path.join(HERE, "watch", "specs")  # patchable in tests
 DEFAULT_STATE = {
@@ -168,146 +173,7 @@ DEFAULT_CONFIG = {
     "server": {"daemon_port": 8799},
 }
 
-# ── minimal YAML subset loader (stdlib-only; handles this repo's config) ──
-
-def _strip_yaml_comment(line):
-    in_s = in_d = False
-    for i, ch in enumerate(line):
-        if ch == "'" and not in_d:
-            in_s = not in_s
-        elif ch == '"' and not in_s:
-            in_d = not in_d
-        elif ch == "#" and not in_s and not in_d:
-            return line[:i]
-    return line
-
-
-def _yaml_split_kv(s):
-    depth = 0
-    in_s = in_d = False
-    for i, ch in enumerate(s):
-        if ch == "'" and not in_d:
-            in_s = not in_s
-        elif ch == '"' and not in_s:
-            in_d = not in_d
-        elif ch in "[{":
-            depth += 1
-        elif ch in "]}":
-            depth -= 1
-        elif ch == ":" and depth == 0 and not in_s and not in_d:
-            return s[:i].strip(), s[i + 1:].strip()
-    return s.strip(), ""
-
-
-def _yaml_split_flow(s):
-    parts = []
-    depth = 0
-    in_s = in_d = False
-    cur = ""
-    for ch in s:
-        if ch == "'" and not in_d:
-            in_s = not in_s
-        elif ch == '"' and not in_s:
-            in_d = not in_d
-        elif not in_s and not in_d:
-            if ch in "[{":
-                depth += 1
-            elif ch in "]}":
-                depth -= 1
-            elif ch == "," and depth == 0:
-                parts.append(cur.strip())
-                cur = ""
-                continue
-        cur += ch
-    if cur.strip():
-        parts.append(cur.strip())
-    return parts
-
-
-def _yaml_scalar(s):
-    s = s.strip()
-    if s in ("true", "True", "TRUE"):
-        return True
-    if s in ("false", "False", "FALSE"):
-        return False
-    if s in ("null", "Null", "NULL", "~", ""):
-        return None
-    if len(s) >= 2 and s[0] == s[-1] and s[0] in "'\"":
-        return s[1:-1]
-    if s.startswith("["):
-        inner = s[1:-1].strip()
-        return [_yaml_scalar(t) for t in _yaml_split_flow(inner)] if inner else []
-    if s.startswith("{"):
-        inner = s[1:-1].strip()
-        out = {}
-        if inner:
-            for tok in _yaml_split_flow(inner):
-                k, v = _yaml_split_kv(tok)
-                out[_yaml_scalar(k)] = _yaml_scalar(v)
-        return out
-    try:
-        if "." in s or "e" in s.lower():
-            return float(s)
-        return int(s)
-    except ValueError:
-        return s
-
-
-def _yaml_block(lines, pos, indent):
-    content = lines[pos][1]
-    if content.startswith("- "):
-        seq = []
-        i = pos
-        while i < len(lines) and lines[i][0] == indent and lines[i][1].startswith("- "):
-            item = lines[i][1][2:].strip()
-            i += 1
-            if item == "" and i < len(lines) and lines[i][0] > indent:
-                val, i = _yaml_block(lines, i, lines[i][0])
-                seq.append(val)
-            else:
-                seq.append(_yaml_scalar(item))
-        return seq, i
-    out = {}
-    i = pos
-    while i < len(lines) and lines[i][0] == indent and not lines[i][1].startswith("- "):
-        key, rest = _yaml_split_kv(lines[i][1])
-        i += 1
-        if rest == "":
-            if i < len(lines) and lines[i][0] > indent:
-                val, i = _yaml_block(lines, i, lines[i][0])
-            else:
-                val = None
-        else:
-            val = _yaml_scalar(rest)
-        out[key] = val
-    return out, i
-
-
-def load_yaml(text):
-    """Parse the YAML subset used by config.yaml → nested dict/list."""
-    lines = []
-    for raw in text.splitlines():
-        if not raw.strip():
-            continue
-        stripped = _strip_yaml_comment(raw)
-        if not stripped.strip():
-            continue
-        indent = len(stripped) - len(stripped.lstrip(" "))
-        lines.append((indent, stripped.strip()))
-    if not lines:
-        return {}
-    value, _ = _yaml_block(lines, 0, lines[0][0])
-    return value or {}
-
-
-def _deep_merge(base, override):
-    out = dict(base)
-    for k, v in (override or {}).items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
-            out[k] = _deep_merge(out[k], v)
-        else:
-            out[k] = v
-    return out
+# ── config loading (YAML subset parser lives in config_lite.py) ───────
 
 
 def load_config(path=None):
@@ -316,7 +182,7 @@ def load_config(path=None):
     if os.path.isfile(p):
         try:
             with open(p) as f:
-                cfg = _deep_merge(cfg, load_yaml(f.read()) or {})
+                cfg = deep_merge(cfg, load_yaml(f.read()) or {})
         except Exception as exc:
             print(f"config load failed ({exc}) — using defaults", flush=True)
     return cfg
@@ -703,6 +569,10 @@ class Daemon:
         self.reliability = reliability_load_safe()
         self.state["profiles"] = self.profiles
         self.state["reliability"] = self.reliability
+        self.capabilities = {
+            "resolve": HAS_RESOLVE, "observe": HAS_OBSERVE,
+            "reliability": HAS_RELIABILITY, "reflect": HAS_REFLECT,
+        }
         self._lock = threading.Lock()
         self._rescreen_flag = False
 
@@ -831,7 +701,8 @@ class Daemon:
                     ticket, brief, slot["balance"], cap, profile["code"],
                     pair_code, exchange_code=exch,
                     amount_precision=amount_precision,
-                    max_affordable_grids=fit_grids, min_cost=min_cost)
+                    max_affordable_grids=fit_grids, min_cost=min_cost,
+                    min_grids=min_grids)
                 sizing = payloads["grid_bot"].get("sizing") or {}
                 new_worst = sizing.get("total_commitment_estimate") or 0.0
                 log(self.state, {"kind": "size-fit",
@@ -1304,13 +1175,31 @@ class Daemon:
                 gs = grid_status_safe()
                 for b in gs:
                     if b.get("code") == bot_code:
-                        status_res = {"ok": True, "status": b.get("status")}
+                        st = (b.get("status") or "").lower()
+                        status_res = {"ok": st in STOPPED_STATES,
+                                      "status": st}
                         break
             except Exception as exc:
                 status_res = {"ok": False, "error": str(exc)[:160]}
-        if not (status_res or {}).get("ok"):
+        if not dry_run and not (stop_res or {}).get("ok"):
+            log(self.state, {"kind": "rotation-veto", "slot": slot_key,
+                             "msg": f"stop failed for {bot_code} — incumbent "
+                                    f"kept, challenger not deployed"})
+            return False
+        if not dry_run and status_res is not None and \
+                not status_res.get("ok"):
+            # bot listed but still running — never delete a live bot
+            log(self.state, {"kind": "rotation-veto", "slot": slot_key,
+                             "msg": f"stop not verified for {bot_code} "
+                                    f"(status={status_res.get('status')}) — "
+                                    f"incumbent kept"})
+            return False
+        if status_res is None and not dry_run:
+            # stop reported ok but the bot is not listed — deletion of an
+            # already-gone bot is harmless, so proceed with a warning
             log(self.state, {"kind": "rotation-warn", "slot": slot_key,
-                             "msg": f"could not verify stop for {bot_code}"})
+                             "msg": f"could not verify stop for {bot_code} "
+                                    f"(not listed) — proceeding"})
         del_res = retry_grid_call(grid_adapter.grid_delete, dry_run, bot_code,
                                   dry_run=dry_run)
         log(self.state, {"kind": "rotation-delete", "slot": slot_key,
@@ -1341,6 +1230,16 @@ class Daemon:
         incumbent.pop("force_rotate", None)
         self.commit_deploy(action, ticket, payloads, brief, challenger, slot,
                            dry_run)
+        if not dry_run and str(slot["slot"]) not in self.state["active_bots"]:
+            # challenger create failed after the incumbent was removed:
+            # the slot stays empty and the next rescreen refills it — make
+            # the gap visible instead of logging a plain success
+            log(self.state, {"kind": "rotation-error", "slot": slot_key,
+                             "msg": f"challenger "
+                                    f"{challenger.get('venue')}:"
+                                    f"{challenger.get('symbol')} deploy "
+                                    f"failed after incumbent removal — slot "
+                                    f"left empty, next rescreen will refill"})
         log(self.state, {"kind": "rotate", "slot": slot_key,
                          "msg": f"{key} → {challenger.get('venue')}:"
                                 f"{challenger.get('symbol')} "
@@ -1523,76 +1422,6 @@ class Daemon:
             nxt = min(next_health, next_rescreen, next_reliability)
             time.sleep(max(1.0, min(10.0, nxt - time.time())))
 
-
-# ── HTTP control plane ──────────────────────────────────────────────────
-class Ctl(BaseHTTPRequestHandler):
-    daemon = None
-
-    def _json(self, code, obj):
-        body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-    def do_GET(self):
-        st = self.daemon.state
-        if self.path == "/health":
-            self._json(200, {"status": "ok", "at": utcnow(),
-                             "kill": os.path.exists(os.path.join(HERE, "KILL"))})
-        elif self.path == "/status":
-            self._json(200, {"slots": st["slots"], "active_bots": st["active_bots"],
-                             "committed": st["committed"],
-                             "live_allow": st["live_allow"],
-                             "profiles": st.get("profiles", []),
-                             "capabilities": {
-                                 "resolve": HAS_RESOLVE,
-                                 "observe": HAS_OBSERVE,
-                                 "reliability": HAS_RELIABILITY,
-                                 "reflect": HAS_REFLECT},
-                             "last_cycle": st.get("last_cycle"),
-                             "journal_tail": st["journal"][-10:]})
-        elif self.path == "/reliability":
-            self._json(200, {"reliability": st["reliability"]})
-        elif self.path == "/observe":
-            self._json(200, {"observe": st.get("last_observe", {})})
-        else:
-            self._json(404, {"error": "unknown path"})
-
-    def do_POST(self):
-        if self.path == "/kill":
-            open(os.path.join(HERE, "KILL"), "w").write(utcnow())
-            self._json(200, {"killed": True})
-        elif self.path == "/rescreen":
-            self.daemon.queue_rescreen()
-            self._json(200, {"queued": True})
-        elif self.path == "/rotate":
-            length = int(self.headers.get("Content-Length", 0))
-            body = json.loads(self.rfile.read(length) or b"{}")
-            slot = body.get("slot")
-            if slot is None:
-                self._json(400, {"error": "missing slot"})
-                return
-            sk = str(slot)
-            bot = self.daemon.state["active_bots"].get(sk)
-            if bot is None:
-                self._json(404, {"error": f"no active bot in slot {slot}"})
-                return
-            bot["force_rotate"] = True
-            self.daemon.queue_rescreen()  # rotation is evaluated on rescreen
-            self._json(200, {"queued": True, "slot": slot,
-                             "symbol": bot.get("symbol")})
-        else:
-            self._json(404, {"error": "unknown path"})
-
-    def log_message(self, *a):
-        pass
-
-
-def serve_ctl(daemon, port):
-    Ctl.daemon = daemon
-    HTTPServer(("127.0.0.1", port), Ctl).serve_forever()
 
 
 def main():
