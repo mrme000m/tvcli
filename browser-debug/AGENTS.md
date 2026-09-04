@@ -1,5 +1,19 @@
 # AGENTS.md — minimal-mjs (portable CloakBrowser launcher)
 
+## The mission
+
+This directory is a **web-platform reverse-engineering factory**: the bdg +
+cloak browser system exists so agents can investigate a web platform's
+interface UX and its corresponding network-layer API, discover how it really
+works, and codify that into reverse-engineered APIs for programmatic usage —
+dsh plugins and CLI tools (`tv.mjs`, `wt.mjs`) that other agents and scripts
+use and reuse for automation. TradingView and WunderTrading are the worked
+examples; the repeatable loop (SCOUT → INVESTIGATE → CODIFY → FORGE →
+IMPROVE) is codified in the `web-discovery` skill
+(`../.agents/skills/web-discovery/`), and the `web-discovery` fleet preset
+(`../bootstrapping/presets/web-discovery/`) turns a prime-orchestrator agent
+into a dedicated discovery + tool-forging worker.
+
 `launch.mjs` downloads + launches the stealth-patched CloakBrowser Chromium,
 headful, with CDP on port 9222 (or next free). Usage: `node launch.mjs [--force]`,
 profile via `CB_PROFILE=<dir>`.
@@ -119,6 +133,17 @@ Alt+G/R=go-to-date/reset-view, Alt+I/L/P=scale, Alt+C/F/H/J/T/V=drawing tools.
 Screenshot the chart reliably with CDP `Page.captureScreenshot`.
 Hotkeys only fire when focus is NOT on an input (blur `document.activeElement`
 first — a stray input silently eats hotkeys).
+
+## WunderTrading programmatic access — `wt.mjs`
+
+`node wt.mjs` restores the vault-persisted WunderTrading session in the
+headful browser and wraps the fingerprint-gated trader XHR surface via
+fetch-in-page (`api`), page eval (`eval`), screenshots (`shot`), and — for
+endpoint discovery — `record [seconds] [--out file]`, which captures all
+XHR/fetch traffic while the UI is driven and prints an endpoint summary
+(method, path, statuses, counts) plus a full JSON dump in `dumps/`. See the
+web-discovery skill for the loop that turns a `record` capture into codified
+API docs and tooling.
 
 ## Vision tool (Mistral) — understand UI changes from screenshots
 

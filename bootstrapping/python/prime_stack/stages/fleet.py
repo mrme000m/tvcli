@@ -9,6 +9,9 @@ Implements the autonomous grid-trading loop blueprint
   wt-investigator configure (WunderTrading bots — Grid/DCA/Signal/
                   Multi-Pair Grid — via wt CLI, REST, MCP, headful UI)
   tv-scout        confirm (visual confluence on the live chart)
+  web-discovery   platform reverse-engineering (UX + network layer ->
+                  codified API docs, platform CLIs, skills, plugin rows,
+                  fleet presets — improved during and after usage)
   prime-orchestrator  coordinate/manage (fleet + prime-agent workers)
 
 Sub-stages (one CLI stage / playbook tag each):
@@ -93,6 +96,11 @@ def run_presets(cfg: Config, ctx: Context) -> StageResult:
             statuses[name] = "preserved: user-owned (no prime-stack marker)"
             warnings.append(f"{name}: user-owned (no marker) — preserved untouched")
             continue
+        else:
+            # no marker AND no destination dir: a brand-new vendored preset —
+            # install it fresh (previously misclassified as user-owned, which
+            # made the "installed" path unreachable).
+            marker_doc = {"managedBy": cfg.fleet_managed_by, "files": {}}
 
         status = preset_marker_status(marker_doc, plan["files"], cfg.fleet_managed_by)
         if status == "unchanged":
@@ -116,7 +124,7 @@ def run_presets(cfg: Config, ctx: Context) -> StageResult:
     return StageResult(
         STAGE_PRESETS, changed=changed, warnings=warnings,
         details={"presets": statuses},
-        summary_line="fleet presets (tv-scout, tv-investigator, wt-investigator): "
+        summary_line="fleet presets (" + ", ".join(cfg.fleet_presets) + "): "
         + ("installed/updated this run" if changed else "present or user-preserved"),
     )
 

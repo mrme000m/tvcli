@@ -25,7 +25,8 @@ bootstrapping/
 ├── presets/                vendored specialist agent presets (fleet tag)
 │   ├── tv-scout/           visual confluence on the live chart
 │   ├── tv-investigator/    multi-session TV network-API screening + research
-│   └── wt-investigator/    WunderTrading bot configuration + management
+│   ├── wt-investigator/    WunderTrading bot configuration + management
+│   └── web-discovery/      web-platform reverse-engineering + tool forging
 └── docs/
     └── grid-fleet.md       the autonomous grid-trading loop blueprint
 ```
@@ -93,7 +94,7 @@ Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 | `prime-agent` CLI | Prime Intellect agent CLI (self-contained) | `~/.local/bin/prime-agent` |
 | CF Workers AI config | dsh `~/.dsh/settings.yaml` + prime-agent `~/.prime/agent/{models,auth,settings}.json`, all Cloudflare-account templated from env | `~/.dsh`, `~/.prime/agent` |
 | parity plugins | dsh-mnemon, pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client, pi-agent-memory, vendored dsh-restart | profile `web` |
-| specialist fleet | tv-scout, tv-investigator, wt-investigator + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve) | `$DSH_HOME/.agent-presets/` + web profile patch |
+| specialist fleet | tv-scout, tv-investigator, wt-investigator, web-discovery + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve) | `$DSH_HOME/.agent-presets/` + web profile patch |
 
 Default model: **`@cf/zai-org/glm-5.3`** on provider `cloudflare-workers-ai`,
 `defaultThinkingLevel: high`. The model catalog lives ONLY in

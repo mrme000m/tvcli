@@ -51,7 +51,7 @@ MOBILE_GATEWAY_PORT = 3443
 
 # --- fleet ------------------------------------------------------------------
 
-FLEET_PRESETS = ["tv-scout", "tv-investigator", "wt-investigator"]
+FLEET_PRESETS = ["tv-scout", "tv-investigator", "wt-investigator", "web-discovery"]
 FLEET_MANAGED_BY = "prime-stack-bootstrap"
 FLEET_PRESET_MARKER = ".plugin-managed.json"
 FLEET_PRESET_FILES = ["preset.yml", "agent.cordis.yml"]

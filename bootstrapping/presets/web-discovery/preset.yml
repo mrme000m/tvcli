@@ -1,0 +1,10 @@
+name: Web Platform Discovery
+description: >
+  Web-platform reverse-engineering agent: drives the headful stealth
+  CloakBrowser (bdg CDP telemetry) to investigate any platform's interface UX
+  and its network-layer API (XHR/REST, WebSocket, cookies, fingerprints),
+  verifies findings live, and codifies them into reverse-engineered API docs,
+  reusable platform CLI tools, agent skills, dsh plugin rows, and fleet
+  presets — improving the artifacts from usage feedback (proven on
+  TradingView and WunderTrading).
+order: 22

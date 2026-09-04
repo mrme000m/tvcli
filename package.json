@@ -20,7 +20,8 @@
       ".agents/skills/pine2tool",
       ".agents/skills/openknowledge",
       ".agents/skills/codespace-prime-stack",
-      ".agents/skills/wundertrading"
+      ".agents/skills/wundertrading",
+      ".agents/skills/web-discovery"
     ],
     "subagents": {
       "agents": [

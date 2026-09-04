@@ -50,10 +50,11 @@ playbook §5).
 | `tv-investigator` | Research + screening at scale: multi-session TradingView network API, protocol capture, tvcli extension, regime ranking | bdg `tv` command group, tvcli `/hunt`, skill-filesystem |
 | `wt-investigator` | Configure + manage WunderTrading bots: grid/DCA/signal config, exchange setup, API keys, backtesting UI | wt_* tools (wt CLI: session/login/browse/api/apikey/mcp), mcp-wundertrading row, bdg |
 | `tv-scout` | Confirm: render the thesis on the live chart, screenshot, vision confluence | tvvisual (CloakBrowser + CDP), tvcli, skill-filesystem |
+| `web-discovery` | Reverse-engineer: investigate any platform's UX + network API (bdg+cloak), codify verified findings, forge platform CLIs/skills/plugin rows/presets, improve them on drift | launch.mjs + bdg daemon, `record`-capable platform CLIs (wt.mjs), web-discovery skill |
 
 All presets discover the workspace skills (tvcli, pine2tool, tv-scout,
-tv-usecases, tv-watch, wundertrading, wt-network from the plugin) through
-`skill-filesystem` local roots when working in the repo.
+tv-usecases, tv-watch, wundertrading, web-discovery, wt-network from the
+plugin) through `skill-filesystem` local roots when working in the repo.
 
 ## Screening: parallel TV sessions with cookies
 

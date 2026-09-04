@@ -19,7 +19,7 @@ PATH, and Cloudflare Workers AI as the LLM provider.
 | `dsh` CLI (npm global, exact `0.1.1-rc.2`) | `/usr/local/share/nvm/current/bin/dsh` — **resets on every codespace rebuild; the playbook reinstalls it** |
 | dsh profile `web` (bundles: `dsh-base`, `dsh-web-app`, `dsh-prime-orchestrator`) | `~/.dsh/profiles/web/` |
 | `prime-orchestrator` agent preset (plugin-managed, sha256 marker) | `~/.dsh/.agent-presets/prime-orchestrator/` |
-| Specialist fleet presets (vendored, marker `managedBy: prime-stack-bootstrap`) — tv-scout, tv-investigator, wt-investigator | `~/.dsh/.agent-presets/<name>/` (sources: `bootstrapping/presets/`) |
+| Specialist fleet presets (vendored, marker `managedBy: prime-stack-bootstrap`) — tv-scout, tv-investigator, wt-investigator, web-discovery | `~/.dsh/.agent-presets/<name>/` (sources: `bootstrapping/presets/`) |
 | Grid-fleet profile rows: `mcp-wundertrading` MCP + `wt-tools` cloakDir override (keys templated from vault at provision time, mode 0600) | `~/.dsh/profiles/web/cordis.patch.yml` |
 | WunderTrading runtime env (vault item `wundertrading-api`: WT_API_KEY / WT_API_SECRET) | `browser-debug/secrets/runtime/wt.env` |
 | tvcli multi-account server autostart marker (`.tvcli-autoserve` → `/hunt` fan-out over the accounts.json pool on :8765) | repo root |
@@ -66,6 +66,9 @@ in [bootstrapping/docs/grid-fleet.md](../../bootstrapping/docs/grid-fleet.md):
 - **manage** — prime-orchestrator reacting to `tvcli watch` triggers
   (edit/swing/close/cancel + reliability exports)
 - **confirm** — tv-scout (visual confluence on the live chart)
+- **reverse-engineer** — web-discovery (bdg+cloak investigation of any
+  platform's UX + network API → codified API docs, platform CLIs, skills,
+  plugin rows, fleet presets; improves them on drift)
 
 Presets are marker-preserved: a preset dir without the
 `prime-stack-bootstrap` marker is user-owned and never overwritten; vendored

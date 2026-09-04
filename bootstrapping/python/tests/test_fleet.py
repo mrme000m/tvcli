@@ -3,8 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from prime_stack.config import Config
+from prime_stack.core import Context
 from prime_stack.stages.fleet import (load_env_file, preset_marker_status,
-                                      upsert_grid_rows)
+                                      run_presets, upsert_grid_rows)
 
 
 class PresetMarkerTests(unittest.TestCase):
@@ -59,6 +61,50 @@ class EnvFileTests(unittest.TestCase):
     def test_load_env_file(self):
         keys = load_env_file("# comment\nWT_API_KEY=abc\n WT_API_SECRET = def\nEMPTY=\n")
         self.assertEqual(keys, {"WT_API_KEY": "abc", "WT_API_SECRET": "def", "EMPTY": ""})
+
+
+
+class RunPresetsTests(unittest.TestCase):
+    """run_presets marker semantics end-to-end (incl. the fresh-install path)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.ws = self.root / "workspace"
+        self.src = self.ws / "bootstrapping" / "presets"
+        self.home = self.root / "home"
+        self.dsh = self.home / ".dsh"
+        self.src.mkdir(parents=True)
+        self.dsh.mkdir(parents=True)
+        for n in ("demo", "userdir"):
+            (self.src / n).mkdir()
+            (self.src / n / "preset.yml").write_text(f"name: {n}\norder: 1\ndescription: >\n  uses @TV_WORKSPACE@\n")
+            (self.src / n / "agent.cordis.yml").write_text("# agent @CLOAK_DIR@\n")
+        self.cfg = Config(workspace=self.ws, home=self.home, dsh_home=self.dsh)
+        self.cfg.fleet_presets = ["demo", "userdir"]
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def test_fresh_preset_installs_then_converges(self):
+        r1 = run_presets(self.cfg, Context())
+        self.assertEqual(r1.details["presets"]["demo"], "installed")
+        self.assertTrue(r1.changed)
+        text = (self.cfg.preset_root / "demo" / "preset.yml").read_text()
+        self.assertIn(str(self.ws), text)  # placeholders rendered
+        marker = json.loads((self.cfg.preset_root / "demo" / self.cfg.fleet_preset_marker).read_text())
+        self.assertEqual(marker["managedBy"], "prime-stack-bootstrap")
+        r2 = run_presets(self.cfg, Context())
+        self.assertEqual(r2.details["presets"]["demo"], "unchanged")
+        self.assertFalse(r2.changed)
+
+    def test_user_dir_without_marker_is_preserved(self):
+        dst = self.cfg.preset_root / "userdir"
+        dst.mkdir(parents=True)
+        (dst / "preset.yml").write_text("name: user-owned\n")
+        r = run_presets(self.cfg, Context())
+        self.assertEqual(r.details["presets"]["userdir"], "preserved: user-owned (no prime-stack marker)")
+        self.assertEqual((dst / "preset.yml").read_text(), "name: user-owned\n")
 
 
 if __name__ == "__main__":

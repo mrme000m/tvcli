@@ -14,6 +14,14 @@
 //   node wt.mjs api <METHOD> <path> [bodyJSON]   # session-auth API call via page fetch
 //   node wt.mjs eval '<js expression>'    # eval JS in page (awaitPromise, JSON out)
 //   node wt.mjs shot [file.png]           # screenshot (default shots/wt-<ts>.png)
+//   node wt.mjs record [seconds] [--out file]    # capture XHR/fetch while the UI is driven;
+//                                          # endpoint summary + full dump (default dumps/)
+//
+// Discovery loop (web-discovery skill): `record` while clicking through the
+// cabinet → endpoint summary → replay candidates with `api` → codify verified
+// endpoints into the skill/docs. The platform CLI template
+// (.agents/skills/web-discovery/templates/platform-cli.mjs) generalizes this
+// file to any platform.
 //
 // Session cookies: ./secrets/runtime/wt-session.env (vault item
 // `wundertrading-session`, materialized by bw-provision.sh — see
@@ -33,10 +41,10 @@ const DEFAULT_URL = 'https://wundertrading.com/en/trader/grid_bots';
 const WT_ORIGIN = 'https://wundertrading.com';
 
 const [cmd, ...rest] = process.argv.slice(2);
-const command = (cmd && !cmd.startsWith('http') && !['open', 'api', 'eval', 'shot'].includes(cmd))
+const command = (cmd && !cmd.startsWith('http') && !['open', 'api', 'eval', 'shot', 'record'].includes(cmd))
   ? null // treat as URL or default
   : cmd;
-const USAGE = `usage: node wt.mjs [open <url> | api <METHOD> <path> [bodyJSON] | eval '<js>' | shot [file] | <url>]`;
+const USAGE = `usage: node wt.mjs [open <url> | api <METHOD> <path> [bodyJSON] | eval '<js>' | shot [file] | record [seconds] [--out file] | <url>]`;
 
 // ── session env (vault materialized) ────────────────────────────────────────
 function parseEnv(p) {
@@ -98,9 +106,12 @@ async function connectPage(port) {
   const ws = new WebSocket(page.webSocketDebuggerUrl);
   let id = 0;
   const pending = new Map();
+  const events = [];            // CDP Network.* events while recording (wt record)
+  let recording = false;
   ws.onmessage = (ev) => {
     const m = JSON.parse(ev.data);
-    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
+    if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); return; }
+    if (recording && m.method) events.push(m);
   };
   await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
   const send = (method, params = {}) => new Promise((res) => {
@@ -108,7 +119,49 @@ async function connectPage(port) {
     pending.set(i, res);
     ws.send(JSON.stringify({ id: i, method, params }));
   });
-  return { page, send };
+  return { page, send, events, setRecording: (v) => { recording = v; } };
+}
+
+// ── network recording → endpoint discovery ──────────────────────────────────
+async function record(seconds, outFile, send, setRecording, getEvents) {
+  setRecording(true);
+  await send('Network.enable');
+  console.error(`recording ${seconds}s of WunderTrading network traffic — drive the UI now…`);
+  await new Promise((r) => setTimeout(r, seconds * 1000));
+  setRecording(false);
+  const reqs = new Map();   // requestId -> {url, method, type, status, mimeType}
+  for (const m of getEvents()) {
+    if (m.method === 'Network.requestWillBeSent') {
+      const p = m.params;
+      reqs.set(p.requestId, { url: p.request.url, method: p.request.method, type: p.type, initiator: p.initiator?.type });
+    } else if (m.method === 'Network.responseReceived') {
+      const e = reqs.get(m.params.requestId);
+      if (e) { e.status = m.params.response.status; e.mimeType = m.params.response.mimeType; }
+    }
+  }
+  const byEndpoint = new Map();
+  for (const r of reqs.values()) {
+    let u; try { u = new URL(r.url); } catch { continue; }
+    const key = `${r.method} ${u.origin}${u.pathname}`;
+    const e = byEndpoint.get(key) || { count: 0, statuses: [], types: new Set() };
+    e.count++;
+    if (r.status && !e.statuses.includes(r.status)) e.statuses.push(r.status);
+    if (r.type) e.types.add(r.type);
+    byEndpoint.set(key, e);
+  }
+  const rows = [...byEndpoint.entries()].sort((a, b) => b[1].count - a[1].count);
+  for (const [key, e] of rows) {
+    console.log(`${String(e.count).padStart(4)}x  ${key}  [${e.statuses.join(',') || '?'}] ${[...e.types].join(',')}`);
+  }
+  const dump = {
+    capturedAt: new Date().toISOString(),
+    seconds,
+    endpoints: rows.map(([key, e]) => ({ endpoint: key, count: e.count, statuses: e.statuses, types: [...e.types] })),
+    requests: [...reqs.values()].map((r) => ({ ...r, cookies: undefined })),
+  };
+  mkdirSync(dirname(outFile), { recursive: true });
+  writeFileSync(outFile, JSON.stringify(dump, null, 2));
+  console.error(`\n${rows.length} endpoints, ${reqs.size} requests -> ${outFile}`);
 }
 
 async function restoreSession(send) {
@@ -181,7 +234,7 @@ async function apiCall(send, method, path, body) {
 // ── commands ────────────────────────────────────────────────────────────────
 async function main() {
   const port = await ensureBrowser();
-  const { page, send } = await connectPage(port);
+  const { send, setRecording, events } = await connectPage(port);
   await restoreSession(send);
 
   // default / bare URL: launch + open page + report auth
@@ -227,6 +280,19 @@ async function main() {
     const r = await send('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
     const v = r.result?.result?.value;
     console.log(typeof v === 'string' ? v : JSON.stringify(v, null, 2));
+    process.exit(0);
+  }
+
+  if (command === 'record') {
+    let seconds = 30;
+    const rest2 = [...rest];
+    const outIdx = rest2.indexOf('--out');
+    const outFile = outIdx >= 0 ? rest2[outIdx + 1] : null;
+    if (outIdx >= 0) rest2.splice(outIdx, 2);
+    if (rest2[0] && /^\d+$/.test(rest2[0])) seconds = parseInt(rest2[0], 10);
+    await record(seconds,
+      outFile || join(SCRIPT_DIR, 'dumps', `wt-net-${new Date().toISOString().replace(/[:.]/g, '-')}.json`),
+      send, setRecording, () => events);
     process.exit(0);
   }
 
