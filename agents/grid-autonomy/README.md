@@ -139,6 +139,7 @@ Accuracy note: every fact below is verified against the code at
 | `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
 | `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
 | `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
+| `console/` | **Mission console** — web UI + additive API on :8798 for observing the fleet (channel-ladder slot cards, decision ledger, run cards, reliability, logs), editing config.yaml (whitelisted, comment-preserving), and dev control (rescreen/rotate/KILL/start/stop/restart). See `console/README.md`. |
 | `config.yaml` | Contract: portfolio, venues, providers, policy defaults. |
 | `screen/merge.py` | Parallel HL+Binance screen, confluence, 4h confirm. |
 | `agents/swarm.py` | TradingAgents deliberation swarm (rule fallback). |
@@ -318,6 +319,21 @@ rm  -f agents/grid-autonomy/KILL  # clear before restarting
 
 The daemon checks the KILL file every loop tick, on startup, and refuses to
 start while it is present.
+
+**Mission console (web UI, port 8798):**
+
+```sh
+python3 console/server.py         # open http://127.0.0.1:8798
+```
+
+A full observation / configuration / dev-control dashboard over the same
+state the ctl plane serves: channel-ladder slot cards with live price
+cursors, the decision ledger with outcomes, run cards, the reliability
+ledger with sizing tiers, a whitelisted config.yaml editor
+(comment-preserving, backup kept), log tail, and the same ctl actions
+(rescreen / rotate / KILL / start / stop / restart, all confirm-gated).
+Purely additive — the daemon is untouched. Full reference:
+`console/README.md`.
 
 ## Paper → live escalation
 

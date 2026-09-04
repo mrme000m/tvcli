@@ -49,6 +49,7 @@ scripts/start.sh --live-paper   # actually create paper bots
 scripts/stop.sh                 # POST /kill + SIGTERM (escalates to SIGKILL)
 scripts/smoke.sh                # one-shot dry-run E2E smoke (live public data)
 python3 daemon.py --once --no-confluence --top 5   # one-shot smoke (same, explicit)
+python3 console/server.py       # mission console UI on :8798 (observe/configure/control)
 ```
 
 Control plane on `:8799`:
@@ -104,6 +105,7 @@ volume).
 | `daemon.py` | Scheduler + orchestrator (Daemon class, the manage loop). |
 | `config_lite.py` | Stdlib-only YAML-subset parser. |
 | `ctl_http.py` | HTTP ctl plane on :8799 (health/status/rotate/kill). |
+| `console/` | Mission console on :8798 — web UI (fleet/ladder cards, decision ledger, run cards, reliability, config editor, logs) + JSON API over the same state; whitelisted config.yaml edits and confirm-gated daemon lifecycle ops (`console/README.md`). |
 | `config.yaml` | Portfolio, venues, policy defaults, port 8799. |
 | `screen/merge.py` | Parallel screen + confluence + 4h confirm. |
 | `agents/swarm.py`, `agents/reflect.py` | Deliberation + memory/run cards. |

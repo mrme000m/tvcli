@@ -7,3 +7,9 @@ KILL
 
 # Re-include committed test fixtures (root .gitignore has a global *.json rule)
 !tests/fixtures/*.json
+
+# console config backup (runtime artifact)
+config.yaml.bak
+
+# PocketBase runtime install (33MB binary + pb_data + pb.env secrets)
+.pocketbase/

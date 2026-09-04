@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>grid/autonomy — mission console</title>
+  <meta name="description" content="Observation, configuration and dev control for the autonomous paper grid-trading fleet.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23F1F4EF'/%3E%3Cpath d='M6 10h20M6 16h20M6 22h20' stroke='%23182420' stroke-width='2.4'/%3E%3Cpath d='M16 4v24' stroke='%230A7E6D' stroke-width='2.4'/%3E%3C/svg%3E">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="topbar-row">
+    <div class="brand">
+      <span class="brand-title">grid<span class="slash">/</span>autonomy</span>
+      <span class="brand-sub">mission console · paper fleet</span>
+    </div>
+    <div class="statusbar" id="statusbar" aria-live="polite">
+      <span class="chip"><span class="dot"></span>connecting…</span>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist" aria-label="Console views">
+    <button class="tab" role="tab" id="tab-fleet" aria-selected="true" aria-controls="view-fleet">Fleet</button>
+    <button class="tab" role="tab" id="tab-decisions" aria-selected="false" aria-controls="view-decisions">Decisions</button>
+    <button class="tab" role="tab" id="tab-reports" aria-selected="false" aria-controls="view-reports">Run cards</button>
+    <button class="tab" role="tab" id="tab-reliability" aria-selected="false" aria-controls="view-reliability">Reliability</button>
+    <button class="tab" role="tab" id="tab-config" aria-selected="false" aria-controls="view-config">Config</button>
+    <button class="tab" role="tab" id="tab-logs" aria-selected="false" aria-controls="view-logs">Logs</button>
+  </nav>
+</header>
+
+<main class="main">
+
+  <!-- ══ FLEET ══ -->
+  <section class="view" id="view-fleet" role="tabpanel" aria-labelledby="tab-fleet">
+    <div id="fleet-banner"></div>
+    <div class="fleet-layout">
+      <div class="fleet-grid" id="slot-board"></div>
+      <aside class="rail" style="display:flex;flex-direction:column;gap:16px;">
+        <div class="card controls-card">
+          <div class="card-head"><span class="card-title">Controls</span></div>
+          <div class="card-body">
+            <div class="ctl-grid">
+              <button class="btn" id="ctl-rescreen" title="Queue an immediate rescreen cycle">Force rescreen</button>
+              <button class="btn" id="ctl-reliability" title="Refresh the reliability ledger now">Refresh reliability</button>
+              <button class="btn btn--danger" id="ctl-halt">Halt daemon</button>
+              <button class="btn" id="ctl-unkill" hidden>Clear KILL</button>
+              <button class="btn btn--wide" id="ctl-restart">Restart daemon</button>
+              <button class="btn btn--wide" id="ctl-stop">Stop daemon (KILL)</button>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">Live feed</span>
+            <span class="spacer"></span>
+            <span class="chip chip--ok" style="padding:2px 8px;"><span class="dot pulse" id="feed-dot"></span><span id="feed-age">—</span></span>
+          </div>
+          <ul class="feed" id="feed"></ul>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Last screen</span><span class="spacer"></span><span class="mono" id="screen-at" style="font-size:10.5px;color:var(--ink-faint)"></span></div>
+          <div id="screen-list" style="padding:6px 0;"><div class="empty-note" style="padding:14px;">No rescreen run card yet.</div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><span class="card-title">Fleet summary</span></div>
+          <div class="card-body"><div class="mini-kv" id="fleet-summary"></div></div>
+        </div>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ══ DECISIONS ══ -->
+  <section class="view" id="view-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
+    <div class="view-head">
+      <h2>Decision ledger</h2>
+      <span class="sub">Every deliberate → guard → deploy decision, with outcomes attached on close.</span>
+    </div>
+    <div class="filter-row">
+      <input type="text" id="dec-filter" placeholder="filter by symbol, venue, regime…">
+      <select id="dec-state">
+        <option value="all">all states</option>
+        <option value="open">open</option>
+        <option value="closed">closed</option>
+      </select>
+      <span class="mono" id="dec-count" style="font-size:11px;color:var(--ink-faint)"></span>
+    </div>
+    <div class="card"><div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr>
+          <th>id</th><th>at</th><th>market</th><th>regime</th><th>grid</th>
+          <th>call</th><th>score</th><th>step</th><th>slot</th><th>state</th><th>rationale</th>
+        </tr></thead>
+        <tbody id="dec-body"></tbody>
+      </table>
+    </div></div>
+  </section>
+
+  <!-- ══ RUN CARDS ══ -->
+  <section class="view" id="view-reports" role="tabpanel" aria-labelledby="tab-reports" hidden>
+    <div class="view-head">
+      <h2>Run cards</h2>
+      <span class="sub">One card per cycle — route, ground, deliberate, guard, deploy, observe, reflect.</span>
+      <span class="spacer"></span>
+      <button class="btn" id="rc-back" hidden>← All cards</button>
+    </div>
+    <div id="rc-list" class="runcard-list"></div>
+    <div id="rc-detail" hidden>
+      <div class="card"><div class="card-body md" id="rc-md"></div></div>
+      <p></p>
+      <details><summary class="mono" style="font-size:11px;cursor:pointer;color:var(--ink-soft)">raw JSON</summary>
+        <pre class="logbox" id="rc-json" style="margin-top:10px;"></pre>
+      </details>
+    </div>
+  </section>
+
+  <!-- ══ RELIABILITY ══ -->
+  <section class="view" id="view-reliability" role="tabpanel" aria-labelledby="tab-reliability" hidden>
+    <div class="view-head">
+      <h2>Reliability ledger</h2>
+      <span class="sub">Closed round-trips per regime archetype gate the sizing ladder: base &lt;10 samples → probe ≥10 → full ≥30 &amp; PF ≥1.3; recent PF &lt;1.0 kills the archetype.</span>
+    </div>
+    <div class="card"><div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr>
+          <th>archetype</th><th>samples</th><th>progress → full</th><th>profit factor</th>
+          <th>recent PF</th><th>win rate</th><th>expectancy</th><th>max DD</th><th>tier</th>
+        </tr></thead>
+        <tbody id="rel-body"></tbody>
+      </table>
+    </div></div>
+  </section>
+
+  <!-- ══ CONFIG ══ -->
+  <section class="view" id="view-config" role="tabpanel" aria-labelledby="tab-config" hidden>
+    <div class="view-head">
+      <h2>Configuration</h2>
+      <span class="sub">Edits write <code class="mono">config.yaml</code> in place (comments preserved, backup kept). The daemon reads config at startup — restart to apply.</span>
+    </div>
+    <div id="config-banner"></div>
+    <div class="config-layout">
+      <div class="card">
+        <div class="card-head">
+          <span class="card-title">Editable knobs</span>
+          <span class="spacer"></span>
+          <button class="btn btn--primary" id="cfg-save">Save changes</button>
+        </div>
+        <div class="card-body" id="cfg-fields"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><span class="card-title">Contract (read-only)</span></div>
+        <div class="card-body kv-view" id="cfg-readonly"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ LOGS ══ -->
+  <section class="view" id="view-logs" role="tabpanel" aria-labelledby="tab-logs" hidden>
+    <div class="view-head">
+      <h2>Daemon log</h2>
+      <span class="sub">Tail of <code class="mono">state/daemon.log</code>.</span>
+    </div>
+    <div class="log-controls">
+      <input type="text" id="log-grep" placeholder="grep (regex, case-insensitive)…">
+      <label class="mono" style="font-size:12px;display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" id="log-follow" checked> follow
+      </label>
+      <select id="log-lines">
+        <option value="150">150 lines</option>
+        <option value="400" selected>400 lines</option>
+        <option value="1000">1000 lines</option>
+      </select>
+      <span class="mono" id="log-count" style="font-size:11px;color:var(--ink-faint)"></span>
+    </div>
+    <div class="logbox" id="logbox" tabindex="0">—</div>
+  </section>
+
+  <p class="footer-note" id="footnote">grid/autonomy console · paper money only · 127.0.0.1</p>
+</main>
+
+<div id="modal-root"></div>
+<div class="toast-wrap" id="toasts" aria-live="polite"></div>
+
+<script src="/app.js"></script>
+</body>
+</html>
