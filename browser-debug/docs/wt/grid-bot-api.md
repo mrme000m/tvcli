@@ -122,16 +122,45 @@ The URL scheme is deterministic:
 
 Stop/restart/close-all/delete all verified live (200 + `{"status":"ok"}`).
 
-## Backtest & Optimize
+## Backtest & Optimize — programmatic (engine ported, parity-verified)
 
-- **Backtest** and **Optimize** (Profit-per-GRID sweep) are computed
-  **client-side** in the configurator from the public `:2087/ohlc` history
-  (30 days / 2976 × 15m candles) — there is **no dedicated backtest endpoint**
-  beyond `find_notional_prices` (notional rates). Results panel: Positions
-  Long/Short, Unrealized, Realized/Total PnL.
-- A grid centered on the current price can legitimately backtest to all-zero:
-  if the 30-day path starts outside the channel and never crosses a level in
-  the tradeable direction, no positions open.
+`browser-debug/wt-backtest.mjs` is a **verbatim Node port of the
+configurator's client-side backtest engine** (SPA module 534152). It fetches
+the same `:2087/ohlc` history through the logged-in page (fetch-in-page; raw
+HTTP is Cloudflare-403) and reproduces the UI's Backtest panel numbers
+**exactly** (verified 2026-09-04 on HYPE-USDC: 103.6% realized / -1.6%
+unrealized / 37+1 positions, digit-for-digit).
+
+```bash
+# config.json = the same payload you would POST to …/grid_bots/upsert
+node browser-debug/wt-backtest.mjs backtest  cfg.json            # one run (UI parity)
+node browser-debug/wt-backtest.mjs optimize  cfg.json           # platform sweep: step 1.2→3.0 %, best totalResult
+node browser-debug/wt-backtest.mjs sweep     cfg.json --step 0.2:5:0.1 --widths 0.1,0.2,0.3
+# agent sweep over profit-per-grid and channel half-widths; --rank-by totalResult|pnl
+```
+
+Engine semantics (extracted from the minified bundle — keep them when editing):
+- **0.2% fee per closed grid position** (the `-.002` constant).
+- Intra-candle path: down candle walks `[high, low, close]`, up candle
+  `[low, high, close]` (a zigzag, not the OHLC open).
+- Edge levels (first/last of the channel) never open positions.
+- `long`/`short`/`neutral`/`two_way` open rules: LONG grids buy down-crossings,
+  NEUTRAL longs ≤ mid / shorts > mid, two_way opens both sides; **pumpProtection
+  flips the side filter** (longs open only on up-crossings).
+- `stopOnOutOfGrid`: leading candles fully outside the channel are trimmed, and
+  the sim halts when a candle breaks the channel high/low.
+- Start bracket: if the first candle is outside the channel (M), the bracket
+  starts at the near edge — for a price path that enters the grid from below
+  and never dips, a LONG grid legitimately backtests all-zero.
+- `optimize` (platform parity): sweep percents 1.2 → 3.0 step 0.01, keep the
+  best `totalResult`; INFINITE grids use the 30-day hi/lo ±1% as bounds.
+- `sweep` (agent extension): arbitrary step range + channel half-widths around
+  the current price; rank by `totalResult` or realized `pnl` only
+  (`--rank-by pnl` avoids ranking unrealized-heavy directional outcomes first).
+
+Notes:
+- There is **no server-side backtest endpoint** beyond `find_notional_prices`
+  (notional rates for the USD conversions).
 - Presets (`GET …/grid_bots/presets`) are the platform's pre-backtested
   configs (ROI-ranked; fields `grid_trading_type`, `grid_levels`,
   `grid_percent_step`, `high/low/mid_price`, `pnl`, `roi`, `timeframe`).
