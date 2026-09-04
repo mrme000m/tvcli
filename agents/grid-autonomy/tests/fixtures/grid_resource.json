@@ -1,0 +1,116 @@
+{
+  "id": 278981,
+  "code": "c629f5ba3a643a82fc53dd4e",
+  "status": "active",
+  "paperTrading": true,
+  "gridType": "interval",
+  "gridMethod": "classic",
+  "gridMarket": "derivative",
+  "gridTradingType": "long",
+  "gridPercentStep": 0.0059,
+  "gridTickStep": null,
+  "gridLevels": 13,
+  "initPrice": 87.03,
+  "midPrice": 90.02,
+  "highPrice": 90.02,
+  "lowPrice": 83.85,
+  "closestHighLevelPrice": 87.374906493276,
+  "closestLowLevelPrice": 86.862418225744,
+  "investmentRef": null,
+  "investmentBase": null,
+  "amountPerTrade": 417,
+  "amountPerTradeType": "base",
+  "amountPerTradeMultiplier": null,
+  "takeProfit": null,
+  "stopLoss": null,
+  "stopLossPnlCompareType": "total",
+  "trailingStopActivation": null,
+  "trailingStopExecute": null,
+  "trailingStopPnlCompareType": "total",
+  "stopCauseCode": "cabinet_stop_action",
+  "stoppedAt": "2026-09-04T06:20:04+03:00",
+  "profitCurrencyType": "base",
+  "stopCondition": "stop_and_close_all",
+  "strategyProfitCondition": "take_profit",
+  "strategyStopLossFixedPercentRatio": null,
+  "initialRefBalance": 0,
+  "initialBaseBalance": 10000,
+  "stopOnOutOfGrid": true,
+  "pumpProtection": true,
+  "pumpProtectionOrderType": "market",
+  "trader": {
+    "id": 131284,
+    "email": "mrme000.m0@gmail.com",
+    "name": "mrme000.m0",
+    "referralCode": "wbt8180fc42c629f5ba",
+    "code": "c629f5ba3a643a82"
+  },
+  "exchange": {
+    "id": 43,
+    "code": "HYPERLIQUID_SWAP",
+    "types": []
+  },
+  "pair": {
+    "code": "159",
+    "refCurrency": "HYPE",
+    "baseCurrency": "USDC",
+    "viewSymbol": "HYPE-USDC",
+    "type": "future",
+    "unifiedCode": "HYPE-USDC"
+  },
+  "profiles": [
+    {
+      "profile": {
+        "about": null,
+        "id": 345444,
+        "name_of_account": "demo-hype",
+        "trader": {
+          "id": 131284,
+          "email": "mrme000.m0@gmail.com",
+          "name": "mrme000.m0",
+          "referralCode": "wbt8180fc42c629f5ba",
+          "code": "c629f5ba3a643a82"
+        },
+        "code": "c629f5ba3a643a82934b954a",
+        "status": "active",
+        "paperTrading": true,
+        "mode": null,
+        "marginMode": null
+      }
+    }
+  ],
+  "apiError": false,
+  "startCondition": "immediate",
+  "indicators": [],
+  "signalSource": null,
+  "maxRequiredAmount": "4587 USDC",
+  "unrealizedPnl": {
+    "cnt": 2,
+    "pnlFiat": -6.12,
+    "summary": {
+      "6a9a87c737810096c04fec5b": {
+        "pnlFiat": -1.83
+      },
+      "6a9a3bba37810096c04fa91c": {
+        "pnlFiat": -4.29
+      }
+    }
+  },
+  "createdAt": "2026-09-04T05:53:57+03:00",
+  "exchangeLeverage": null,
+  "leverage": 1,
+  "lastErrorLogAtTimestamp": 0,
+  "lastOpenLogsAtTimestamp": 0,
+  "awaitingStartSignal": false,
+  "stoppedWithUnrealized": false,
+  "stopped": false,
+  "stats": {
+    "profitLoss": 5.52,
+    "completedTrades": 3,
+    "cumulativeProfitLossPercents": 1.32231925,
+    "cumulativeWeightedProfitLossPercents": 0.05514069
+  },
+  "signalCode": null,
+  "isPremiumExchange": true,
+  "positionsWsCode": "3a1e822967c6f53aba1e648f"
+}

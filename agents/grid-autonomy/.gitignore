@@ -1,0 +1,9 @@
+# Runtime artifacts — see README "State artifacts" (not source)
+state/
+watch/specs/
+KILL
+*.log
+*.pid
+
+# Re-include committed test fixtures (root .gitignore has a global *.json rule)
+!tests/fixtures/*.json

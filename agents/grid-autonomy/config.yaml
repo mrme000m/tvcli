@@ -1,0 +1,105 @@
+# grid-autonomy daemon contract — portfolio, venues, providers, policy defaults.
+# The daemon (Phase 4) reads this; all execution stays blocked until
+# execution/guardrails.py passes every gate below.
+
+portfolio:
+  total_usd: 500.0
+  venues:
+    hyperliquid: { balance_usd: 300.0, market: perps, grids: [Long, Short, Neutral] }
+    binance:     { balance_usd: 200.0, market: spot,  grids: [Long, Neutral] }  # spot-like sleeve: NO Short (kept even on the futures paper stand-in)
+  slots_min: 3
+  slots_max: 5
+  slots_default: 4
+  max_alloc_per_slot: 0.5      # worst-case commitment ≤ 50% of slot
+  cash_buffer_pct: 0.15        # portfolio deployable ceiling = 85% of 500
+
+screen:
+  presets: [grid-neutral, grid-directional]
+  interval: 1h
+  confirm_interval: 4h         # direction must agree on 1h + 4h for trend grids
+  limit: 300
+  min_volume_usd: 5000000
+  top_per_preset_venue: 30
+  confluence_top: 10
+  confluence_skills: [squeeze, choppiness, mtf-confluence]
+  rescreen_minutes: 60         # daemon re-runs merge+swarm every 60m
+
+grid_defaults:                 # passed through to grid_config.py
+  band_atr: 3.0
+  step_factor: 0.5
+  step_min: 0.1
+  step_max: 2.0
+  min_grids: 5
+  max_grids: 30
+  dca_factor: 1.5
+  stop_trigger: "stop_and_close_all"
+  pump_protection: true
+
+llm:
+  chain: [cf, nvidia, openrouter]   # GRID_LLM_CHAIN env overrides order
+  cf_model: "@cf/zai-org/glm-5.3"
+  nvidia_model: "meta/llama-3.3-70b-instruct"
+  openrouter_model: "arcee-ai/trinity-large-preview:free"
+  max_calls_per_decision: 8
+  debate_rounds: 3
+
+policy:                        # history-derived per token; values here are bounds
+  cooldown_min_h: 12.0
+  cooldown_max_h: 72.0
+  fill_ratio_stagnant: 0.3
+  realized_ratio_stagnant: 0.4
+  score_drop_rotate: 12.0
+  hysteresis_score: 5.0
+  min_hold_h: 24               # rotation cooldown floor even if policy says less
+
+reliability:                   # Phase G gates before any live scale-up
+  paper_profile: demo-hype     # hyperliquid paperTrading profile
+  min_samples: 30
+  profit_factor_pass: 1.3
+  profit_factor_kill: 1.0
+
+watch:                         # daemon health-poll loop (Phase 4)
+  interval_s: 60               # observe_all poll cadence
+  adjust_steps_threshold: 2.0  # in-place adjust once price drifts >2 grid steps from mid
+
+autonomy:                      # escalation ladder + profile allowlists
+  mode: auto                   # auto: manage loop runs unattended
+  base_pct: 0.25               # unproven archetype: target 25% of slot worst-case
+  probe_pct: 0.40              # ≥10 reliability samples → probe at 40%
+  full_pct: 0.50               # ≥30 samples & PF≥1.3 → full 50%
+                               # NOTE (density-first sizing): tiers are TARGETS.
+                               # The exchange minimum per line (limits.cost.min,
+                               # e.g. 10 USDC on Hyperliquid) raises per-line
+                               # funding to keep full grid density — using more
+                               # funds instead of degrading the geometry — and
+                               # the hard worst-case cap (min of full_pct and
+                               # max_alloc_per_slot, applied to the ONE-SIDED
+                               # adverse fill ≈ half the channel) always holds.
+  live_profiles: []            # real-money profile NAMES; empty = real money ALWAYS refused
+  paper_profiles:               # paperTrading=true profile NAMES per venue.
+    hyperliquid: [demo-hype]   #   HYPERLIQUID_SWAP paper profile
+    binance: [demo-bn]         #   BINANCE_FUTURES paper stand-in (WunderTrading has
+                               #   NO Binance spot paper mode); pairCodes resolve from
+                               #   the derivative map, no-Short rule still enforced.
+                               #   Connect a real BINANCE (spot) account and list it in
+                               #   live_profiles for the spot sleeve to go live.
+
+memory:                        # reflect.py memory recall for swarm briefs
+  k: 3                         # top-k past memories injected per candidate
+
+adopt_existing: true           # first run: adopt matching active paper bots into free slots
+
+guardrails:                    # ALL must pass or deployment is refused (fail-closed)
+  checks:
+    - pairCode_from_get_exchange_markets
+    - profilesCodes_active_with_balance
+    - worst_case_commitment_within_max_alloc
+    - profit_per_grid_ge_2x_spread
+    - venue_side_allowed        # binance spot rejects Short
+    - reliability_gate
+    - cooldown_and_hysteresis
+  kill_file: agents/grid-autonomy/KILL   # presence halts the daemon
+
+server:
+  tvcli: http://127.0.0.1:8765
+  daemon_port: 8799

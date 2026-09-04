@@ -24,6 +24,7 @@
       ".agents/skills/web-discovery",
       ".agents/skills/stealth-browser",
       ".agents/skills/grid-bot",
+      ".agents/skills/grid-autonomy",
       ".agents/skills/tv-scout",
       ".agents/skills/tv-watch",
       ".agents/skills/tv-usecases"

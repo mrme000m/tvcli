@@ -1,0 +1,324 @@
+{
+  "strategyGroupType": "classic",
+  "rows": [
+    {
+      "_id": "6a9a87c737810096c04fec5b",
+      "strategyGroupType": "classic",
+      "status": "entered",
+      "type": false,
+      "stopped": false,
+      "reduceOnly": true,
+      "paperTrading": true,
+      "placeConditionalOrdersOnExchange": false,
+      "keepPositionOpen": true,
+      "timeToLive": null,
+      "enteredAt": "2026-09-04T08:56:39.764Z",
+      "createdAt": "2026-09-04T08:56:39.328Z",
+      "updatedAt": "2026-09-04T09:03:46.179Z",
+      "lastPrice": 86.8475,
+      "price": 86.867,
+      "stopPrice": null,
+      "highestReachedPrice": {
+        "price": 87.0335,
+        "timestamp": 1788512584213
+      },
+      "lowestReachedPrice": {
+        "price": 86.826,
+        "timestamp": 1788512315588
+      },
+      "totalEntryVolume": 41696,
+      "totalExitVolume": 0,
+      "totalEntryAmount": 4.8,
+      "totalExitAmount": 0,
+      "totalEntryCost": 416.964,
+      "totalExitCost": 0,
+      "totalEntryCommission": 0.00336001,
+      "totalExitCommission": 0,
+      "totalEntryCommissionCost": 0.29187566867500003,
+      "totalExitCommissionCost": 0,
+      "totalEntryCommissionVolume": 0.2918748,
+      "totalExitCommissionVolume": 0,
+      "totalProfitLoss": -2918.748,
+      "currentPosition": -0.03,
+      "weightedProfitLoss": 0,
+      "extraOrderDeviation": null,
+      "extraOrderCount": null,
+      "extraOrderVolumeMultiplier": null,
+      "extraOrderDeviationMultiplier": null,
+      "extraOrderCostAveraging": null,
+      "extraOrderCompletedCount": 0,
+      "extraOrderType": "market",
+      "applyDcaForFirstSafetyOrder": false,
+      "takeProfitBaseOn": "average_price",
+      "stopLossBaseOn": "entry_order",
+      "trailingStopActivation": null,
+      "trailingStopExecute": null,
+      "stopLossMove": null,
+      "updatedStopLoss": null,
+      "stopLoss": null,
+      "stopLossStatus": "not triggered",
+      "takeProfits": [
+        {
+          "price": 87.37440357269872,
+          "portfolio": 1,
+          "status": "not triggered",
+          "hasExecutionErrors": false,
+          "_id": "6a9a87c737810096c04fec5c"
+        }
+      ],
+      "precision": {
+        "amount": 2,
+        "price": 3,
+        "origin": {
+          "amount": 0.01,
+          "price": 0.001
+        },
+        "base": 8,
+        "quote": 8
+      },
+      "decimals": 3,
+      "pair": "HYPE/USDC:USDC",
+      "pairCode": "159",
+      "pairType": "future",
+      "pairSymbols": {
+        "ref": "HYPE",
+        "base": "USDC"
+      },
+      "exitTriggeredOrder": null,
+      "lastTriggeredBy": null,
+      "followingType": null,
+      "orderType": "market",
+      "portfolioType": "fixed",
+      "portfolio": 0.0417,
+      "fixedAmount": 417,
+      "initFixedAmount": 417,
+      "initFixedAmountSymbol": "USDC",
+      "amountMultiplier": 1,
+      "initialLeverage": 1,
+      "leverage": 1,
+      "profileStrategies": [
+        {
+          "_id": "6a9a87c737810096c04fec5d",
+          "pricePhase1": 86.867,
+          "pricePhase2": null,
+          "initialEntryAmount": 4.8,
+          "multiplier": 1,
+          "amount": 4.8,
+          "cost": 416.964,
+          "exitAmount": 0,
+          "exitCost": 0,
+          "entryUsdVolume": 41696,
+          "exitUsdVolume": null,
+          "entryCommission": 0.00336001,
+          "exitCommission": 0,
+          "entryCommissionUSD": 0.2918748,
+          "exitCommissionUSD": 0,
+          "entryCommissionCost": 0.29187566867500003,
+          "exitCommissionCost": 0,
+          "exitPnl": 0,
+          "status": "entered",
+          "partialFill": 1,
+          "usdtVolume": 41696,
+          "profitLoss": null,
+          "errorTransKey": null,
+          "strategyProfilesInfos": "Order#[6a9a87c737810096c04fec5e] completed",
+          "trailingStopExecutePrice": null,
+          "trailingStopActivationPrice": null,
+          "issues": [],
+          "buyOrders": [],
+          "sellOrders": [],
+          "profile": {
+            "name_of_account": "demo-hype",
+            "code": "c629f5ba3a643a82934b954a",
+            "tradeMode": "hedge_mode",
+            "marginMode": "cross"
+          }
+        }
+      ],
+      "creationTrigger": {
+        "code": "bot_entry_signal",
+        "createdAt": "2026-09-04T08:56:39.327Z"
+      },
+      "entryTrigger": null,
+      "exitTrigger": null,
+      "exchange": {
+        "code": "HYPERLIQUID_SWAP"
+      },
+      "trader": {
+        "id": 131284
+      },
+      "signalBot": null,
+      "createdBy": "grid_bot",
+      "isMain": true
+    },
+    {
+      "_id": "6a9a3bba37810096c04fa91c",
+      "strategyGroupType": "classic",
+      "status": "entered",
+      "type": false,
+      "stopped": false,
+      "reduceOnly": true,
+      "paperTrading": true,
+      "placeConditionalOrdersOnExchange": false,
+      "keepPositionOpen": true,
+      "timeToLive": null,
+      "enteredAt": "2026-09-04T03:32:12.264Z",
+      "createdAt": "2026-09-04T03:32:10.966Z",
+      "updatedAt": "2026-09-04T09:03:46.178Z",
+      "lastPrice": 86.8475,
+      "price": 87.385,
+      "stopPrice": null,
+      "highestReachedPrice": {
+        "price": 87.4745,
+        "timestamp": 1788492753686
+      },
+      "lowestReachedPrice": {
+        "price": 85.639,
+        "timestamp": 1788501131312
+      },
+      "totalEntryVolume": 41682,
+      "totalExitVolume": 0,
+      "totalEntryAmount": 4.77,
+      "totalExitAmount": 0,
+      "totalEntryCost": 416.8288349999999,
+      "totalExitCost": 0,
+      "totalEntryCommission": 0.00333901,
+      "totalExitCommission": 0,
+      "totalEntryCommissionCost": 0.29178105835499996,
+      "totalExitCommissionCost": 0,
+      "totalEntryCommissionVolume": 0.29178018,
+      "totalExitCommissionVolume": 0,
+      "totalProfitLoss": -2917.8018,
+      "currentPosition": -0.62,
+      "weightedProfitLoss": 0,
+      "extraOrderDeviation": null,
+      "extraOrderCount": null,
+      "extraOrderVolumeMultiplier": null,
+      "extraOrderDeviationMultiplier": null,
+      "extraOrderCostAveraging": null,
+      "extraOrderCompletedCount": 0,
+      "extraOrderType": "market",
+      "applyDcaForFirstSafetyOrder": false,
+      "takeProfitBaseOn": "average_price",
+      "stopLossBaseOn": "entry_order",
+      "trailingStopActivation": null,
+      "trailingStopExecute": null,
+      "stopLossMove": null,
+      "updatedStopLoss": null,
+      "stopLoss": null,
+      "stopLossStatus": "not triggered",
+      "takeProfits": [
+        {
+          "price": 87.88991555255761,
+          "portfolio": 1,
+          "status": "not triggered",
+          "hasExecutionErrors": false,
+          "_id": "6a9a3bba37810096c04fa91d"
+        }
+      ],
+      "precision": {
+        "amount": 2,
+        "price": 3,
+        "origin": {
+          "amount": 0.01,
+          "price": 0.001
+        },
+        "base": 8,
+        "quote": 8
+      },
+      "decimals": 3,
+      "pair": "HYPE/USDC:USDC",
+      "pairCode": "159",
+      "pairType": "future",
+      "pairSymbols": {
+        "ref": "HYPE",
+        "base": "USDC"
+      },
+      "exitTriggeredOrder": null,
+      "lastTriggeredBy": null,
+      "followingType": null,
+      "orderType": "market",
+      "portfolioType": "fixed",
+      "portfolio": 0.0417,
+      "fixedAmount": 417,
+      "initFixedAmount": 417,
+      "initFixedAmountSymbol": "USDC",
+      "amountMultiplier": 1,
+      "initialLeverage": 1,
+      "leverage": 1,
+      "profileStrategies": [
+        {
+          "_id": "6a9a3bba37810096c04fa91e",
+          "pricePhase1": 87.385,
+          "pricePhase2": null,
+          "initialEntryAmount": 4.77,
+          "multiplier": 1,
+          "amount": 4.77,
+          "cost": 416.8288349999999,
+          "exitAmount": 0,
+          "exitCost": 0,
+          "entryUsdVolume": 41682,
+          "exitUsdVolume": null,
+          "entryCommission": 0.00333901,
+          "exitCommission": 0,
+          "entryCommissionUSD": 0.29178018,
+          "exitCommissionUSD": 0,
+          "entryCommissionCost": 0.29178105835499996,
+          "exitCommissionCost": 0,
+          "exitPnl": 0,
+          "status": "entered",
+          "partialFill": 1,
+          "usdtVolume": 41682,
+          "profitLoss": null,
+          "errorTransKey": null,
+          "strategyProfilesInfos": "Order#[6a9a3bba37810096c04fa91f] completed",
+          "trailingStopExecutePrice": null,
+          "trailingStopActivationPrice": null,
+          "issues": [],
+          "buyOrders": [],
+          "sellOrders": [],
+          "profile": {
+            "name_of_account": "demo-hype",
+            "code": "c629f5ba3a643a82934b954a",
+            "tradeMode": "hedge_mode",
+            "marginMode": "cross"
+          }
+        }
+      ],
+      "creationTrigger": {
+        "code": "bot_entry_signal",
+        "createdAt": "2026-09-04T03:32:10.961Z"
+      },
+      "entryTrigger": null,
+      "exitTrigger": null,
+      "exchange": {
+        "code": "HYPERLIQUID_SWAP"
+      },
+      "trader": {
+        "id": 131284
+      },
+      "signalBot": null,
+      "createdBy": "grid_bot",
+      "isMain": true
+    }
+  ],
+  "currentTrader": {
+    "code": "c629f5ba3a643a82",
+    "timezone": "Europe/London",
+    "locale": "en"
+  },
+  "actions": {
+    "fail": {
+      "link": "/en/trader/strategies/__id__/fail",
+      "isGranted": true
+    },
+    "cancel": {
+      "link": "/en/trader/strategies/__id__/cancel",
+      "isGranted": true
+    },
+    "panic_exiting": {
+      "link": "/en/trader/strategies/__id__/panic",
+      "isGranted": true
+    }
+  }
+}

@@ -8,6 +8,13 @@ operating blueprint the agents follow.
 
 ## The loop
 
+As of the grid-autonomy delivery, **this loop is automated** by
+`agents/grid-autonomy/daemon.py` (screen → deliberate → guard → deploy →
+watch → rotate → reflect). The fleet presets below now *supervise* the
+daemon and step in for manual intervention, rather than hand-running every
+step. The diagram shows who owns what when a human (or the orchestrator) is
+in the loop; the daemon performs the same path unattended.
+
 ```
             ┌──────────────────────────────────────────────────────────────┐
             │                   prime-orchestrator (coordinate)            │
@@ -41,6 +48,33 @@ turns fired triggers into re-analysis and adaptation orders for
 wt-investigator. Regime decay, full DCA ladders, squeeze breakouts and
 funding extremes are the standard trigger set (see the wundertrading skill's
 playbook §5).
+
+### Automated daemon
+
+The whole loop now runs unattended under
+[`agents/grid-autonomy/daemon.py`](../../agents/grid-autonomy/daemon.py):
+
+- **Screen (60m)** — `screen/merge.py`: Hyperliquid perps + Binance spot,
+  regime/preset scoring, real Binance spreads, tvcli `/hunt` confluence,
+  4h directional confirmation.
+- **Deliberate** — `agents/swarm.py` + `llm/provider.py` (CF → Nvidia →
+  OpenRouter, rule fallback); `agents/reflect.py` injects k=3 memories.
+- **Guard** — `execution/guardrails.py`: 8 fail-closed gates before any
+  WunderTrading mutation.
+- **Deploy** — `execution/grid_adapter.py` + `resolve.py` (paper profiles
+  only; per-pair `limits.cost.min` minimum-notional floor, $10 fallback;
+  USD-stable-denominated sizing).
+- **Watch (60s)** — `execution/observe.py` → per-token stagnation policy →
+  in-place re-centre (6h rate limit) or re-analysis.
+- **Rotate** — stagnant incumbent + challenger Δscore ≥ 5 + cooldown expired.
+- **Reflect** — `state/decisions.jsonl` + `state/reports/<ts>-<kind>.{json,md}`
+  run cards.
+
+Operate it with `scripts/start.sh` (dry-run default) / `scripts/stop.sh` and
+the HTTP ctl plane on `:8799` (`/health`, `/status`, `/reliability`,
+`/observe`, `POST /rescreen`, `POST /rotate`, `POST /kill`). Full operating
+manual, config reference, escalation policy, and troubleshooting:
+[`agents/grid-autonomy/README.md`](../../agents/grid-autonomy/README.md).
 
 ## Fleet roster
 
@@ -111,7 +145,7 @@ Cross-cutting rules (from the wundertrading skill):
   commits up to `A × (1 + v + … + v^(N−1))`; cap the total at ≤ 50% of the
   profile balance.
 - Every live order requires explicit confirmation (the tools enforce it);
-  paper-trade on a `demo` profile first, probe 5–10%, scale only after the
+  paper-trade on a `demo` profile first, probe 40%, scale only after the
   exported history passes the reliability bars (≥ 30 samples, PF ≥ 1.3).
 
 ## Manage: keep the system responsive

@@ -1,0 +1,449 @@
+{
+  "page": 1,
+  "limit": 10,
+  "pages": 1,
+  "total": 3,
+  "_links": {
+    "self": {
+      "href": "/en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/positions-history/grid?page=1&limit=10"
+    },
+    "first": {
+      "href": "/en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/positions-history/grid?page=1&limit=10"
+    },
+    "last": {
+      "href": "/en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/positions-history/grid?page=1&limit=10"
+    }
+  },
+  "_embedded": {
+    "items": [
+      {
+        "resource": {
+          "strategyId": "6a9a56a937810096c04fbeb8",
+          "clientId": "6a9a56a937810096c04fbeb8",
+          "type": false,
+          "status": "completed",
+          "price": 86.365,
+          "portfolio": 0.0417,
+          "amountMultiplier": 1,
+          "leverage": 1,
+          "totalVolume": 83671,
+          "totalEntryAmount": 4.83,
+          "totalExitAmount": 4.83,
+          "totalEntryCost": 417.14295,
+          "totalExitCost": 419.570025,
+          "totalEntryCommission": 0.003381,
+          "totalExitCommission": 0.00338101,
+          "totalEntryCommissionCost": 0.292000065,
+          "totalExitCommissionCost": 0.293699886175,
+          "totalEntryCommissionVolume": 0.29200006,
+          "totalExitCommissionVolume": 0.29369901,
+          "profitLoss": 18389,
+          "weightedProfitLoss": 0.01838282,
+          "currentPosition": 0.44083521,
+          "createdAt": "2026-09-04T08:27:05+03:00",
+          "paperTrading": true,
+          "createdBy": "grid_bot",
+          "updatedAt": "2026-09-04T11:56:39+03:00",
+          "enteredAt": "2026-09-04T08:27:06+03:00",
+          "exitedAt": null,
+          "mainStrategyId": null,
+          "traderId": 131284,
+          "traderCode": "c629f5ba3a643a82",
+          "signalProviderChannelId": null,
+          "strategyGroupType": "classic",
+          "exchangeCode": "HYPERLIQUID_SWAP",
+          "riskRewardRatio": 0,
+          "orderType": "market",
+          "profit": 86.862418225744,
+          "stopLoss": null,
+          "updatedProfit": 86.862418225744,
+          "updatedStopLoss": null,
+          "stopLossStatus": "not triggered",
+          "exitTriggeredOrder": null,
+          "pair": "HYPE/USDC:USDC",
+          "pairType": "future",
+          "pairSymbols": {
+            "ref": "HYPE",
+            "base": "USDC"
+          },
+          "portfolioType": "fixed",
+          "fixedAmount": 417,
+          "initFixedAmount": 417,
+          "initFixedAmountSymbol": "USDC",
+          "initialLeverage": 1,
+          "decimals": 3,
+          "precision": {
+            "base": 8,
+            "price": 3,
+            "quote": 8,
+            "amount": 2,
+            "origin": {
+              "price": 0.001,
+              "amount": 0.01
+            }
+          },
+          "extraOrderCount": null,
+          "extraOrderCompletedCount": 0,
+          "extraOrderDeviation": null,
+          "extraOrderVolumeMultiplier": null,
+          "extraOrderDeviationMultiplier": null,
+          "trailingStopActivation": null,
+          "trailingStopExecute": null,
+          "averageTrailingStopActivationPrice": null,
+          "averageTrailingStopExecutePrice": null,
+          "stopLossMove": null,
+          "highestReachedPrice": {
+            "price": 86.8675,
+            "timestamp": 1788512199080
+          },
+          "lowestReachedPrice": {
+            "price": 85.639,
+            "timestamp": 1788501131303
+          },
+          "totalEntryVolume": 41714,
+          "totalExitVolume": 41957,
+          "takeProfits": [
+            {
+              "id": {
+                "$oid": "6a9a56a937810096c04fbeb9"
+              },
+              "price": 86.862418225744,
+              "status": "completed",
+              "portfolio": 1,
+              "hasExecutionErrors": false
+            }
+          ],
+          "issues": [],
+          "exitTrigger": null,
+          "entryTrigger": null,
+          "creationTrigger": {
+            "code": "bot_entry_signal",
+            "createdAt": "2026-09-04T05:27:05.750Z"
+          },
+          "signalBot": null
+        },
+        "actions": {
+          "load_more": {
+            "type": "link",
+            "label": "load_more",
+            "show": true,
+            "can": {
+              "result": true,
+              "violations": []
+            },
+            "data": {
+              "link": "/en/trader/grid_bots/6a9a56a937810096c04fbeb8/positions-history/profile-strategies/grid",
+              "method": "GET"
+            }
+          }
+        }
+      },
+      {
+        "resource": {
+          "strategyId": "6a9a7be837810096c04fe088",
+          "clientId": "6a9a7be837810096c04fe088",
+          "type": false,
+          "status": "completed",
+          "price": 85.884,
+          "portfolio": 0.0417,
+          "amountMultiplier": 1,
+          "leverage": 1,
+          "totalVolume": 83710,
+          "totalEntryAmount": 4.86,
+          "totalExitAmount": 4.86,
+          "totalEntryCost": 417.39867,
+          "totalExitCost": 419.71689,
+          "totalEntryCommission": 0.00340201,
+          "totalExitCommission": 0.00340201,
+          "totalEntryCommissionCost": 0.292179927845,
+          "totalExitCommissionCost": 0.293802686615,
+          "totalEntryCommissionVolume": 0.29217906,
+          "totalExitCommissionVolume": 0.29380182,
+          "profitLoss": 17321,
+          "weightedProfitLoss": 0.01730481,
+          "currentPosition": 0.41498358,
+          "createdAt": "2026-09-04T11:06:00+03:00",
+          "paperTrading": true,
+          "createdBy": "grid_bot",
+          "updatedAt": "2026-09-04T11:50:10+03:00",
+          "enteredAt": "2026-09-04T11:06:01+03:00",
+          "exitedAt": null,
+          "mainStrategyId": null,
+          "traderId": 131284,
+          "traderCode": "c629f5ba3a643a82",
+          "signalProviderChannelId": null,
+          "strategyGroupType": "classic",
+          "exchangeCode": "HYPERLIQUID_SWAP",
+          "riskRewardRatio": 0,
+          "orderType": "market",
+          "profit": 86.349929958212,
+          "stopLoss": null,
+          "updatedProfit": 86.349929958212,
+          "updatedStopLoss": null,
+          "stopLossStatus": "not triggered",
+          "exitTriggeredOrder": null,
+          "pair": "HYPE/USDC:USDC",
+          "pairType": "future",
+          "pairSymbols": {
+            "ref": "HYPE",
+            "base": "USDC"
+          },
+          "portfolioType": "fixed",
+          "fixedAmount": 417,
+          "initFixedAmount": 417,
+          "initFixedAmountSymbol": "USDC",
+          "initialLeverage": 1,
+          "decimals": 3,
+          "precision": {
+            "base": 8,
+            "price": 3,
+            "quote": 8,
+            "amount": 2,
+            "origin": {
+              "price": 0.001,
+              "amount": 0.01
+            }
+          },
+          "extraOrderCount": null,
+          "extraOrderCompletedCount": 0,
+          "extraOrderDeviation": null,
+          "extraOrderVolumeMultiplier": null,
+          "extraOrderDeviationMultiplier": null,
+          "trailingStopActivation": null,
+          "trailingStopExecute": null,
+          "averageTrailingStopActivationPrice": null,
+          "averageTrailingStopExecutePrice": null,
+          "stopLossMove": null,
+          "highestReachedPrice": {
+            "price": 86.3615,
+            "timestamp": 1788511810724
+          },
+          "lowestReachedPrice": {
+            "price": 85.9235,
+            "timestamp": 1788510800521
+          },
+          "totalEntryVolume": 41739,
+          "totalExitVolume": 41971,
+          "takeProfits": [
+            {
+              "id": {
+                "$oid": "6a9a7be837810096c04fe089"
+              },
+              "price": 86.34942724858487,
+              "status": "completed",
+              "portfolio": 1,
+              "hasExecutionErrors": false
+            }
+          ],
+          "issues": [],
+          "exitTrigger": null,
+          "entryTrigger": null,
+          "creationTrigger": {
+            "code": "bot_entry_signal",
+            "createdAt": "2026-09-04T08:06:00.368Z"
+          },
+          "signalBot": null
+        },
+        "actions": {
+          "load_more": {
+            "type": "link",
+            "label": "load_more",
+            "show": true,
+            "can": {
+              "result": true,
+              "violations": []
+            },
+            "data": {
+              "link": "/en/trader/grid_bots/6a9a7be837810096c04fe088/positions-history/profile-strategies/grid",
+              "method": "GET"
+            }
+          }
+        }
+      },
+      {
+        "resource": {
+          "strategyId": "6a9a5d6937810096c04fc46d",
+          "clientId": "6a9a5d6937810096c04fc46d",
+          "type": false,
+          "status": "completed",
+          "price": 85.838,
+          "portfolio": 0.0417,
+          "amountMultiplier": 1,
+          "leverage": 1,
+          "totalVolume": 83687,
+          "totalEntryAmount": 4.86,
+          "totalExitAmount": 4.86,
+          "totalEntryCost": 417.17511,
+          "totalExitCost": 419.70717,
+          "totalEntryCommission": 0.00340201,
+          "totalExitCommission": 0.00340201,
+          "totalEntryCommissionCost": 0.292023435385,
+          "totalExitCommissionCost": 0.293795882595,
+          "totalEntryCommissionVolume": 0.29202257,
+          "totalExitCommissionVolume": 0.29379501,
+          "profitLoss": 19461,
+          "weightedProfitLoss": 0.01945306,
+          "currentPosition": 0.46650046,
+          "createdAt": "2026-09-04T08:55:53+03:00",
+          "paperTrading": true,
+          "createdBy": "grid_bot",
+          "updatedAt": "2026-09-04T10:40:11+03:00",
+          "enteredAt": "2026-09-04T08:55:54+03:00",
+          "exitedAt": null,
+          "mainStrategyId": null,
+          "traderId": 131284,
+          "traderCode": "c629f5ba3a643a82",
+          "signalProviderChannelId": null,
+          "strategyGroupType": "classic",
+          "exchangeCode": "HYPERLIQUID_SWAP",
+          "riskRewardRatio": 0,
+          "orderType": "market",
+          "profit": 86.349929958212,
+          "stopLoss": null,
+          "updatedProfit": 86.349929958212,
+          "updatedStopLoss": null,
+          "stopLossStatus": "not triggered",
+          "exitTriggeredOrder": null,
+          "pair": "HYPE/USDC:USDC",
+          "pairType": "future",
+          "pairSymbols": {
+            "ref": "HYPE",
+            "base": "USDC"
+          },
+          "portfolioType": "fixed",
+          "fixedAmount": 417,
+          "initFixedAmount": 417,
+          "initFixedAmountSymbol": "USDC",
+          "initialLeverage": 1,
+          "decimals": 3,
+          "precision": {
+            "base": 8,
+            "price": 3,
+            "quote": 8,
+            "amount": 2,
+            "origin": {
+              "price": 0.001,
+              "amount": 0.01
+            }
+          },
+          "extraOrderCount": null,
+          "extraOrderCompletedCount": 0,
+          "extraOrderDeviation": null,
+          "extraOrderVolumeMultiplier": null,
+          "extraOrderDeviationMultiplier": null,
+          "trailingStopActivation": null,
+          "trailingStopExecute": null,
+          "averageTrailingStopActivationPrice": null,
+          "averageTrailingStopExecutePrice": null,
+          "stopLossMove": null,
+          "highestReachedPrice": {
+            "price": 86.3595,
+            "timestamp": 1788507611771
+          },
+          "lowestReachedPrice": {
+            "price": 85.695,
+            "timestamp": 1788503799629
+          },
+          "totalEntryVolume": 41717,
+          "totalExitVolume": 41970,
+          "takeProfits": [
+            {
+              "id": {
+                "$oid": "6a9a5d6937810096c04fc46e"
+              },
+              "price": 86.34942697918778,
+              "status": "completed",
+              "portfolio": 1,
+              "hasExecutionErrors": false
+            }
+          ],
+          "issues": [],
+          "exitTrigger": null,
+          "entryTrigger": null,
+          "creationTrigger": {
+            "code": "bot_entry_signal",
+            "createdAt": "2026-09-04T05:55:53.875Z"
+          },
+          "signalBot": null
+        },
+        "actions": {
+          "load_more": {
+            "type": "link",
+            "label": "load_more",
+            "show": true,
+            "can": {
+              "result": true,
+              "violations": []
+            },
+            "data": {
+              "link": "/en/trader/grid_bots/6a9a5d6937810096c04fc46d/positions-history/profile-strategies/grid",
+              "method": "GET"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "_filters": {
+    "statuses": {
+      "data": {
+        "canceled": "label.canceled",
+        "completed": "label.completed",
+        "failed": "label.failed",
+        "panic_exited": "label.panic_exited"
+      },
+      "query": "criteria[statuses][value]",
+      "multiple": true,
+      "currentValue": [],
+      "show": true
+    },
+    "period": {
+      "data": {
+        "-7": "label.week",
+        "-30": "label.month",
+        "-90": "label.3_months"
+      },
+      "query": "criteria[period][value]",
+      "multiple": false,
+      "currentValue": [],
+      "show": true
+    }
+  },
+  "_sorting": {
+    "currentPosition": {
+      "sortedBy": false,
+      "currentOrder": "desc",
+      "query": "sorting[currentPosition]=asc"
+    },
+    "weightedProfitLoss": {
+      "sortedBy": false,
+      "currentOrder": "desc",
+      "query": "sorting[weightedProfitLoss]=asc"
+    },
+    "updatedAt": {
+      "sortedBy": false,
+      "currentOrder": "desc",
+      "query": "sorting[updatedAt]=asc"
+    },
+    "updatedAtDate": {
+      "sortedBy": true,
+      "currentOrder": "desc",
+      "query": "sorting[updatedAtDate]=asc"
+    },
+    "enteredAt": {
+      "sortedBy": false,
+      "currentOrder": "desc",
+      "query": "sorting[enteredAt]=asc"
+    },
+    "status": {
+      "sortedBy": false,
+      "currentOrder": "desc",
+      "query": "sorting[status]=asc"
+    }
+  },
+  "_limits": [
+    10,
+    25,
+    50
+  ]
+}

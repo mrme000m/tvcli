@@ -1,0 +1,20 @@
+{
+ "code": "c629f5ba3a643a82fc53dd4e",
+ "status": "active",
+ "pair": "HYPE-USDC",
+ "exchange": "HYPERLIQUID_SWAP",
+ "paperTrading": true,
+ "gridTradingType": "long",
+ "gridType": "interval",
+ "step": 0.0059,
+ "levels": 13,
+ "high": 90.02,
+ "low": 83.85,
+ "actions": {
+  "positions": "GET /en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/positions/grid",
+  "positions_history": "GET /en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/positions-history/grid",
+  "stop": "POST /en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/stop",
+  "close_all": "POST /en/trader/grid_bots/c629f5ba3a643a82fc53dd4e/close-all",
+  "edit": "POST /en/trader/grid_bots/upsert?code=c629f5ba3a643a82fc53dd4e"
+ }
+}
