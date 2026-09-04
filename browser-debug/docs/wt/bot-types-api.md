@@ -107,36 +107,57 @@ riskLevelsRecommendedInvestments (4000/2000/1000), minAmountPerTrade (20),
 amountPerTradeRatio (0.05/0.1/0.2). Custom pairs:
 `GET …/multi_pair_grid_bot/custom-mode-markets/{exchange}`.
 
-## Signal Bot — `POST /en/trader/signal_bots/upsert` (schema extracted)
+## Signal Bot — `POST /en/trader/signal_bots/upsert` (verified create, 2026-09-04)
 
-Payload (from the SPA bundle; **requires a user-owned `signalCode`** — the
-code is assigned when binding a TradingView alert/signal, so creation is only
-possible after that binding exists):
+**Fully API-creatable without the browser UI.** Verified payload (200 +
+bot created on the demo profile; `wt-bots.mjs signal create` round-trips):
 
 ```json
 {
-  "signalCode": "<from signal binding>", "name": "...", "about": "...",
-  "time": "15m",                                  // timeframeValue + Period
-  "exchanges": [/* prepareMultipleExchanges: per-exchange profiles+amount */],
+  "name": "my-signal-bot", "about": "",
+  "time": "15M",                        // REQUIRED format: "<value><M|H|D>" (uppercase period!)
+  "exchanges": {                         // REQUIRED map keyed by exchange code:
+    "HYPERLIQUID_SWAP": {
+      "profiles": [{ "code": "<profile-code>", "multiplier": 1 }],
+      "pairsCodes": ["159"],
+      "leverage": 1,
+      "leverageBy": "value"
+    }
+  },
   "amountPerTrade": 20, "amountPerTradeType": "base",
-  "takeProfits": [{ "portfolio": 1, "priceDeviation": 0.015 }],
-  "takeProfitBaseOn": "average_price", "stopLossBaseOn": "average_price",
-  "stopLoss": null, "stopLossMove": null, "stopLossMoveExecute": null,
-  "trailingStopActivation": null, "trailingStopExecute": null,
+  "takeProfits": [],
   "multipleEntries": false, "dynamicPair": false, "swingTrade": false,
   "orderType": "market", "reduceOnly": false, "keepPositionOpen": false,
   "maxOpenPositions": 2, "alertSettingsType": "message",
-  "signalSource": "trading_view", "maxCapitalUsdCents": null,
-  "placeConditionalOrdersOnExchange": false,
-  ["dca block": extraOrderCount, extraOrderDeviation, extraOrderVolumeMultiplier,
+  "signalSource": "trading_view",
+  "placeConditionalOrdersOnExchange": false,   // REQUIRED (non-null) — omit = 400
+  ["optional dca block": extraOrderCount, extraOrderDeviation, extraOrderVolumeMultiplier,
    extraOrderDeviationMultiplier, applyDcaForFirstSafetyOrder, extraOrderCostAveraging],
-  ["limit block": timeToLive, limitOrderPriceType, limitOrderPriceDeviation(+Type)]
+  ["optional limit block": timeToLive, limitOrderPriceType, limitOrderPriceDeviation(+Type)],
+  ["optional exits": stopLoss, stopLossMove(+Execute), trailingStopActivation/Execute,
+   maxCapitalUsdCents]
 }
 ```
-Init data (`GET …/signal_bots/upsert`): activeSignalBots, maxActiveSignalBots,
-signalBot (current form state, empty when none). For the TradingView-alert →
-execution bridge the platform ALSO exposes the classic-strategy MCP/REST
-surface (see the wundertrading skill) — prefer that for agent-driven entries.
+
+**`signalCode` is NOT an input** — the server generates it on create
+(response: `result.data.signalCode`, e.g. `3a4c822931c6f53aba7c6477`) — that
+code is what you then wire into the TradingView alert message. Omit it
+entirely.
+
+Validation notes (server-verified):
+- `exchanges` must be a non-empty map (array → "At least one Exchange must be
+  selected"); `"time": "15m"` lowercase → "Invalid format".
+- Action links per bot (from the grid list): stop/start (`…/{code}/stop`,
+  `…/{code}/start`), close-all, edit (`upsert?code=`), positions (+
+  history), `signals_logs` (keyed by the **signalCode**:
+  `…/signal_bots/{signalCode}/trading_view_logs/show`), public stats
+  (`…/public/bot/{code}`).
+- **Delete uses the NUMERIC `id`**, not the code:
+  `DELETE …/signal_bots/{id}/delete` (code → 404). `wt-bots.mjs signal
+  delete <code>` resolves code→id automatically; the list output carries
+  both `id` and `code`.
+- Init data (`GET …/signal_bots/upsert`): activeSignalBots, maxActiveSignalBots,
+  signalBot (current form state, empty when none).
 
 ## Programmatic parameter optimization (all types)
 
