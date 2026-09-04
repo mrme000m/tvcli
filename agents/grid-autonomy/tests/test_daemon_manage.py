@@ -595,3 +595,51 @@ class SubscriptionObservationTestCase(unittest.TestCase):
         self.assertEqual(sig["gridBots"], {"active": 3, "max": 200})
         self.assertEqual(sig["tier_caps"], {"other": 1, "premium": 200})
         self.assertEqual(sig["premium_exchanges"], ["HYPERLIQUID_SWAP"])
+
+
+
+class SupervisionTestCase(unittest.TestCase):
+    """launchd supervision support: reliability queue + adoption decisions."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch("daemon.STATE_PATH",
+                             os.path.join(self.tmp.name, "state.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.d = daemon.Daemon()
+
+    def test_reliability_queue_roundtrip(self):
+        self.assertFalse(self.d.consume_reliability())
+        self.d.queue_reliability()
+        self.assertTrue(self.d.consume_reliability())
+        self.assertFalse(self.d.consume_reliability())  # consumed once
+
+    def test_adopt_records_decision_and_archetype(self):
+        rec = []
+
+        def fake_record(ticket, brief, action, payloads=None):
+            rec.append((ticket, brief, action))
+            return "dADOPT1"
+
+        prof = {"code": "P1", "name": "demo-hype",
+                "exchange": "HYPERLIQUID_SWAP", "paperTrading": True,
+                "balance": 300.0}
+        bots = [{"code": "B1", "paperTrading": True, "status": "active",
+                 "exchange": "HYPERLIQUID_SWAP",
+                 "pair": "ZEC-USDC", "pairCode": "214"}]
+        with mock.patch("daemon.grid_status_safe", return_value=bots), \
+                mock.patch("daemon.grid_profiles_safe", return_value=[prof]), \
+                mock.patch("daemon.record_decision_safe", fake_record), \
+                mock.patch("daemon.reclassify_regime",
+                           return_value="trend_up"), \
+                mock.patch("daemon.fetch_symbol",
+                           side_effect=lambda v, s: s):
+            self.d.adopt_existing(dry_run=True)
+        self.assertEqual(len(rec), 1)
+        self.assertEqual(rec[0][0]["regime"], "trend_up")
+        self.assertEqual(rec[0][2]["kind"], "adopted")
+        bot = self.d.state["active_bots"]["1"]
+        self.assertEqual(bot["decision_id"], "dADOPT1")
+        self.assertEqual(bot["archetype"], "trend_up")

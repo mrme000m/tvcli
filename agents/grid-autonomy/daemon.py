@@ -612,6 +612,7 @@ class Daemon:
         }
         self._lock = threading.Lock()
         self._rescreen_flag = False
+        self._reliability_flag = False
 
     # ctl hook
     def queue_rescreen(self):
@@ -622,6 +623,16 @@ class Daemon:
         with self._lock:
             v = self._rescreen_flag
             self._rescreen_flag = False
+            return v
+
+    def queue_reliability(self):
+        with self._lock:
+            self._reliability_flag = True
+
+    def consume_reliability(self):
+        with self._lock:
+            v = self._reliability_flag
+            self._reliability_flag = False
             return v
 
     def plan_slots(self):
@@ -1446,18 +1457,36 @@ class Daemon:
                 policy = derive_policy([c[3] for c in cl], "1h", 0.5, "neutral")
             except Exception as exc:
                 policy = {"error": str(exc)[:120]}
+            # classify the regime so the adopted bot joins the reliability
+            # ledger under a real archetype instead of "unknown"
+            try:
+                regime = reclassify_regime(venue, symbol) or "neutral"
+            except Exception:
+                regime = "neutral"
+            ticket = {"symbol": symbol, "venue": venue,
+                      "decision": "GO", "grid_type": "neutral",
+                      "regime": regime}
+            # record the adoption as a decision so a later rotation can
+            # attach an outcome (adopted bots used to have decision_id=None
+            # and never fed the memory/reflection loop)
+            decision_id = record_decision_safe(
+                ticket,
+                {"symbol": symbol, "venue": venue, "slot": slot,
+                 "regime": regime, "stagnation_policy": policy},
+                {"kind": "adopted", "slot": slot["slot"], "symbol": symbol,
+                 "venue": venue,
+                 "msg": f"adopted bot {b.get('code')}"})
             self.state["active_bots"][str(slot["slot"])] = {
                 "symbol": symbol, "venue": venue,
                 "since": utcnow(), "adopted": True,
                 "bot_code": b.get("code"),
-                "ticket": {"symbol": symbol, "venue": venue,
-                           "decision": "GO", "grid_type": "neutral"},
+                "ticket": ticket,
                 "score_final": None,
-                "archetype": None,
+                "archetype": regime,
                 "stagnation_policy": policy,
                 "channel": None,
                 "profile_code": None, "pair_code": b.get("pairCode"),
-                "upsert": None, "decision_id": None,
+                "upsert": None, "decision_id": decision_id,
             }
             log(self.state, {"kind": "adopted", "slot": slot["slot"],
                              "msg": f"{venue}:{symbol} bot {b.get('code')} "
@@ -1553,6 +1582,12 @@ class Daemon:
                 except Exception as exc:
                     log(self.state, {"kind": "reliability-error", "msg": str(exc)[:160]})
                 next_reliability = now + reliability_s
+            if self.consume_reliability():
+                try:
+                    self.reliability_cycle()
+                except Exception as exc:
+                    log(self.state, {"kind": "reliability-error",
+                                     "msg": str(exc)[:160]})
             if self.consume_rescreen():
                 try:
                     self.rescreen_cycle(dry_run=dry_run,
@@ -1586,6 +1621,17 @@ class Daemon:
 
 
 def main():
+    # Graceful SIGTERM: exit 0 so a supervisor (launchd KeepAlive with
+    # SuccessfulExit=false) restarts only on real crashes, not on stops.
+    import signal
+
+    def _term(_signum, _frame):
+        raise SystemExit(0)
+
+    try:
+        signal.signal(signal.SIGTERM, _term)
+    except (ValueError, OSError):
+        pass  # non-main thread (tests) — fine
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--once", action="store_true")
@@ -1598,8 +1644,14 @@ def main():
     ap.add_argument("--port", type=int, default=None)
     args = ap.parse_args()
     d = Daemon(port=args.port)
-    d.run(once=args.once, dry_run=not args.live_paper,
-          no_confluence=args.no_confluence, top=args.top)
+    try:
+        d.run(once=args.once, dry_run=not args.live_paper,
+              no_confluence=args.no_confluence, top=args.top)
+    finally:
+        try:
+            save_state(d.state)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

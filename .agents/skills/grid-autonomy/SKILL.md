@@ -60,12 +60,24 @@ Control plane on `:8799`:
 | GET | `/reliability` | Reliability ledger. |
 | GET | `/observe` | Latest observation snapshot. |
 | POST | `/rescreen` | Queue a rescreen cycle. |
+| POST | `/reliability` | Queue an immediate reliability-ledger refresh. |
 | POST | `/rotate` | Force-rotate: body `{"slot": n}`. |
 | POST | `/kill` | Write KILL file (daemon halts next tick). |
 
 Hard stop: `touch agents/grid-autonomy/KILL` (clear with `rm -f` before
 restart). `start.sh` imports `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY`
 from the `dsh web` process env and refuses to start without them.
+
+**Supervision (crash + reboot survival):** `scripts/install_launchd.sh`
+installs two per-user LaunchAgents — `com.tvcli.grid-autonomy`
+(`scripts/run_launchd.py`, foreground `--live-paper`) and `com.tvcli.serve`
+(`tvcli serve`, the `:8765` confluence backend). `KeepAlive
+{SuccessfulExit: false}` restarts only on crashes (verified: `kill -9`
+→ restart in ~30s); `stop.sh`/SIGTERM exits 0 and stays stopped; a leftover
+KILL file blocks startup on purpose. macOS TCC: the repo is on a removable
+volume, so the agent must run under Homebrew python3 (`/opt/homebrew/bin/
+python3` holds the Removable Volumes grant; launchd bash cannot read the
+volume).
 
 ## Read run cards + journal
 

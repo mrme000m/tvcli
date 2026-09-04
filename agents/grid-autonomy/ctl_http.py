@@ -7,6 +7,7 @@ Endpoints (127.0.0.1:<port>, default 8799):
     GET  /reliability  current reliability ledger
     GET  /observe      latest observation snapshot
     POST /rescreen     queue an immediate rescreen cycle
+    POST /reliability  queue an immediate reliability-ledger refresh
     POST /rotate       force-rotate a slot (body {"slot": n})
     POST /kill         write the KILL file (daemon halts on next tick)
 
@@ -65,6 +66,9 @@ class Ctl(BaseHTTPRequestHandler):
             self._json(200, {"killed": True})
         elif self.path == "/rescreen":
             self.daemon.queue_rescreen()
+            self._json(200, {"queued": True})
+        elif self.path == "/reliability":
+            self.daemon.queue_reliability()
             self._json(200, {"queued": True})
         elif self.path == "/rotate":
             length = int(self.headers.get("Content-Length", 0))

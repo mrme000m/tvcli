@@ -102,6 +102,9 @@ Accuracy note: every fact below is verified against the code at
 7. **Reflect.** Every decision lands in `state/decisions.jsonl`; every cycle
    writes a run card `state/reports/<UTC-ts>-<kind>.{json,md}` with
    Route/Ground/Deliberate/Guard/Deploy/Observe/Reflect/Caveats sections.
+   Adopted bots get a decision record at adoption (`kind: adopted`, regime
+   archetype classified) so a later rotation attaches an outcome — the
+   memory/reflection loop learns from adopted bots too.
 8. **Reliability (24h).** `daemon.reliability_cycle` exports each active
    bot's closed round-trips (`execution/reliability_grid.py`), aggregates
    them per archetype into `state/reliability.json` (zero-sample
@@ -151,6 +154,8 @@ Accuracy note: every fact below is verified against the code at
 | `policy/stagnation.py` | Per-token stagnation policy + slot allocator. |
 | `watch/spec.py` | Per-bot tvcli watch spec generator. |
 | `scripts/start.sh` / `stop.sh` | Start (CF env from `dsh web`) / stop (POST /kill). |
+| `scripts/run_launchd.py` | launchd entrypoint (foreground, CF env import, PID file). |
+| `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
 | `tests/` | 129 offline unit tests (`python3 -m unittest`). |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
@@ -266,6 +271,31 @@ scripts/stop.sh
 15s, then SIGKILLs, and removes the PID file. Port override:
 `GRID_DAEMON_PORT`.
 
+**Supervision (survive crashes + reboots):**
+
+```sh
+scripts/install_launchd.sh   # installs + loads two per-user LaunchAgents
+```
+
+- `com.tvcli.grid-autonomy` — runs `scripts/run_launchd.py` **in the
+  foreground** with `--live-paper` (imports the CF keys from the `dsh web`
+  process env, writes the PID file, then runs `daemon.py` in-process).
+- `com.tvcli.serve` — runs `tvcli serve` in the foreground (`:8765`,
+  the confluence backend).
+- Restart policy: `KeepAlive={SuccessfulExit: false}` — a crash (non-zero
+  exit) restarts after `ThrottleInterval` (30s); `stop.sh`/SIGTERM exits 0
+  and stays stopped until the next boot/load; a leftover KILL file blocks
+  startup on purpose. The daemon handles SIGTERM gracefully (state save,
+  exit 0). Verified live: `kill -9 <pid>` → launchd restarts within ~30s.
+- macOS TCC note: the repo lives on a removable volume, which launchd-spawned
+  bash cannot read — the agent must run under Homebrew python3
+  (`/opt/homebrew/bin/python3`, holds the Removable Volumes grant, same as
+  `com.tvcli.watchtower`); that interpreter has `httpx`+`websockets` for the
+  `wt_browser.py` subprocesses.
+- Manual control:
+  `launchctl kickstart -k gui/$(id -u)/com.tvcli.grid-autonomy` (restart),
+  `launchctl bootout gui/$(id -u)/com.tvcli.grid-autonomy` (unload).
+
 **Status and control plane (port 8799):**
 
 | Method | Path | Effect |
@@ -275,6 +305,7 @@ scripts/stop.sh
 | GET | `/reliability` | Current reliability ledger. |
 | GET | `/observe` | Latest `observe_all()` snapshot. |
 | POST | `/rescreen` | Queue an immediate rescreen cycle. |
+| POST | `/reliability` | Queue an immediate reliability-ledger refresh (else the 24h cron). |
 | POST | `/rotate` | Force-rotate a slot: body `{"slot": n}`. |
 | POST | `/kill` | Write the KILL file (daemon halts on next tick). |
 
