@@ -233,3 +233,23 @@ values are payload fields).
   per-command timeouts.)
 - `POST :2087` fetches with custom headers fail CORS — use plain fetch,
   `credentials: "omit"` for the market-data origin.
+
+## Plan limits (verified 2026-09-05)
+
+- `GET /en/trader/dashboard/account-limits` (session): dashboard view —
+  `gridBots {active, max}`, `dcaBots`, `signalBots`, `aiSpreadBots` (0/5),
+  `aiBots` (0/5), `openPositions` (0/2000), `apiPerExchange`.
+- The cap **enforced** by `POST /en/trader/grid_bots/upsert` comes from the
+  configurator boot (`GET /en/trader/grid_bots/upsert?gridMarket=…`):
+  `data.maxActiveGridBots = {other: 1, premium: 200}` and
+  `data.activeGridBots = {other: n, premium: {HYPERLIQUID_SWAP: n}}`
+  (+ `data.exchangesUsedPairs`, one bot per pair per profile).
+- Meaning: exchange tiers, not a global count — HYPERLIQUID_SWAP is premium
+  (WT's 0.035% builder-fee arrangement → Premium grid limits on Hyperliquid);
+  every other exchange (BINANCE, BINANCE_FUTURES, …) runs on the Free plan
+  with **1 active grid bot**. Beyond it the create returns 400
+  `Maximum number of Grid Bots reached. Please upgrade your plan.` even when
+  account-limits says `gridBots: n/200`.
+- Only active bots count toward the tier cap; stopped bots free their pair
+  slot (`exchangesUsedPairs`) — stop→delete→create rotations are safe
+  everywhere.

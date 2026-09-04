@@ -46,6 +46,8 @@ class Ctl(BaseHTTPRequestHandler):
                              "committed": st["committed"],
                              "live_allow": st["live_allow"],
                              "profiles": st.get("profiles", []),
+                             "capacity": st.get("capacity", {}),
+                             "account_limits": st.get("account_limits", {}),
                              "capabilities": getattr(
                                  self.daemon, "capabilities", {}),
                              "last_cycle": st.get("last_cycle"),

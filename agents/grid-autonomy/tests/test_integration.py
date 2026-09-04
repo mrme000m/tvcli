@@ -217,6 +217,8 @@ class TestRotationPass(unittest.TestCase):
             mock.patch("daemon.guard_deploy",
                        side_effect=lambda t, ctx: (True, [])),
             mock.patch("daemon.grid_profiles_safe", side_effect=lambda: PROFILES),
+            mock.patch("daemon.grid_capacity_safe", side_effect=lambda: {}),
+            mock.patch("daemon.account_limits_safe", side_effect=lambda: {}),
             mock.patch("daemon.reliability_load_safe", side_effect=lambda: {}),
             mock.patch("daemon.grid_status_safe", side_effect=lambda: []),
             mock.patch("daemon.grid_adapter.build_ticket_payloads",
@@ -447,6 +449,8 @@ class TestMinHoldFloor(unittest.TestCase):
             mock.patch("daemon.SPECS_DIR",
                        os.path.join(self.tmp.name, "watch", "specs")),
             mock.patch("daemon.grid_profiles_safe", side_effect=lambda: []),
+            mock.patch("daemon.grid_capacity_safe", side_effect=lambda: {}),
+            mock.patch("daemon.account_limits_safe", side_effect=lambda: {}),
             mock.patch("daemon.deliberate",
                        side_effect=lambda brief: {
                            "decision": "GO", "grid_type": "neutral",

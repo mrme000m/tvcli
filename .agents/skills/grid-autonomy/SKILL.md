@@ -21,7 +21,11 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 - **Guard:** `execution/guardrails.py` — 8 fail-closed gates (KILL, pairCode,
   profile, sizing, spread, venue/side, reliability, rotation). Any veto
   blocks deployment.
-- **Deploy:** `execution/grid_adapter.py` + `resolve.py` — ATR-band channel,
+- **Deploy:** plan-capacity pre-check (`observe.grid_capacity()` →
+  `capacity-veto` — free plan: 1 active grid bot on non-Hyperliquid
+  exchanges; HYPERLIQUID_SWAP is premium/200 via WT's 0.035% builder-fee
+  arrangement; rotation frees capacity before the challenger create), then
+  `execution/grid_adapter.py` + `resolve.py` — ATR-band channel,
   geometric grid lines, USD-denominated sizing, per-pair min-notional
   floor from `:2087` market metadata.
 - **Watch (60s):** `execution/observe.py` reads real status/positions/
@@ -30,7 +34,10 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 - **Rotate:** stagnant incumbent + challenger Δscore ≥ 5 + cooldown expired
   → stop → verify → delete → cooldown → deploy.
 - **Reflect:** `state/decisions.jsonl` + run cards
-  `state/reports/<ts>-<kind>.{json,md}`.
+  `state/reports/<ts>-<kind>.{json,md}`. Subscription state (account-limits
+  dashboard + enforced tier caps) is re-observed every rescreen cycle and
+  journaled as `subscription` on any change (`/status` → `capacity` +
+  `account_limits`).
 
 ## Operate
 
@@ -68,7 +75,8 @@ from the `dsh web` process env and refuses to start without them.
 - **Journal:** `state/state.json → journal` (last 200 events) and
   `GET /status → journal_tail`. Kinds: `screen`, `veto`, `guard-veto`,
   `reliability-veto`, `deploy-paper`, `adopted`, `stagnant`, `adjust`,
-  `rotation-stop/delete/rotate`, `kill`, and more.
+  `rotation-stop/delete/rotate`, `capacity-veto` (plan bot cap),
+  `subscription` (plan limits observed/changed), `kill`, and more.
 - **Decision journal:** `state/decisions.jsonl` — one line per decision;
   `record_outcome` attaches `"outcome"` on close. Ids are
   `dYYYYMMDD-NNN`. `payload_digest` is an md5 — full payloads are never

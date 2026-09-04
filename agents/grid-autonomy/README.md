@@ -74,7 +74,12 @@ Accuracy note: every fact below is verified against the code at
 3. **Guard (fail-closed).** `execution/guardrails.py` runs 8 gates. Any
    violation vetoes the deployment. No WunderTrading mutation happens before
    all gates pass.
-4. **Deploy.** `execution/grid_adapter.py` turns the ticket into the verified
+4. **Deploy.** A plan-capacity pre-check (`observe.grid_capacity()` →
+    `Daemon.venue_capacity_block()`) skips venues whose exchange tier is at
+    its active-grid-bot cap (free plan: HYPERLIQUID_SWAP is premium/200 via
+    WT's 0.035% builder-fee arrangement, everything else allows one active
+    bot) with a `capacity-veto` journal entry. `execution/grid_adapter.py`
+    then turns the ticket into the verified
    `grid_bots/upsert` payload: ATR-band channel, ATR-derived
    profit-per-grid, geometric grid lines, USD-denominated per-trade
    sizing (WT `amountPerTrade` is in the market's USD-stable base
@@ -139,7 +144,7 @@ Accuracy note: every fact below is verified against the code at
 | `execution/guardrails.py` | 8 pure fail-closed gates (unit-testable). |
 | `execution/grid_adapter.py` | Ticket → `grid_bots/upsert` payloads + grid create/stop/delete/edit. |
 | `execution/resolve.py` | venue+symbol → `pairCode` via cached all-markets map. |
-| `execution/observe.py` | Read-only bot status/positions/history observation. |
+| `execution/observe.py` | Read-only bot status/positions/history observation + plan capacity (`grid_capacity()`, `account_limits()`). |
 | `execution/reliability_grid.py` | Per-archetype PF/samples ledger. |
 | `execution/profiles.py` | WunderTrading paper-profile creation helper. |
 | `execution/spreads.py` | Public Binance spot spread fetch (no auth). |
@@ -266,7 +271,7 @@ scripts/stop.sh
 | Method | Path | Effect |
 |--------|------|--------|
 | GET | `/health` | `{status, at, kill}` — liveness + KILL presence. |
-| GET | `/status` | slots, active bots, committed, `live_allow`, profiles, `last_cycle`, last 10 journal entries. |
+| GET | `/status` | slots, active bots, committed, `live_allow`, profiles, plan `capacity` + `account_limits`, `last_cycle`, last 10 journal entries. |
 | GET | `/reliability` | Current reliability ledger. |
 | GET | `/observe` | Latest `observe_all()` snapshot. |
 | POST | `/rescreen` | Queue an immediate rescreen cycle. |
@@ -361,6 +366,7 @@ python3 llm/provider.py --ping --json
 | All LLM calls fail | The daemon **does not block**: swarm falls back to the rule map and tags decisions `llm_degraded: true`. Check keys with `python3 llm/provider.py --ping`. |
 | Browser down / Cloudflare 403 | `resolve.py` and `observe.py` go through `wt_browser.py`; on failure `resolve` falls back to the cached market map and `observe` returns error/empty fields. Restart the browser session and re-run. |
 | `pairCode` unresolved | Market map missing or stale. The daemon fetches `https://wundertrading.com:2087/all-markets?market=…&marketExpiryGroup=infinite` via the browser and caches `state/market_map-{spot,derivative}.json` for 24h (stale cache is still used when the browser is down). |
+| `Maximum number of Grid Bots reached` on create | Plan capacity, **not** the account-limits dashboard number. The enforced caps live in the `grid_bots/upsert` init data: `maxActiveGridBots = {other: 1, premium: 200}` — HYPERLIQUID_SWAP is a *premium* exchange (200 active bots); every other exchange (incl. `BINANCE_FUTURES`) is the *other* tier with **one active grid bot** on the free plan. The daemon observes both views every rescreen cycle (journal kind `subscription` on any change) and pre-checks this (`capacity-veto`, `GET /status → capacity` / `account_limits`), skipping the create instead of retrying into the 400. Hyperliquid's Premium caps come from WunderTrading's 0.035% builder-fee arrangement. Rotations are unaffected (stop→delete frees the slot before the challenger create). `GET /en/trader/dashboard/account-limits` reports `gridBots: n/200` but is not what `upsert` enforces. |
 | Bot stillborn / tiny grid lines | The per-pair min-notional floor (`limits.cost.min` from `:2087`) bumps the allocation within caps, then widens the grid step to fit fewer lines; if neither fits it vetoes. Check `state/state.json → journal` for `size-floor` / `size-fit` / `guard-veto` entries. |
 | Rotation won’t happen | Requires a stagnant incumbent **and** Δscore ≥ 5 **and** expired per-token cooldown. Check `/status` journal for `rotation-veto` / `rotation-skip`. |
 | Empty `.md` run card | Older daemon shape bug (fixed); the companion `.json` was always correct. If you see it, upgrade daemon.py. |

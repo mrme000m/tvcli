@@ -171,3 +171,34 @@ Key facts (all live-verified on the `demo-hype` paper profile):
 - Every live deployment still requires the Phase E checklist and explicit
   user confirmation (see SKILL.md) — the webhook only *arms/triggers* an
   already-approved, already-configured bot.
+
+
+## 11. Plan limits & per-exchange caps (verified 2026-09-05)
+
+The **enforced** grid-bot capacity comes from the upsert init data, not the
+account-limits dashboard:
+
+```
+GET /en/trader/grid_bots/upsert?gridMarket=derivative   (auth browser session)
+  data.maxActiveGridBots   = {"other": 1, "premium": 200}
+  data.activeGridBots      = {"other": 1, "premium": {"HYPERLIQUID_SWAP": 2}}
+  data.exchangesUsedPairs  = {EXCHANGE: {profileCode: [pairCode, …]}}
+```
+
+| Exchange tier | Members | Active grid-bot cap (free plan) |
+|---|---|---|
+| premium | HYPERLIQUID_SWAP (WT builder-fee arrangement, 0.035%) | 200 |
+| other | everything else (BINANCE, BINANCE_FUTURES, BYBIT, OKX, …) | **1** |
+
+- Creating beyond the cap: 400 `{"message": "Maximum number of Grid Bots
+  reached. Please upgrade your plan."}` — misleadingly worded; it fires at
+  2 active bots on a non-Hyperliquid exchange even though the dashboard says
+  `gridBots: n/200`.
+- `GET /en/trader/dashboard/account-limits` (gridBots 3/200, dcaBots 0/300,
+  aiSpreadBots 0/5, aiBots 0/5, openPositions 0/2000) is the dashboard view;
+  it does **not** reflect the per-tier cap that upsert enforces.
+- Only **active** bots count toward the tier caps, and stopped bots free
+  their pair slot (verified: stopped HYPE-USDC is absent from
+  `exchangesUsedPairs`); deleting frees both capacity and pair.
+- Rotations (stop → verify → delete → create) are safe on every tier: the
+  delete happens before the challenger create.

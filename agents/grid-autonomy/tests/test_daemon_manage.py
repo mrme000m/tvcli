@@ -1,3 +1,4 @@
+import json
 #!/usr/bin/env python3
 """Daemon manage-loop tests — hermetic, no network, no wt_browser.
 
@@ -107,6 +108,8 @@ class ManageTestCase(unittest.TestCase):
             "daemon.pair_meta": lambda venue, symbol, market=None: {"min_cost": 1, "amount_precision": 2},
             "daemon.guard_deploy": lambda ticket, ctx: (True, []),
             "daemon.grid_profiles_safe": lambda: list(PROFILES),
+            "daemon.grid_capacity_safe": lambda: {},
+            "daemon.account_limits_safe": lambda: {},
             "daemon.reliability_load_safe": lambda: dict(self.reliability),
             "daemon.grid_status_safe": fake_grid_status,
             "daemon.grid_edit_safe": fake_grid_edit,
@@ -149,12 +152,50 @@ class ManageTestCase(unittest.TestCase):
         self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
         ok = d.execute_rotation("1", challenger, dry_run=False)
         self.assertTrue(ok)
+        # already-stopped incumbent: the stop call is skipped (WT would
+        # answer 400 "Grid Bot already stopped")
         self.assertEqual(self.ops, [
             ("build", "PAIR1", 0.25),      # challenger plan (guard passes)
-            ("stop", "OLDBOT", False),     # stop incumbent
-            ("verify",),                   # verify stopped
+            ("verify",),                   # pre-check: already stopped
+            ("verify",),                   # post-stop verification
             ("delete", "OLDBOT", False),   # delete incumbent
             ("create", "hyperliquid", False),  # deploy challenger
+        ])
+
+    def test_rotation_stops_active_incumbent(self):
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0,
+            "stagnation_policy": {
+                "regime": "neutral",
+                "stagnant_if": {"min_fills_24h": 1.0, "min_realized_ratio": 0.4},
+                "score_drop_rotate": 12.0, "hysteresis_score": 5.0,
+                "cooldown_h": 12.0},
+            "observed": {"fills_24h": 0.0, "realized_ratio": 0.0},
+            "decision_id": "OLD1",
+        }
+        challenger = {"venue": "hyperliquid", "symbol": "SOL",
+                      "tv_symbol": "HYPE:SOL", "regime": "neutral",
+                      "score_final": 60.0,
+                      "archetype": "Neutral Grid (mean-reversion)"}
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "active"}]
+
+        def fake_stop_active(bot_code, mode, dry_run=True):
+            self.ops.append(("stop", bot_code, dry_run))
+            self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
+            return {"ok": True}
+
+        with mock.patch("daemon.grid_adapter.grid_stop", fake_stop_active):
+            ok = d.execute_rotation("1", challenger, dry_run=False)
+        self.assertTrue(ok)
+        self.assertEqual(self.ops, [
+            ("build", "PAIR1", 0.25),
+            ("verify",),                   # pre-check: incumbent still active
+            ("stop", "OLDBOT", False),     # active incumbent: stop first
+            ("verify",),                   # post-stop verification
+            ("delete", "OLDBOT", False),
+            ("create", "hyperliquid", False),
         ])
         self.assertGreater(d.state["cooldowns_until"]["hyperliquid:PUMP"],
                            time.time())
@@ -432,3 +473,125 @@ class DefensiveImportTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+CAPACITY_LIVE = {
+    "max_active": {"other": 1, "premium": 200},
+    "active": {"other": 1, "premium": {"HYPERLIQUID_SWAP": 2}},
+    "used_pairs": {"BINANCE_FUTURES": {"demo-bn-prof": ["SOLUSDT"]},
+                   "HYPERLIQUID_SWAP": {"demo-hype-prof": ["1", "200"]}},
+}
+
+PROFILES_LIVE = [
+    {"code": "demo-hype-prof", "name": "demo-hype",
+     "exchange": "HYPERLIQUID_SWAP", "paperTrading": True, "balance": 300.0},
+    {"code": "demo-bn-prof", "name": "demo-bn",
+     "exchange": "BINANCE_FUTURES", "paperTrading": True, "balance": 200.0},
+]
+
+
+class CapacityBlockTestCase(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch("daemon.STATE_PATH",
+                             os.path.join(self.tmp.name, "state.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.d = daemon.Daemon()
+        self.d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
+        self.d.profiles = list(PROFILES_LIVE)
+
+    def test_binance_blocked_at_tier_cap(self):
+        # free plan: 1 active bot on non-premium exchanges, SOL occupies it
+        reason = self.d.venue_capacity_block(
+            {"venue": "binance", "symbol": "PUMP"}, CAPACITY_LIVE)
+        self.assertTrue(reason)
+        self.assertIn("plan cap", reason)
+
+    def test_hyperliquid_premium_allowed(self):
+        reason = self.d.venue_capacity_block(
+            {"venue": "hyperliquid", "symbol": "ZEC"}, CAPACITY_LIVE)
+        self.assertIsNone(reason)
+
+    def test_hyperliquid_blocked_at_premium_cap(self):
+        cap = json.loads(json.dumps(CAPACITY_LIVE))
+        cap["max_active"]["premium"] = 2
+        cap["active"]["premium"]["HYPERLIQUID_SWAP"] = 2
+        reason = self.d.venue_capacity_block(
+            {"venue": "hyperliquid", "symbol": "ZEC"}, cap)
+        self.assertTrue(reason)
+
+    def test_used_pair_blocked(self):
+        cap = json.loads(json.dumps(CAPACITY_LIVE))
+        cap["active"]["other"] = 0  # tier has room; pair is the blocker
+        with mock.patch("daemon.resolve_pair_safe",
+                        lambda venue, symbol, market=None: ("SOLUSDT", "")):
+            reason = self.d.venue_capacity_block(
+                {"venue": "binance", "symbol": "SOL"}, cap)
+        self.assertTrue(reason)
+        self.assertIn("already", reason)
+
+    def test_no_capacity_data_passes(self):
+        self.assertIsNone(
+            self.d.venue_capacity_block({"venue": "binance", "symbol": "X"}, {}))
+
+
+class SubscriptionObservationTestCase(unittest.TestCase):
+    """The daemon must observe the plan (account-limits + tier caps) each
+    rescreen cycle and journal a `subscription` entry when it changes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch("daemon.STATE_PATH",
+                             os.path.join(self.tmp.name, "state.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.d = daemon.Daemon()
+        self.d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
+        patches = {
+            "daemon.grid_profiles_safe": lambda: list(PROFILES),
+            "daemon.grid_capacity_safe": lambda: dict(CAPACITY_LIVE),
+            "daemon.account_limits_safe": lambda: {
+                "gridBots": {"active": 3, "max": 200, "allowOnCurrentPlan": True},
+                "dcaBots": {"active": 0, "max": 300},
+            },
+            "daemon.run_merge": lambda **kw: {"results": []},
+            "daemon.write_run_card_safe": lambda rep: None,
+            "daemon.record_decision_safe": lambda *a, **k: "d1",
+            "daemon.resolve_pair_safe": lambda v, s, market=None: ("PAIR1", ""),
+        }
+        self.patches = {}
+        for target, new in patches.items():
+            p = mock.patch(target, new)
+            p.start()
+            self.addCleanup(p.stop)
+
+    def test_subscription_journaled_once_then_only_on_change(self):
+        self.d.rescreen_cycle(dry_run=True)
+        self.assertEqual(self.d.state["account_limits"]["gridBots"]["max"], 200)
+        self.assertEqual(self.d.state["capacity"]["max_active"]["other"], 1)
+        subs = [j for j in self.d.state["journal"] if j.get("kind") == "subscription"]
+        self.assertEqual(len(subs), 1)
+        self.assertIn("gridBots 3/200", subs[0]["msg"])
+        # second cycle with identical limits: no duplicate journal entry
+        self.d.rescreen_cycle(dry_run=True)
+        subs = [j for j in self.d.state["journal"] if j.get("kind") == "subscription"]
+        self.assertEqual(len(subs), 1)
+        # a plan change (free->paid tier caps) journals again
+        mock.patch("daemon.grid_capacity_safe",
+                   side_effect=lambda: {
+                       "max_active": {"other": 20, "premium": 200},
+                       "active": {"other": 1, "premium": {"HYPERLIQUID_SWAP": 2}},
+                   }).start()
+        self.d.rescreen_cycle(dry_run=True)
+        subs = [j for j in self.d.state["journal"] if j.get("kind") == "subscription"]
+        self.assertEqual(len(subs), 2)
+
+    def test_limits_signature_shape(self):
+        sig = json.loads(daemon._limits_signature(
+            {"gridBots": {"active": 3, "max": 200}}, CAPACITY_LIVE))
+        self.assertEqual(sig["gridBots"], {"active": 3, "max": 200})
+        self.assertEqual(sig["tier_caps"], {"other": 1, "premium": 200})
+        self.assertEqual(sig["premium_exchanges"], ["HYPERLIQUID_SWAP"])

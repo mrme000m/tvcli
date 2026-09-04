@@ -159,6 +159,20 @@ to test; it fires `L1`/`L2` actions the prime-orchestrator can consume).
 **Reliability (Phase G):** `python3 reliability.py` exports closed history and
 scores each archetype (win rate / PF / expectancy) against the pass/kill bars.
 
+## Plan capacity (verified 2026-09-05)
+
+- The **free plan allows 1 active grid bot on non-Hyperliquid exchanges**
+  (BINANCE, BINANCE_FUTURES, BYBIT, OKX, …). **HYPERLIQUID_SWAP is premium**
+  (up to 200 active grid bots) via WunderTrading's 0.035% builder-fee
+  arrangement — Hyperliquid trades get Premium grid limits.
+- Creating beyond the cap fails with 400 `Maximum number of Grid Bots
+  reached. Please upgrade your plan.` — even though the account-limits
+  dashboard says `gridBots: n/200`. Check the enforced caps from the upsert
+  init data (`maxActiveGridBots` / `activeGridBots` / `exchangesUsedPairs`)
+  before planning a second bot on any non-Hyperliquid venue.
+- One bot per pair per profile (server-validated). Stopped bots free both
+  their tier slot and pair — stop→delete→create rotations are always safe.
+
 ## Safety rails
 
 - Never execute without explicit user confirmation of the exact trade.

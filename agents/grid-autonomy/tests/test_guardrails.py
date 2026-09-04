@@ -125,3 +125,22 @@ class TestUpsert(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestRotationNoneScores(unittest.TestCase):
+    """Regression: adopted incumbents carry score_final=None — the rotation
+    gate must coerce None to 0 instead of raising float - None."""
+
+    def test_none_incumbent_score_does_not_raise(self):
+        ok, v = deploy(GO, base_ctx(is_rotation=True, cooldown_ok=True,
+                                    candidate_score=102.0,
+                                    incumbent_score=None, hysteresis=5.0))
+        self.assertTrue(ok, v)
+        # None incumbent coerces to 0: challenger passes the Δscore gate
+
+    def test_none_candidate_score_does_not_raise(self):
+        ok, v = deploy(GO, base_ctx(is_rotation=True, cooldown_ok=True,
+                                    candidate_score=None,
+                                    incumbent_score=0.0, hysteresis=5.0))
+        self.assertFalse(ok)
+        self.assertTrue(any("hysteresis" in x for x in v))

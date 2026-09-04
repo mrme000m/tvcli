@@ -111,9 +111,75 @@ def _balance_usd(balance):
     return None
 
 
+_INIT_CACHE = {"at": 0.0, "raw": None, "fn": None}  # 60s TTL
+_INIT_TTL = 60.0
+
+
+def _upsert_init():
+    """Cached GET /en/trader/grid_bots/upsert init data (never raises).
+
+    The cache is keyed on the identity of `_api_json` so tests that patch
+    it get a guaranteed cache miss (no cross-test pollution).
+    """
+    fn = _api_json
+    now = time.time()
+    if (_INIT_CACHE["raw"] is not None
+            and _INIT_CACHE.get("fn") is fn
+            and now - _INIT_CACHE["at"] < _INIT_TTL):
+        return _INIT_CACHE["raw"]
+    raw = fn("/en/trader/grid_bots/upsert")
+    if isinstance(raw, dict) and isinstance(raw.get("data"), dict):
+        _INIT_CACHE.update({"at": now, "raw": raw, "fn": fn})
+    return raw
+
+
+def grid_capacity():
+    """Plan capacity from the upsert init data. Returns {} when unavailable.
+
+    Shape (verified live 2026-09-05 on the free plan):
+        max_active: {"other": 1, "premium": 200}
+        active:     {"other": 1, "premium": {"HYPERLIQUID_SWAP": 2}}
+        used_pairs: {EXCHANGE: {profileCode: [pairCode, ...]}}
+
+    Semantics: "premium" is an exchange tier (HYPERLIQUID_SWAP qualifies),
+    not a plan tier — non-premium exchanges share one active-grid-bot cap
+    (`other`); premium exchanges have their own, much larger cap. The
+    account-limits dashboard endpoint (gridBots 3/200) does NOT reflect the
+    per-tier cap actually enforced by grid_bots/upsert.
+    """
+    raw = _upsert_init()
+    data = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(data, dict):
+        return {}
+    out = {}
+    for key, dst in (("maxActiveGridBots", "max_active"),
+                     ("activeGridBots", "active"),
+                     ("exchangesUsedPairs", "used_pairs")):
+        val = data.get(key)
+        if isinstance(val, dict):
+            out[dst] = val
+    return out
+
+
+def account_limits():
+    """Plan limits from the trader dashboard (never raises; {} on failure).
+
+    GET /en/trader/dashboard/account-limits returns per-bot-type usage:
+        {"openPositions": {...}, "gridBots": {"active": n, "max": m},
+         "dcaBots": {...}, "signalBots": {...}, "aiSpreadBots": {...},
+         "aiBots": {...}}
+    NOTE (verified 2026-09-05): this is the DASHBOARD view. The cap actually
+    enforced by grid_bots/upsert is per exchange tier (see grid_capacity()):
+    Hyperliquid is premium via WT's 0.035% builder-fee arrangement; every
+    other exchange runs on the Free plan (1 active grid bot).
+    """
+    raw = _api_json("/en/trader/dashboard/account-limits")
+    return raw if isinstance(raw, dict) else {}
+
+
 def grid_profiles():
     """List of connected trading profiles with code/name/exchange/paper/balance."""
-    raw = _api_json("/en/trader/grid_bots/upsert")
+    raw = _upsert_init()
     data = raw.get("data") if isinstance(raw, dict) else None
     profiles = (data or {}).get("exchangesProfiles") or {}
     out = []

@@ -162,6 +162,42 @@ squeeze breakout, funding extremes) — details in the playbook.
    R ≥ 1.5), drawdown survivable. Scale only then; kill on PF < 1.0 over the
    last 20 samples.
 
+## Plan limits & capacity (verified 2026-09-05)
+
+Two different numbers, one trap:
+
+- **Dashboard view** — `GET /en/trader/dashboard/account-limits` (session web):
+  `gridBots 3/200`, `dcaBots 0/300`, `signalBots` not allowed (`max: -1`),
+  `aiSpreadBots 0/5`, `aiBots 0/5`, `openPositions 0/2000`. This is what the
+  pricing page shows, **not** what `grid_bots/upsert` enforces.
+- **Enforced caps** — from the `GET /en/trader/grid_bots/upsert?gridMarket=…`
+  init data: `maxActiveGridBots = {other: 1, premium: 200}`,
+  `activeGridBots = {other: 1, premium: {HYPERLIQUID_SWAP: 2}}`,
+  `exchangesUsedPairs` (one bot per pair per profile).
+
+Rules:
+
+1. **Exchanges are tiered.** HYPERLIQUID_SWAP is *premium* — WunderTrading
+   grants Premium grid limits on Hyperliquid via its **0.035% builder-fee
+   arrangement** (up to 200 active grid bots). Every other exchange
+   (BINANCE, BINANCE_FUTURES, BYBIT, OKX, …) runs on the **Free plan:
+   1 active grid bot**. Creating beyond the cap fails with 400
+   `Maximum number of Grid Bots reached. Please upgrade your plan.`
+2. **One bot per pair per profile** (server-validated, `exchangesUsedPairs`).
+3. Stopping/deleting a bot frees its capacity and pair slot —
+   stop→delete→create rotations work on any tier.
+
+Check both from the shell:
+
+```bash
+python3 scripts/wt_browser.py api GET /en/trader/dashboard/account-limits
+python3 scripts/wt_browser.py api GET "/en/trader/grid_bots/upsert?gridMarket=derivative" | jq .data.maxActiveGridBots,.data.activeGridBots
+```
+
+The grid-autonomy daemon consumes this automatically (`observe.grid_capacity()`
++ `observe.account_limits()`, journal kind `subscription`, `GET /status` →
+`capacity`/`account_limits`, deploy pre-check `capacity-veto`).
+
 ## Safety rails
 
 - **Never execute without explicit user confirmation of the exact trade.**

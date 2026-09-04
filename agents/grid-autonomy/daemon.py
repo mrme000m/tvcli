@@ -71,12 +71,19 @@ except Exception:
     market_map = {}
 
 try:
-    from observe import observe_all, grid_profiles, grid_status  # noqa: F401
+    from observe import (account_limits, observe_all,  # noqa: F401
+                         grid_capacity, grid_profiles, grid_status)
     HAS_OBSERVE = True
 except Exception:
     HAS_OBSERVE = False
 
     def observe_all(active_bots):
+        return {}
+
+    def account_limits():
+        return {}
+
+    def grid_capacity():
         return {}
 
     def grid_profiles():
@@ -303,6 +310,36 @@ def grid_profiles_safe():
         return grid_profiles() or []
     except Exception:
         return []
+
+
+def grid_capacity_safe():
+    """grid_capacity with error guard: {} on failure (never raises)."""
+    try:
+        return grid_capacity() or {}
+    except Exception:
+        return {}
+
+
+def account_limits_safe():
+    """account_limits with error guard: {} on failure (never raises)."""
+    try:
+        return account_limits() or {}
+    except Exception:
+        return {}
+
+
+def _limits_signature(limits, capacity):
+    """Compact signature of the observed subscription state (change detection)."""
+    gb = (limits or {}).get("gridBots") or {}
+    caps = (capacity or {}).get("max_active") or {}
+    active = (capacity or {}).get("active") or {}
+    premium = active.get("premium")
+    premium_exchanges = sorted(premium.keys()) if isinstance(premium, dict) else []
+    return json.dumps({
+        "gridBots": {"active": gb.get("active"), "max": gb.get("max")},
+        "tier_caps": caps,
+        "premium_exchanges": premium_exchanges,
+    }, sort_keys=True)
 
 
 def grid_status_safe():
@@ -652,7 +689,11 @@ class Daemon:
             meta = pair_meta(cand["venue"], cand["symbol"], market=market) or {}
         except Exception:
             meta = {}
-        min_cost = meta.get("min_cost") or MIN_USD_PER_GRID
+        # WT grid engines enforce a per-line floor ($MIN_USD_PER_GRID) that is
+        # HIGHER than the exchange's order min (limits.cost.min) on Binance
+        # futures (5 USDT) — the exchange value must only raise it, never lower
+        # it below the grid floor.
+        min_cost = max(meta.get("min_cost") or 0, MIN_USD_PER_GRID)
         amount_precision = meta.get("amount_precision")
 
         # escalation ladder
@@ -754,8 +795,8 @@ class Daemon:
         if is_rotation:
             ctx.update({
                 "cooldown_ok": cooldown_ok,
-                "incumbent_score": (incumbent or {}).get("score_final", 0),
-                "candidate_score": cand.get("score_final", 0),
+                "incumbent_score": (incumbent or {}).get("score_final") or 0,
+                "candidate_score": cand.get("score_final") or 0,
                 # manual rotate (ctl /rotate) overrides the score hysteresis;
                 # every other guard (sizing, spread, venue, reliability) stays
                 "hysteresis": 0.0 if (incumbent or {}).get("force_rotate")
@@ -789,6 +830,17 @@ class Daemon:
         res = retry_grid_call(grid_adapter.grid_create, False,
                               payloads["upsert"], cand["venue"], dry_run=False)
         action["result"] = res
+        if not res.get("ok"):
+            # surface the real WT reason (e.g. "Maximum number of Grid Bots
+            # reached") instead of a bare DEPLOY-PAPER journal line
+            msg = None
+            try:
+                msg = json.loads(res.get("stdout") or "").get("message")
+            except Exception:
+                pass
+            action["kind"] = "deploy-failed"
+            action["error"] = (msg or (res.get("stderr") or "")[:200]
+                                or "grid_create ok=false")
         log(self.state, action)
         bot_code = extract_bot_code(res)
         if res.get("ok") and bot_code:
@@ -828,6 +880,49 @@ class Daemon:
                 log(self.state, {"kind": "warn", "msg": f"spec write failed: {exc}"})
         return action
 
+    def venue_capacity_block(self, cand, capacity):
+        """(blocked_reason | None) — plan-level grid-bot capacity for a venue.
+
+        From the upsert init data (maxActiveGridBots/activeGridBots/
+        exchangesUsedPairs). Two rules:
+          1. active-grid-bot cap per exchange tier — non-premium exchanges
+             (free plan: everything except HYPERLIQUID_SWAP) share a single
+             active-bot cap; premium exchanges have their own large cap.
+             A blocked venue is rotation-only: stop+delete first frees it.
+          2. one bot per pair per profile (server-validated pair exclusivity).
+        Returns None when capacity data is unavailable — the guard-profile
+        gate and the server-side 400 stay the backstops.
+        """
+        if not capacity:
+            return None
+        profiles = self.profiles or self.state.get("profiles") or []
+        prof, _violation = select_profile(cand["venue"], profiles,
+                                          self.config, paper=True)
+        if not prof:
+            return None  # profile gate handles it
+        exch = (prof.get("exchange") or "").upper()
+        active = capacity.get("active") or {}
+        max_active = capacity.get("max_active") or {}
+        premium_active = active.get("premium")
+        if isinstance(premium_active, dict) and exch in premium_active:
+            act, cap = premium_active.get(exch, 0), max_active.get("premium")
+        else:
+            act, cap = active.get("other"), max_active.get("other")
+        if cap is not None and act is not None and act >= cap:
+            return (f"plan cap: {act} active grid bot(s) on {exch} already "
+                    f"at the max {cap} for its tier — venue is "
+                    f"rotation-only until capacity frees")
+        used = (capacity.get("used_pairs") or {}).get(exch) or {}
+        if isinstance(used, dict):
+            try:
+                pair, _m = resolve_pair_safe(cand["venue"], cand["symbol"])
+            except Exception:
+                pair = None
+            if pair and pair in (used.get(prof.get("code")) or []):
+                return (f"pair {cand['venue']}:{cand['symbol']} already "
+                        f"has a bot on profile {prof.get('name')}")
+        return None
+
     # ── rescreen cycle ─────────────────────────────────────────────────
     def rescreen_cycle(self, dry_run=True, no_confluence=False, max_new=2,
                        top=None):
@@ -848,6 +943,31 @@ class Daemon:
         except Exception as exc:
             log(self.state, {"kind": "health-warn",
                               "msg": f"profile refresh failed: {str(exc)[:120]}"})
+        # subscription observation: enforced tier caps (upsert init) + the
+        # dashboard plan view (account-limits). Journaled on any change so
+        # plan upgrades/downgrades and the Hyperliquid premium tier are
+        # noticed automatically.
+        capacity = grid_capacity_safe()
+        if capacity:
+            self.state["capacity"] = capacity
+        limits = account_limits_safe()
+        if limits:
+            self.state["account_limits"] = limits
+        sig = _limits_signature(limits, capacity)
+        if limits and sig != self.state.get("limits_signature"):
+            self.state["limits_signature"] = sig
+            gb = (limits.get("gridBots") or {})
+            caps = (capacity or {}).get("max_active") or {}
+            active = (capacity or {}).get("active") or {}
+            premium = active.get("premium")
+            premium_ex = sorted(premium.keys()) if isinstance(premium, dict) else []
+            log(self.state, {"kind": "subscription",
+                             "msg": f"gridBots {gb.get('active')}/"
+                                    f"{gb.get('max')} (dashboard); tier caps "
+                                    f"other={caps.get('other')} "
+                                    f"premium={caps.get('premium')} "
+                                    f"[premium: {','.join(premium_ex) or 'none'}]"})
+        capacity_noted = set()  # one capacity-veto log per venue per cycle
         plan = self.plan_slots()
         if not self.state["slots"]:
             self.state["slots"] = plan["slots"]
@@ -880,6 +1000,13 @@ class Daemon:
             slot = next((s for s in free if s["venue"] == cand["venue"]), None)
             if slot is None:
                 continue  # no free slot on this venue
+            blocked = self.venue_capacity_block(cand, capacity)
+            if blocked:
+                if cand["venue"] not in capacity_noted:
+                    capacity_noted.add(cand["venue"])
+                    log(self.state, {"kind": "capacity-veto",
+                                     "msg": f"{key}: {blocked}"})
+                continue
             action, ticket, payloads, brief = self.plan_candidate(cand, slot, dry_run)
             deliberations.append({
                 "symbol": cand["symbol"], "venue": cand["venue"],
@@ -1163,8 +1290,24 @@ class Daemon:
             return False
         # stop → verify → delete → cooldown → clear → deploy challenger
         bot_code = incumbent.get("bot_code")
-        stop_res = retry_grid_call(grid_adapter.grid_stop, dry_run, bot_code,
-                                   "stop_and_close_all", dry_run=dry_run)
+        # an already-stopped incumbent (health_cycle flags stopped bots for
+        # re-analysis) cannot be stopped again — WT answers 400 "already
+        # stopped", which used to veto the rotation forever. Treat a
+        # verified-stopped bot as successfully stopped.
+        already_stopped = False
+        if not dry_run:
+            try:
+                for b in grid_status_safe() or []:
+                    if b.get("code") == bot_code and                             (b.get("status") or "").lower() in STOPPED_STATES:
+                        already_stopped = True
+                        break
+            except Exception:
+                pass
+        if already_stopped:
+            stop_res = {"ok": True, "status": "already stopped", "skipped": True}
+        else:
+            stop_res = retry_grid_call(grid_adapter.grid_stop, dry_run, bot_code,
+                                       "stop_and_close_all", dry_run=dry_run)
         log(self.state, {"kind": "rotation-stop", "slot": slot_key,
                          "msg": f"stop {bot_code}", "result": stop_res})
         if dry_run:
@@ -1181,7 +1324,8 @@ class Daemon:
                         break
             except Exception as exc:
                 status_res = {"ok": False, "error": str(exc)[:160]}
-        if not dry_run and not (stop_res or {}).get("ok"):
+        stop_failed = not (stop_res or {}).get("ok") and "already stopped"             not in json.dumps(stop_res or {}).lower()
+        if not dry_run and stop_failed:
             log(self.state, {"kind": "rotation-veto", "slot": slot_key,
                              "msg": f"stop failed for {bot_code} — incumbent "
                                     f"kept, challenger not deployed"})
@@ -1249,18 +1393,28 @@ class Daemon:
 
     # ── first-run adoption ─────────────────────────────────────────────
     def adopt_existing(self, dry_run=True):
-        if self.state["active_bots"] or not self.config.get("adopt_existing"):
+        if not self.config.get("adopt_existing"):
             return
         bots = grid_status_safe()
         if not bots:
             return
         plan = self.plan_slots()
-        free = [s for s in plan["slots"]]
+        occupied = set(self.state["active_bots"])
+        free = [s for s in plan["slots"]
+                if str(s["slot"]) not in occupied]
+        # never double-track: skip bots already known to state (by code) and
+        # symbols already active in another slot (duplicate deploy)
+        tracked_codes = {bb.get("bot_code") for bb in
+                         self.state["active_bots"].values()}
+        tracked_keys = {f"{bb.get('venue')}:{bb.get('symbol')}" for bb in
+                        self.state["active_bots"].values()}
         for b in bots:
             if not b.get("paperTrading"):
                 continue
             if (b.get("status") or "active").lower() != "active":
                 continue
+            if b.get("code") in tracked_codes:
+                continue  # already tracked in a slot
             venue = venue_from_exchange(b.get("exchange"))
             symbol = symbol_from_pair(b.get("pair") or b.get("pairCode"), venue)
             funded = self.config["portfolio"]["venues"]
@@ -1269,6 +1423,13 @@ class Daemon:
                                  "msg": f"paper bot {b.get('code')} "
                                         f"({b.get('pair')}) left running — "
                                         f"not adopted (no venue/slot match)"})
+                continue
+            if f"{venue}:{symbol}" in tracked_keys:
+                log(self.state, {"kind": "adopt-warn",
+                                 "msg": f"paper bot {b.get('code')} "
+                                        f"({b.get('pair')}) left running — "
+                                        f"{venue}:{symbol} already active in "
+                                        f"another slot"})
                 continue
             slot = next((s for s in free if s["venue"] == venue), None)
             if slot is None:

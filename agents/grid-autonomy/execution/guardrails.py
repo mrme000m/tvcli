@@ -104,7 +104,11 @@ def check_rotation(ctx):
     if not ctx.get("cooldown_ok", False):
         v.append("rotation cooldown not expired")
     h = ctx.get("hysteresis", HYSTERESIS_DEFAULT)
-    if (ctx.get("candidate_score", 0) - ctx.get("incumbent_score", 0)) < h:
+    # .get(..., 0) default only fires on a MISSING key; adopted incumbents
+    # carry score_final=None — coerce None to 0 so the gate never raises.
+    cand_score = ctx.get("candidate_score") or 0
+    inc_score = ctx.get("incumbent_score") or 0
+    if (cand_score - inc_score) < h:
         v.append(f"Δscore < hysteresis {h}")
     return v
 
