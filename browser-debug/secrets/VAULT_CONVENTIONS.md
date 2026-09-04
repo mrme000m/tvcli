@@ -28,8 +28,10 @@ items --search <domain>` returns the whole family).
 | `tv-proxy` | notes (`KEY=VALUE`, optional — missing from vault skips with a warning) | `manifest.json` → `secrets/runtime/tv-proxy.env` |
 | `wundertrading-api` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/wt.env` |
 | `wundertrading-session` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/wt-session.env` |
+| `kimi` | **login** (username/password/TOTP) | manual Google OAuth login (`vb.mrme00@gmail.com`); not provisioned |
+| `kimi-session` | notes (`KEY=VALUE`) | `manifest.json` → `secrets/runtime/kimi-session.env` |
 | `cloudflare-tunnels` | **fields** (live-read, §3) | `cf` skill (`scripts/cf.py`) |
-| `provider-keys` | **fields** (live-read, §3) | reserved — no consumer yet; do not provision |
+| `provider-keys` | **fields** (live-read, §3) | `provider-limits.py` (read) · `kimi-keys.py --update-vault` (write `KIMI_CODE_API_KEY`; do not provision) |
 | `wundertrading-login` | notes (manual/headful login, not provisioned) | docs only (`wt-investigator` preset) |
 
 Rename history (old → new, keep this log so stale references are traceable):
