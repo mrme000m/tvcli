@@ -27,6 +27,39 @@ IP-whitelisted**; shown once). MCP auth = `X-API-Key` + `X-Secret-Key`
 headers. Export as `WUN_API_KEY` / `WUN_SECRET_KEY` for the shell recipes —
 never paste key values into committed files.
 
+## Python package (`scripts/wtclient`)
+
+The importable, validated, type-safe client library behind the CLI. Prefer it
+for new automation instead of shelling out to scripts:
+
+```python
+from wtclient import WunderTrading
+
+wun = WunderTrading()                      # reads provisioned secret files
+wun.rest.exchanges()                       # HMAC REST, no browser
+wun.mcp.api_profiles(limit=5)              # MCP, no browser
+wun.mcp.export_strategies_history(statuses=["completed"])
+
+wun = WunderTrading(browser=True)          # needs a running CloakBrowser tab
+wun.grid.list()
+wun.grid.analyze("HYPERLIQUID_SWAP:191")
+wun.market.ohlc_last("HYPERLIQUID_SWAP:191", timeframe=15)
+```
+
+Request models mirror the live MCP schemas + cross-field rules and fail before
+any HTTP call (`PlaceStrategyTrade`, `EditTradeStrategy`, `GridUpsertPayload`,
+`takeProfits` portfolios sum to 1, limit-vs-market rules, grid geometry).
+Percent fields accept `0.6` / `"60%"` / `"60"` and canonicalize to `"0.6"`.
+The CLI (`scripts/wt_httpx.py`) is now a thin shim over this package and keeps
+the same command shapes, plus `grid` (browser or raw session) and
+`market --transport browser`. Full layout/extension guide:
+[scripts/wtclient/README.md](scripts/wtclient/README.md). Tests:
+
+```bash
+cd .agents/skills/wundertrading/scripts
+python3 -m unittest discover -s wtclient/tests -t . -v
+```
+
 ## Core workflow
 
 ### Phase A — recon (read-only, always first)
@@ -151,8 +184,9 @@ squeeze breakout, funding extremes) — details in the playbook.
 | [scripts/token_screen.py](scripts/token_screen.py) | Candidate ranking across tokens (+ live spreads via MCP) → top pick + config |
 | [scripts/universe_screen.py](scripts/universe_screen.py) | Full-universe liquidity-filtered screener with configurable scan presets (`scan_presets.json`: grid-neutral, grid-directional, trend-classic, squeeze, all) → ranked candidates with spreads |
 | [scripts/grid_config.py](scripts/grid_config.py) | Per-symbol config generator — web-UI Grid-bot config + API-reachable `place_strategy_trade` DCA/classic payload (`--send --yes` to submit) |
-| [scripts/wt_httpx.py](scripts/wt_httpx.py) | Pure httpx client: HMAC `/open_api` + MCP `:2083` without browser (curl equivalents), `session /en/trader` best-effort httpx replay |
-| [scripts/wt_browser.py](scripts/wt_browser.py) | `httpx` **with** CloakBrowser (CDP `Runtime.evaluate` fetch-in-page) — Python port of `browser-debug/wt-grid.mjs`/`wt-bots.mjs`; the reliable grid-bot `create/list/stop/restart/...` without Node |
+| [scripts/wtclient/](scripts/wtclient/) | **Importable Python package** — validated models + typed clients for every surface (REST/MCP/session/grid/market/browser). Use `from wtclient import WunderTrading` |
+| [scripts/wt_httpx.py](scripts/wt_httpx.py) | Thin CLI shim over `wtclient` (same command shapes as before): HMAC `/open_api` + MCP `:2083` without browser, `session` best-effort, `grid` browser/raw, `market` browser/raw |
+| [scripts/wt_browser.py](scripts/wt_browser.py) | `httpx` **with** CloakBrowser (CDP `Runtime.evaluate` fetch-in-page) — Python port of `browser-debug/wt-grid.mjs`/`wt-bots.mjs`; the reliable grid-bot `create/list/stop/restart/...` without Node (kept for `grid_config.py` parity) |
 | [scripts/reliability.py](scripts/reliability.py) | Phase G reliability report — export closed history, score archetypes (win rate / PF / expectancy) |
 | [examples/2026-09-04-btc-trendup.md](examples/2026-09-04-btc-trendup.md) | Complete worked run (Phase A–D) with real numbers — use as a template |
 
