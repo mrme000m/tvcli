@@ -122,9 +122,13 @@ The Grid bot is now **fully API-reachable** through the session-auth web
 surface (NOT the HMAC `/open_api` — that stays classic/DCA only). Full
 reference with payload schemas, enums and gotchas:
 [**docs/wt/grid-bot-api.md**](../../../../browser-debug/docs/wt/grid-bot-api.md)
-in the repo (`browser-debug/docs/wt/grid-bot-api.md`). Ready-made CLI:
+in the repo (`browser-debug/docs/wt/grid-bot-api.md`). Ready-made CLIs:
 `node browser-debug/wt-grid.mjs <list|analyze|create|stop|restart|close-all|delete|positions|profiles>`
-(fetch-in-page via the logged-in CloakBrowser; CSRF handled automatically).
+(fetch-in-page via the logged-in CloakBrowser; CSRF handled automatically),
+Python parity **with browser** `python .agents/skills/wundertrading/scripts/wt_browser.py grid <...>`
+(`httpx` + `websockets` CDP `Runtime.evaluate` fetch-in-page, same headers — verified live),
+and best-effort **without browser** `python .agents/skills/wundertrading/scripts/wt_httpx.py session <...>`
+(raw `httpx` replay with `PHPSESSID`/`cf_clearance`/`X-W-CSRF-Token`; needs fresh `cf_clearance`, else Cloudflare `403 Just a moment…`).
 
 Key facts (all live-verified on the `demo-hype` paper profile):
 

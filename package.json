@@ -22,7 +22,11 @@
       ".agents/skills/codespace-prime-stack",
       ".agents/skills/wundertrading",
       ".agents/skills/web-discovery",
-      ".agents/skills/stealth-browser"
+      ".agents/skills/stealth-browser",
+      ".agents/skills/grid-bot",
+      ".agents/skills/tv-scout",
+      ".agents/skills/tv-watch",
+      ".agents/skills/tv-usecases"
     ],
     "subagents": {
       "agents": [

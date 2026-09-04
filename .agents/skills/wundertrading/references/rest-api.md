@@ -52,6 +52,9 @@ export WUN_API_KEY="..." WUN_SECRET_KEY="..."
 wt_req GET "/open_api/api_profiles?limit=10"
 ```
 
+**Python `httpx` without browser:** `python .agents/skills/wundertrading/scripts/wt_httpx.py open_api GET "/open_api/api_profiles?limit=10"`
+(pure `httpx` HMAC, no browser, no Cloudflare challenge — verified live).
+
 **Gotchas (all observed live):**
 
 - **macOS `date +%s%3N` is broken** (BSD date has no `%N` — it appends a

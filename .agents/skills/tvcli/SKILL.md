@@ -3,9 +3,9 @@ name: tvcli
 description: >
   TradingView Pine Script market analysis toolkit — compile, run, and extract
   structured signals from any Pine Script indicator on live market data via
-  the Go tvcli binary. Includes 19 built-in indicator skills (SMC, EMA stack,
+  the Go tvcli binary. Includes 20 built-in indicator skills (SMC, EMA stack,
   SuperTrend, RSI, Squeeze Momentum, Ichimoku, Volume Profile, CVD, Camarilla,
-  Choppiness, and a consolidated XAUUSD Scalping Confluence Engine), an async
+  Choppiness, MTF Confluence, and a consolidated XAUUSD Scalping Confluence Engine), an async
   HTTP server with a multi-account pool (~50 TradingView accounts, per-account
   concurrency + round-robin failover) and a `POST /hunt` batch endpoint for
   multi-symbol / multi-account sweeps, and progressive reference docs for Pine
@@ -18,7 +18,7 @@ metadata:
   author: ch99q
   version: "1.0"
   binary: tvcli
-  skills: "smc,dvi,liq-sweep,sr-breaks,gold-divergence,xau-trend,vp,vp-pro,swingarm,golden,sniper,ust,quantum,squeeze,ichimoku,camarilla,cvd,choppiness,xau-scalp"
+  skills: "smc,dvi,liq-sweep,sr-breaks,gold-divergence,xau-trend,vp,vp-pro,swingarm,golden,sniper,ust,quantum,squeeze,ichimoku,camarilla,cvd,choppiness,xau-scalp,mtf-confluence"
 ---
 
 # tvcli — TradingView Pine Script Market Analysis Toolkit
@@ -58,7 +58,7 @@ TV_TIER=free
 # Then: curl http://localhost:8765/health
 ```
 
-## Built-in Skills (19)
+## Built-in Skills (20)
 
 All skills output `--json --agent` for agent-ready v2 envelopes with market
 data, structure, opportunities, narrative, and conformance scoring.
@@ -66,6 +66,7 @@ data, structure, opportunities, narrative, and conformance scoring.
 | Skill | Category | Description |
 |-------|----------|-------------|
 | `xau-scalp` | other | All-in-one EMA+ST+RSI+Squeeze+BB+Volume composite signal (one run instead of 6 separate indicators; private `USER;` script — works only on accounts that own it) |
+| `mtf-confluence` | trend | MTF Confluence Engine — chart TF + 2 higher-TF composites in one run (single study slot) |
 | `smc` | smc | Smart Money Concepts — BOS/CHoCH, FVG, Order Blocks |
 | `dvi` | volume | Delta Volume Intensity — trend, S/R, momentum |
 | `liq-sweep` | smc | Institutional Liquidity Sweep & Volume Breakout |
@@ -262,18 +263,18 @@ go build -o tvcli ./cmd/tvcli              # exit 0; matches the `./tvcli` examp
 
 # CLI help and skill registry
 ./tvcli --help                              # exit 0
-./tvcli skills --json                       # exit 0; returns 19 registered skills
+./tvcli skills --json                       # exit 0; returns 20 registered skills
 ./tvcli serve --status                      # exit 0 (server stopped, no hang)
 ./tvcli serve --stop                        # exit 0 (server stopped, no hang)
 
 # Per-skill help for every skill listed above
 for s in smc dvi liq-sweep sr-breaks gold-divergence xau-trend vp vp-pro \
          swingarm golden sniper ust quantum squeeze ichimoku \
-         camarilla cvd choppiness xau-scalp; do
+         camarilla cvd choppiness xau-scalp mtf-confluence; do
   ./tvcli "$s" --help > /dev/null 2>&1
   echo "$s: $?"
 done
-# All 19 exit 0
+# All 20 exit 0
 ```
 
 Notes:

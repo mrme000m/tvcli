@@ -32,6 +32,9 @@ wun() { curl -sS -m 60 -X POST "https://wundertrading.com:2083/mcp" \
 wun get_supported_exchanges '{}'
 ```
 
+**Python `httpx` without MCP client:** `python .agents/skills/wundertrading/scripts/wt_httpx.py mcp get_supported_exchanges --params '{}'`
+(same `X-API-Key`/`X-Secret-Key`, `httpx` `text/event-stream` → `data:` strip — verified live).
+
 Tools that only *read* are `get_*` / `export_*`; everything that starts with
 `place_`, `cancel_`, `close_`, or `edit_` **executes or mutates live state**.
 

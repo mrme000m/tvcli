@@ -520,7 +520,7 @@ Build: `go build -o tvcli ./cmd/tvcli`.
 | `sym` | Change symbol programmatically |
 | `study` | Live-chart study management (list/inputs/report/set) |
 | `skills` | List registered indicator skills |
-| 19 indicator skills | smc, dvi, liq-sweep, sr-breaks, golden, sniper, ust, quantum, squeeze, ichimoku, camarilla, cvd, choppiness, xau-scalp, ... |
+| 20 indicator skills | smc, dvi, liq-sweep, sr-breaks, golden, sniper, ust, quantum, squeeze, ichimoku, camarilla, cvd, choppiness, xau-scalp, mtf-confluence, ... |
 
 ### bdg `tv` commands (Node, live chart)
 | Command | Purpose |

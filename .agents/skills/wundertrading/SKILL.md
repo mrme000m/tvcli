@@ -12,15 +12,15 @@ trailing stop, swing flip) that you configure. **You are the strategy brain**
 — the agent decides the token, direction, and config from market conditions;
 WunderTrading executes and holds the orders.
 
-Two interfaces, one account:
+Three interfaces, one account:
 
 - **MCP** (primary): `mcp__wundertrading__*` tools in a configured client
   (zcode: `~/.zcode/cli/config.json`; PrimeAgent: `~/.prime/agent/settings.json`),
   or the curl recipe below. 15 tools; full schemas + live-verified quirks in
-  [references/mcp-tools.md](references/mcp-tools.md).
-- **REST** (scripting/automation): `https://wundertrading.com/open_api/*`,
-  HMAC-SHA256 signing — verified recipe in
-  [references/rest-api.md](references/rest-api.md).
+  [references/mcp-tools.md](references/mcp-tools.md). Also via `scripts/wt_httpx.py mcp` (httpx without browser, same `X-API-Key`/`X-Secret-Key`).
+- **REST HMAC** (scripting/automation): `https://wundertrading.com/open_api/*`,
+  HMAC-SHA256 signing — verified recipe in [references/rest-api.md](references/rest-api.md), also via `scripts/wt_httpx.py open_api` (pure httpx, no browser).
+- **Session web** (grid bots, no HMAC): Cloudflare-fingerprinted `/en/trader/*` configurator — grid bots live here only (see [references/grid-bot.md](references/grid-bot.md)). Use `scripts/wt_browser.py` (httpx **with** CloakBrowser via CDP `fetch()` in-page, `node browser-debug/wt-grid.mjs` parity, verified live) or best-effort `scripts/wt_httpx.py session` (raw httpx replay; needs fresh `cf_clearance`, else 403 `Just a moment…`).
 
 Keys: created in the cabinet API page (max 10; **expire in 3 months unless
 IP-whitelisted**; shown once). MCP auth = `X-API-Key` + `X-Secret-Key`
@@ -143,14 +143,16 @@ squeeze breakout, funding extremes) — details in the playbook.
 
 | File | Contents |
 |---|---|
-| [references/mcp-tools.md](references/mcp-tools.md) | All 15 MCP tools, full schemas, live-verified quirks, curl transport |
-| [references/rest-api.md](references/rest-api.md) | HMAC signing recipe, endpoint list, rate limits, gotchas |
+| [references/mcp-tools.md](references/mcp-tools.md) | All 15 MCP tools, full schemas, live-verified quirks, curl transport (also `scripts/wt_httpx.py mcp` httpx) |
+| [references/rest-api.md](references/rest-api.md) | HMAC signing recipe, endpoint list, rate limits, gotchas (also `scripts/wt_httpx.py open_api` httpx) |
 | [references/strategy-playbook.md](references/strategy-playbook.md) | Token selection, regime classification, config matrix + sizing math, reliability ladder, adaptation triggers |
-| [references/grid-bot.md](references/grid-bot.md) | Grid bot mechanics (Long/Neutral/Short/Hedge), profit-per-grid, mid price, sizing, Stop Trigger/Pump Protection, start conditions + the webhook path (tvcli→grid), backtest/Optimize/Profit-Optimized Pairs, regime→grid-type mapping |
+| [references/grid-bot.md](references/grid-bot.md) | Grid bot mechanics + session web API (`browser-debug/docs/wt/grid-bot-api.md`); use `scripts/wt_browser.py` (httpx+CDP browser fetch, `wt-grid.mjs` parity) or `scripts/wt_httpx.py session` best-effort |
 | [scripts/market_regime.py](scripts/market_regime.py) | Executable regime classifier → config skeleton |
 | [scripts/token_screen.py](scripts/token_screen.py) | Candidate ranking across tokens (+ live spreads via MCP) → top pick + config |
 | [scripts/universe_screen.py](scripts/universe_screen.py) | Full-universe liquidity-filtered screener with configurable scan presets (`scan_presets.json`: grid-neutral, grid-directional, trend-classic, squeeze, all) → ranked candidates with spreads |
 | [scripts/grid_config.py](scripts/grid_config.py) | Per-symbol config generator — web-UI Grid-bot config + API-reachable `place_strategy_trade` DCA/classic payload (`--send --yes` to submit) |
+| [scripts/wt_httpx.py](scripts/wt_httpx.py) | Pure httpx client: HMAC `/open_api` + MCP `:2083` without browser (curl equivalents), `session /en/trader` best-effort httpx replay |
+| [scripts/wt_browser.py](scripts/wt_browser.py) | `httpx` **with** CloakBrowser (CDP `Runtime.evaluate` fetch-in-page) — Python port of `browser-debug/wt-grid.mjs`/`wt-bots.mjs`; the reliable grid-bot `create/list/stop/restart/...` without Node |
 | [scripts/reliability.py](scripts/reliability.py) | Phase G reliability report — export closed history, score archetypes (win rate / PF / expectancy) |
 | [examples/2026-09-04-btc-trendup.md](examples/2026-09-04-btc-trendup.md) | Complete worked run (Phase A–D) with real numbers — use as a template |
 

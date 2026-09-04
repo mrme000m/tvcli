@@ -101,13 +101,19 @@ Tune `--band-atr`, `--step-factor`, `--step-min/max` per regime — see
   node browser-debug/wt-grid.mjs create grid-bot.json      # POST /en/trader/grid_bots/upsert
   node browser-debug/wt-grid.mjs list [--all]              # bots + per-bot action links
   node browser-debug/wt-grid.mjs stop|restart|close-all|delete <botCode>
+  # Python parity (httpx with browser, no Node — same fetch-in-page):
+  python .agents/skills/wundertrading/scripts/wt_browser.py grid profiles
+  python .agents/skills/wundertrading/scripts/wt_browser.py grid create grid-bot.json  # same POST
+  python .agents/skills/wundertrading/scripts/wt_browser.py grid list
+  # Pure httpx without browser (best-effort, needs fresh cf_clearance):
+  python .agents/skills/wundertrading/scripts/wt_httpx.py session GET /en/trader/grid_bots/grid?page=1\&limit=5
   ```
   The payload schema (all fields + enums + grid-line geometry) is in
   [../wundertrading/references/grid-bot.md](../wundertrading/references/grid-bot.md) §9
   and `browser-debug/docs/wt/grid-bot-api.md`. Requires the headful browser up
-  (`node browser-debug/wt.mjs`) — calls run as fetch-in-page (session +
+  (`node browser-debug/wt.mjs` or `wt_browser.py` via CDP) — calls run as fetch-in-page (session +
   CSRF + Cloudflare fingerprint). Paper profiles (`demo-hype` on
-  HYPERLIQUID_SWAP) are the safe test target.
+  HYPERLIQUID_SWAP) are the safe test target. `wt_browser.py` is the `httpx`+`websockets` Python port of `wt-grid.mjs`.
 - **MCP `place_strategy_trade` (preferred when the regime maps to classic/DCA)**
   — submit `mcp_strategy.payload` with `grid_config.py XMR --send --yes
   --balance <n> --profiles <id>[,<id>]`. `--send` alone prints the Phase E
@@ -170,4 +176,6 @@ scores each archetype (win rate / PF / expectancy) against the pass/kill bars.
 | [../wundertrading/scripts/grid_config.py](../wundertrading/scripts/grid_config.py) | Per-symbol config generator — web-UI Grid-bot config + API-reachable `place_strategy_trade` DCA/classic payload |
 | [../wundertrading/scripts/market_regime.py](../wundertrading/scripts/market_regime.py) | Regime classifier (EMA/ATR/ADX/RSI/BB) |
 | [../wundertrading/scripts/reliability.py](../wundertrading/scripts/reliability.py) | Phase G reliability report — export closed history, score archetypes (win rate/PF/expectancy) |
+| [../wundertrading/scripts/wt_httpx.py](../wundertrading/scripts/wt_httpx.py) | Pure `httpx` client: HMAC `/open_api` + MCP without browser, `session` best-effort httpx |
+| [../wundertrading/scripts/wt_browser.py](../wundertrading/scripts/wt_browser.py) | `httpx` with CloakBrowser (CDP `fetch()`): Python port of `wt-grid.mjs`/`wt-bots.mjs` — reliable grid-bot `create/list/stop` |
 | [../wundertrading/watch/xmr-demo-dca.json](../wundertrading/watch/xmr-demo-dca.json) | `tvcli watch` spec for the XMR demo DCA (TP + DCA-ladder triggers) |

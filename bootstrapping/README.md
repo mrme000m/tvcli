@@ -19,7 +19,7 @@ bootstrapping/
 │   │   ├── config.py       Config + the single CF model catalog (surface
 │   │   │                   deltas as explicit override tables)
 │   │   ├── cli.py          dispatcher (stdout = JSON envelopes, stderr = logs)
-│   │   ├── stages/         one module per stage (17 stages, 3 groups)
+│   │   ├── stages/         one module per stage (18 stages, 3 groups)
 │   │   └── templates/      static file templates (code-review-graph MCP patch)
 │   └── tests/              stdlib unittest suite (python3 -m unittest discover)
 ├── presets/                vendored specialist agent presets (fleet tag)
@@ -67,7 +67,8 @@ Stage list (mirrors the playbook tags):
 `packages` (python fallback; the playbook uses the apt module) · `dsh` ·
 `plugin` · `agent` · `preset` · `env` · `dsh-config` · `prime-config` ·
 `extras-plugins` · `extras-mnemon` · `extras-mobile` · `extras-mcp` ·
-`secrets` · `fleet-presets` · `fleet-patch` · `fleet-autoserve`
+`secrets` · `fleet-presets` · `fleet-patch` · `fleet-autoserve` ·
+`stealth-browser`
 
 ## Knobs (both runners)
 
@@ -80,7 +81,7 @@ Stage list (mirrors the playbook tags):
 
 Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 `dsh-config`, `prime-config`, `extras` (`plugins`/`mnemon`/`mobile`/`mcp`),
-`secrets`, `fleet`, `always`, `packages`. Example:
+`secrets`, `fleet`, `stealth-browser`, `always`, `packages`. Example:
 `ansible-playbook ... --tags plugin,preset`.
 
 ## The prime stack
@@ -95,6 +96,7 @@ Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 | CF Workers AI config | dsh `~/.dsh/settings.yaml` + prime-agent `~/.prime/agent/{models,auth,settings}.json`, all Cloudflare-account templated from env | `~/.dsh`, `~/.prime/agent` |
 | parity plugins | dsh-mnemon, pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client, pi-agent-memory, vendored dsh-restart | profile `web` |
 | specialist fleet | tv-scout, tv-investigator, wt-investigator, web-discovery + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve) | `$DSH_HOME/.agent-presets/` + web profile patch |
+| stealth browser | vibheksoni/stealth-browser-mcp 97-tool MCP (`stealth-browser` stage + `dsh-mcp-client`, headful `DISPLAY=:99` → `x11vnc:5900`/`websockify:6080` + `dsh-cloak-panel` zoom/scale) | `tools/stealth-browser-mcp/venv` + web profile `mcp-stealth-browser` row |
 
 Default model: **`@cf/zai-org/glm-5.3`** on provider `cloudflare-workers-ai`,
 `defaultThinkingLevel: high`. The model catalog lives ONLY in
@@ -158,7 +160,7 @@ A second run does nothing: every stage checks before it writes —
   the source, user-owned dirs (no marker / different managedBy) are
   preserved untouched.
 - The engine is unit-tested (`python3 -m unittest discover -s
-  bootstrapping/python/tests -t bootstrapping/python`) — 41 tests covering
+  bootstrapping/python/tests -t bootstrapping/python`) — 47 tests covering
   the allowBuilds remedy, JSON merges, marker blocks, fleet semantics and
   the settings.yaml catalog.
 

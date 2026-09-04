@@ -134,7 +134,7 @@ Screenshot the chart reliably with CDP `Page.captureScreenshot`.
 Hotkeys only fire when focus is NOT on an input (blur `document.activeElement`
 first — a stray input silently eats hotkeys).
 
-## WunderTrading programmatic access — `wt.mjs`
+## WunderTrading programmatic access — `wt.mjs` (+ Python `wt_httpx.py` / `wt_browser.py`)
 
 `node wt.mjs` restores the vault-persisted WunderTrading session in the
 headful browser and wraps the fingerprint-gated trader XHR surface via
@@ -144,6 +144,19 @@ XHR/fetch traffic while the UI is driven and prints an endpoint summary
 (method, path, statuses, counts) plus a full JSON dump in `dumps/`. See the
 web-discovery skill for the loop that turns a `record` capture into codified
 API docs and tooling.
+
+**Without browser (HMAC/MCP):** `../.agents/skills/wundertrading/scripts/wt_httpx.py`
+(`pip install httpx`) — `open_api` HMAC (`X-Signature`) and `mcp` streamable HTTP
+(`X-API-Key`/`X-Secret-Key`) work raw, no browser, no Cloudflare challenge;
+`session` best-effort httpx replay needs fresh `cf_clearance` or hits `403 Just a moment`.
+
+**With browser, from Python (httpx + CDP):** `../.agents/skills/wundertrading/scripts/wt_browser.py`
+(`pip install httpx websockets`) — Python port of `wt-grid.mjs`/`wt-bots.mjs`:
+`httpx GET :9222/json` → `websockets` `Runtime.evaluate` `fetch()` in-page
+(with `X-W-CSRF-Token` from `window.baseServerConfig.appCsrfToken`). This is the
+reliable grid-bot configurator via Python (`wt_browser.py grid list/create/stop/...`,
+`wt_browser.py api GET /en/trader/...`) — same `wundertrading.com` page the
+Node CLIs use, but driven from Python.
 
 ## Vision tool (Mistral) — understand UI changes from screenshots
 

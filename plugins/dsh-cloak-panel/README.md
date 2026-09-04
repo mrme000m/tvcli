@@ -2,7 +2,7 @@
 
 Installable DSH Web plugin — collapsible, resizable **right-side panel** that streams the headful **CloakBrowser** (stealth Chromium) agents use while discovering / reverse-engineering backend APIs of external systems (TradingView, WunderTrading, etc.).
 
-- **Right dock:** fixed `shell.overlay` panel, 320–860 px drag-resizable, persisted in `localStorage`, collapsible to a 36 px rail.
+- **Right dock:** fixed `shell.overlay` panel, 320–860 px drag-resizable, persisted in `localStorage`, collapsible to a 36 px rail. **Zoom/scale (2026-09-04):** `−`/`+`, `25%–300%` slider, `Ctrl+wheel`, `Fit` (width-fit) vs `Actual` (scroll-to-pan via `transform:scale()` + `overflow:auto`), `100%` reset — click mapping uses transformed `getBoundingClientRect` so zoom is hit-accurate; footer links to `noVNC` full desktop.
 - **Wedge recovery (verified 2026-09-04):** long-lived WunderTrading tabs
   periodically wedge their renderer — `Page.captureScreenshot` returns
   `Internal error` and `Runtime.evaluate` hangs. `/cloak/screenshot` now
@@ -10,7 +10,7 @@ Installable DSH Web plugin — collapsible, resizable **right-side panel** that 
   browser-level `Page.navigate` (works even with a dead renderer) and
   retries, up to 2 refreshes. Every CDP `send` also has an 8 s command
   timeout so a wedged renderer can never hang the panel.
-- **Live view:** polls `GET /cloak/screenshot` (CDP `Page.captureScreenshot` → PNG, ~1.6 s interval, ~100 kB/frame) and `GET /cloak/status`. Click-to-interact via `POST /cloak/click` (normalized `xRatio/yRatio` → `Input.dispatchMouseEvent`), URL bar → `POST /cloak/navigate`.
+- **Live view:** polls `GET /cloak/screenshot` (CDP `Page.captureScreenshot` → PNG, ~1.6 s interval, ~100 kB/frame) and `GET /cloak/status`. Click-to-interact via `POST /cloak/click` (normalized `xRatio/yRatio` → `Input.dispatchMouseEvent`), URL bar → `POST /cloak/navigate`. **Stealth headful via VNC:** any `spawn_browser(headless=false)` from `stealth-browser-mcp` (97 tools, `DISPLAY=:99` → `x11vnc:5900`/`websockify:6080` + `stealth-browser` stage) shares the same X display and is visible in `noVNC` at `https://<codespace>-6080.app.github.dev/vnc.html?autoconnect=1&resize=scale` (`resize=scale` = VNC zoom) alongside the CloakBrowser.
 - **Headful source:** the same `browser-debug/launch.mjs` CloakBrowser (`--remote-debugging-port=9222`, profile `browser-debug/profile`) that `tv.mjs`/`wt.mjs` and the `bdg` CLI attach to. No extra browser — the panel is a **read-only viewport** into the agent's real session.
 
 ## Analysis
@@ -65,5 +65,6 @@ Hard refresh the browser (Ctrl+Shift+R) — the panel appears docked on the righ
 ## Notes
 
 - No layout override — the panel is a `shell.overlay` overlay (z-index 30), so the prime-orchestrator 4-column patch coexists.
-- Screenshot polling is passive; heavy work (study extraction, network capture) stays in the agent's CDP session (`bdg tv …`, `wt.mjs api …`).
+- Screenshot polling is passive; heavy work (study extraction, network capture) stays in the agent's CDP session (`bdg tv …`, `wt.mjs api …`, or `wt_browser.py`/`wt_httpx.py`).
 - For Kanban-style fleet work, keep one `launch.mjs` per profile (`CB_PROFILE`); the panel always shows the preferred page (`wundertrading.com` > `tradingview.com` > first page).
+- The same `DISPLAY=:99` is reused by `stealth-browser-mcp` headful windows (see `stealth-browser` skill) — `noVNC` is the multi-window zoom viewer, the panel is the single-page CDP screenshot viewport with the new zoom controls.
