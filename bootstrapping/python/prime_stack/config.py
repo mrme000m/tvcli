@@ -57,6 +57,17 @@ FLEET_PRESET_MARKER = ".plugin-managed.json"
 FLEET_PRESET_FILES = ["preset.yml", "agent.cordis.yml"]
 WT_MCP_URL = "https://wundertrading.com:2083/mcp"
 
+# --- cloudflare skills + wrangler ----------------------------------------------
+# Upstream: https://github.com/cloudflare/skills (Apache-2.0) — agent skills
+# for building on Cloudflare. The stage vendors a shallow clone and links
+# the relevant subset into every harness skills dir; wrangler (the Workers
+# CLI) is installed globally so dsh / prime-agent / opencode shells share it.
+CF_SKILLS_REPO = "https://github.com/cloudflare/skills.git"
+CF_SKILL_NAMES = ["wrangler", "cloudflare", "cloudflare-one"]
+CF_MCP_URL = "https://mcp.cloudflare.com/mcp"
+CF_VENDOR_DIRNAME = ".local/share/prime-stack/cloudflare-skills"
+CF_MCP_ROW_ID = "mcp-cloudflare"
+
 # --- stealth-browser-mcp ------------------------------------------------------
 
 STEALTH_BROWSER_REPO = "https://github.com/vibheksoni/stealth-browser-mcp.git"
@@ -174,6 +185,7 @@ class Config:
     native_build_keys: list = field(default_factory=lambda: list(NATIVE_BUILD_KEYS))
     mobile_gateway_port: int = MOBILE_GATEWAY_PORT
     fleet_presets: list = field(default_factory=lambda: list(FLEET_PRESETS))
+    cf_skill_names: list = field(default_factory=lambda: list(CF_SKILL_NAMES))
     fleet_managed_by: str = FLEET_MANAGED_BY
     fleet_preset_marker: str = FLEET_PRESET_MARKER
     fleet_enable_tvcli_autoserve: bool = True
@@ -244,6 +256,22 @@ class Config:
     @property
     def stealth_browser_server(self) -> Path:
         return self.stealth_browser_dir / "src" / "server.py"
+
+    @property
+    def cf_vendor_dir(self) -> Path:
+        return self.home / CF_VENDOR_DIRNAME
+
+    @property
+    def opencode_skills_dir(self) -> Path:
+        return self.home / ".config" / "opencode" / "skills"
+
+    @property
+    def opencode_config(self) -> Path:
+        return self.home / ".config" / "opencode" / "opencode.jsonc"
+
+    @property
+    def prime_skills_dir(self) -> Path:
+        return self.home / ".prime" / "skills"
 
     # ---- secrets (presence only; values never leave the process) ----------
 

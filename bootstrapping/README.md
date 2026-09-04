@@ -67,7 +67,7 @@ Stage list (mirrors the playbook tags):
 `packages` (python fallback; the playbook uses the apt module) · `dsh` ·
 `plugin` · `agent` · `preset` · `env` · `dsh-config` · `prime-config` ·
 `extras-plugins` · `extras-mnemon` · `extras-mobile` · `extras-mcp` ·
-`secrets` · `fleet-presets` · `fleet-patch` · `fleet-autoserve` ·
+`secrets` · `cloudflare` · `fleet-presets` · `fleet-patch` · `fleet-autoserve` ·
 `stealth-browser`
 
 ## Knobs (both runners)
@@ -81,7 +81,7 @@ Stage list (mirrors the playbook tags):
 
 Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 `dsh-config`, `prime-config`, `extras` (`plugins`/`mnemon`/`mobile`/`mcp`),
-`secrets`, `fleet`, `stealth-browser`, `always`, `packages`. Example:
+`secrets`, `cloudflare`, `fleet`, `stealth-browser`, `always`, `packages`. Example:
 `ansible-playbook ... --tags plugin,preset`.
 
 ## The prime stack
@@ -97,6 +97,7 @@ Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 | parity plugins | dsh-mnemon, pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client, pi-agent-memory, vendored dsh-restart | profile `web` |
 | specialist fleet | tv-scout, tv-investigator, wt-investigator, web-discovery + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve) | `$DSH_HOME/.agent-presets/` + web profile patch |
 | stealth browser | vibheksoni/stealth-browser-mcp 97-tool MCP (`stealth-browser` stage + `dsh-mcp-client`, headful `DISPLAY=:99` → `x11vnc:5900`/`websockify:6080` + `dsh-cloak-panel` zoom/scale) | `tools/stealth-browser-mcp/venv` + web profile `mcp-stealth-browser` row |
+| cloudflare skills + wrangler | `wrangler` CLI (npm global) + upstream [cloudflare/skills](https://github.com/cloudflare/skills) subset (`wrangler`, `cloudflare`, `cloudflare-one`) linked into opencode + prime-agent skills dirs, Cloudflare remote MCP row for dsh + opencode | `~/.local/share/prime-stack/cloudflare-skills` + `~/.config/opencode/skills` + `~/.prime/skills` |
 
 Default model: **`@cf/zai-org/glm-5.3`** on provider `cloudflare-workers-ai`,
 `defaultThinkingLevel: high`. The model catalog lives ONLY in

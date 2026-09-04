@@ -4,11 +4,13 @@ Groups (`all`, `extras`, `fleet`) expand to their member stages in
 deployment order. The order matches the original playbook's task order
 (secrets runs BEFORE fleet so a standalone full run reads a freshly
 provisioned wt.env — the post-create path provisions it even earlier in
-bw-provision.sh).
+bw-provision.sh; cloudflare sits between secrets and fleet so wrangler
+auth can use the lifecycle env).
 """
 
-from . import (agent, dsh, dsh_config, env_bridge, extras, fleet, packages,
-               plugin, preset, prime_config, secrets, stealth_browser)
+from . import (agent, cloudflare, dsh, dsh_config, env_bridge, extras, fleet,
+                packages, plugin, preset, prime_config, secrets,
+                stealth_browser)
 
 STAGES = {
     "packages": packages.run,
@@ -24,6 +26,7 @@ STAGES = {
     "extras-mobile": extras.run_mobile,
     "extras-mcp": extras.run_mcp,
     "secrets": secrets.run,
+    "cloudflare": cloudflare.run,
     "fleet-presets": fleet.run_presets,
     "fleet-patch": fleet.run_patch,
     "fleet-autoserve": fleet.run_autoserve,
@@ -46,6 +49,7 @@ GROUPS["all"] = [
     "prime-config",
     *GROUPS["extras"],
     "secrets",
+    "cloudflare",
     *GROUPS["fleet"],
     "stealth-browser",
 ]

@@ -6,15 +6,33 @@ as **gitignored runtime files**; values are never echoed, logged, or inlined
 into shell profiles — profiles only gain guarded `source` lines pointing at
 `600`-mode files.
 
+Naming rules for every item/field live in
+[`VAULT_CONVENTIONS.md`](VAULT_CONVENTIONS.md) — read it before adding
+anything. Item names are `<domain>-<purpose>` (never a raw ID); payloads are
+either **notes-type** (provisioned below) or **fields-type** (read live by
+skills, never provisioned).
+
 ## Vault schema
+
+Provisioned (notes-type — declarative in [`manifest.json`](manifest.json)):
 
 | Item (Secure Note) | Notes content | Runtime target |
 |---|---|---|
 | `tvcli-primary-env` | `SESSION=` `SIGNATURE=` `DEVICE_T=` `TV_USER=` `TV_TIER=` lines | `.env` |
-| `tvcli-accounts-pool` | full `accounts.json` (multi-account WS registry) | `accounts.json` |
+| `tvcli-accounts-pool` | full `accounts.json` (multi-account WS registry, attachment) | `accounts.json` |
 | `browser-debug-env` | TV cookies + `MISTRAL_API_KEY` (canonical browser-debug env) | `browser-debug/.env` |
 | `opencode-cloudflare` | `CLOUDFLARE_ACCOUNT_ID=` `CLOUDFLARE_API_KEY=` | `secrets/runtime/opencode.env` |
-| `tv-proxy` | SOCKS relay creds (`TV_PROXY=…` etc.) | `secrets/runtime/tv-proxy.env` |
+| `tv-proxy` | SOCKS relay creds (`TV_PROXY=…` etc.; optional — absent from the vault, skips with a warning) | `secrets/runtime/tv-proxy.env` |
+| `wundertrading-api` | `WT_API_KEY=` `WT_API_SECRET=` | `secrets/runtime/wt.env` |
+| `wundertrading-session` | `WT_PHPSESSID=` `WT_CF_CLEARANCE=` `WT_COOKIES_JSON=` | `secrets/runtime/wt-session.env` |
+
+Live-read (fields-type — consumed at runtime, NOT in `manifest.json`):
+
+| Item | Folder | Fields | Consumer |
+|---|---|---|---|
+| `cloudflare-tunnels` | `cloudflare` | `account-id`, `read-all`, `write-all` (+ opaque `*-storage`) | `cf` skill |
+| `provider-keys` | — | `NVIDIA_*`, `OPENROUTER_*`, … | reserved, no consumer yet |
+| `wundertrading-login` | — | notes (manual/headful login) | docs only (`wt-investigator` preset) |
 
 The mapping is declarative in [`manifest.json`](manifest.json) — **adding a
 secret = add a vault item + one manifest entry** (format `env`/`json`/`raw`,

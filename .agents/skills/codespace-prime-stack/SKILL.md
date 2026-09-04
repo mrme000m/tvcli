@@ -46,7 +46,9 @@ ansible-playbook bootstrapping/ansible/prime-stack.yml \
 Knobs: `-e prime_stack_strict=true` (missing CF secrets fatal),
 `-e prime_stack_force_settings=true` (replace `~/.dsh/settings.yaml`
 after backing it up). Tags: `dsh`, `plugin`, `preset`, `agent`, `env`,
-`dsh-config`, `prime-config`, `secrets`, `fleet` (specialist presets +
+`dsh-config`, `prime-config`, `secrets`, `cloudflare` (wrangler CLI +
+upstream Cloudflare skills/MCP for dsh, prime-agent, opencode),
+`fleet` (specialist presets +
 grid-trading wiring), `always` — e.g. `--tags plugin,preset`.
 
 A second run does nothing (every task checks before writing); a
@@ -89,7 +91,8 @@ the row.
   vault `https://keys.00m.indevs.in`, auth `BW_EMAIL`/`BW_PASSWORD` or
   `BW_CLIENTID`/`BW_CLIENTSECRET` codespace secrets): provisions `.env`,
   `accounts.json`, `browser-debug/.env`, `opencode.env`, `wt.env`
-  (WunderTrading API key pair), and `tv-proxy.env`.
+  (WunderTrading API key pair), and `tv-proxy.env`. Item/field naming rules
+  for every agent/skill: `browser-debug/secrets/VAULT_CONVENTIONS.md`.
 - Missing secrets never break the build — config tasks warn + skip.
 
 ## Verification checklist (run inside the codespace)
