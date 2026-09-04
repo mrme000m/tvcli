@@ -49,7 +49,16 @@ if [ -f "$WS/.dsh-autoweb" ] && command -v dsh >/dev/null 2>&1; then
       # 127.0.0.1 only: dsh refuses --host 0.0.0.0 on purpose (it would
       # expose remote code execution to the network). The codespace port
       # forwarder picks up localhost-bound ports anyway.
-      (cd "$HOME" && setsid nohup dsh web --port 3081 --host 127.0.0.1 --no-open >/tmp/dsh-web.log 2>&1 &)
+      # Trust the forwarded host so the Codespace URL's Host header passes
+      # the /api browser-trust fence (otherwise WS upgrades via the
+      # forwarded URL are treated as untrusted).
+      TRUSTED_ARGS=()
+      if [ -n "${CODESPACE_NAME:-}" ]; then
+        TRUSTED_ARGS+=(--trusted-host "*.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}" --trusted-host "${CODESPACE_NAME}-3081.${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}")
+      else
+        TRUSTED_ARGS+=(--trusted-host "*.app.github.dev")
+      fi
+      (cd "$HOME" && setsid nohup dsh web --port 3081 --host 127.0.0.1 "${TRUSTED_ARGS[@]}" --no-open >/tmp/dsh-web.log 2>&1 &)
       for i in $(seq 1 60); do curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 && break; sleep 1; done
       curl -sf http://127.0.0.1:3081/ >/dev/null 2>&1 \
         && echo "dsh web ready: http://localhost:3081 (Prime fleet column in the Web GUI; preset: prime-orchestrator)" \
