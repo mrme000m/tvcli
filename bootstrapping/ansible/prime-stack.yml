@@ -254,21 +254,31 @@
       check_mode: false
       tags: [fleet]
 
+    # ------------------------------------------------------------------ stealth-browser
+    - name: "stage: stealth-browser — stealth-browser-mcp checkout + venv + dsh MCP row"
+      ansible.builtin.command:
+        cmd: python3 -m prime_stack stealth-browser
+      environment: "{{ prime_stage_env }}"
+      register: r_stealth_browser
+      changed_when: r_stealth_browser.stdout_lines and (r_stealth_browser.stdout_lines | last | from_json).changed | default(false)
+      check_mode: false
+      tags: [stealth-browser]
+
     # ------------------------------------------------------------------ summary
     - name: Prime stack summary
       ansible.builtin.debug:
         msg: "{{ prime_summary_lines }}"
       vars:
         prime_envelopes: >-
-          {{ [r_dsh, r_plugin, r_agent, r_preset, r_env, r_dsh_config,
-              r_prime_config, r_extras_plugins, r_extras_mnemon, r_extras_mobile,
-              r_extras_mcp, r_secrets, r_fleet_presets, r_fleet_patch,
-              r_fleet_autoserve]
-             | selectattr('stdout_lines', 'defined')
-             | map(attribute='stdout_lines')
-             | map('last')
-             | map('from_json')
-             | list }}
+           {{ [r_dsh, r_plugin, r_agent, r_preset, r_env, r_dsh_config,
+               r_prime_config, r_extras_plugins, r_extras_mnemon, r_extras_mobile,
+               r_extras_mcp, r_secrets, r_fleet_presets, r_fleet_patch,
+               r_fleet_autoserve, r_stealth_browser]
+              | selectattr('stdout_lines', 'defined')
+              | map(attribute='stdout_lines')
+              | map('last')
+              | map('from_json')
+              | list }}
         prime_summary_lines: >-
           {{ prime_envelopes | map(attribute='summary_line') | list
              + ['grid fleet blueprint: bootstrapping/docs/grid-fleet.md (screen → configure → manage loop)',

@@ -21,7 +21,8 @@
       ".agents/skills/openknowledge",
       ".agents/skills/codespace-prime-stack",
       ".agents/skills/wundertrading",
-      ".agents/skills/web-discovery"
+      ".agents/skills/web-discovery",
+      ".agents/skills/stealth-browser"
     ],
     "subagents": {
       "agents": [

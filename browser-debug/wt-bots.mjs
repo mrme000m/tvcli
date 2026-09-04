@@ -126,7 +126,7 @@ if (!T) { console.error('unknown type: ' + typeArg + ' (use signal|grid|dca|mn|m
       const links = Object.fromEntries(Object.entries(it.actions || {})
         .filter(([, v]) => v?.data?.link)
         .map(([k, v]) => [k, v.data.method + ' ' + v.data.link]));
-      out({ code: b.code, status: b.status, paperTrading: b.paperTrading,
+      out({ id: b.id, code: b.code, status: b.status, paperTrading: b.paperTrading,
             pair: b.pair?.unifiedCode || b.pairCode, type: b.dcaTradingType || b.gridTradingType || b.type || b.riskLevel,
             actions: links });
     }
@@ -151,7 +151,16 @@ if (!T) { console.error('unknown type: ' + typeArg + ' (use signal|grid|dca|mn|m
     if (!r.ok) process.exit(1);
   } else if (cmd === 'delete') {
     const base = { signal: 'signal_bots', grid: 'grid_bots', dca: 'dca_bots', mn: 'market_neutral', mp: 'multi_pair_grid_bot' }[typeArg];
-    const r = await callApi('DELETE', `/en/trader/${base}/${rest[0]}/delete`);
+    let id = rest[0];
+    if (typeArg === 'signal' && !/^\d+$/.test(id)) {
+      // signal bots delete by NUMERIC id — resolve code -> id from the list
+      const lr = await callApi('GET', T.list('page=1&limit=200'));
+      const items = lr.json?._embedded?.items || [];
+      const found = items.find(it => (it.resource || it).code === id);
+      if (!found) throw new Error('signal bot not found: ' + id);
+      id = (found.resource || found).id;
+    }
+    const r = await callApi('DELETE', `/en/trader/${base}/${id}/delete`);
     out({ status: r.status, ok: r.ok, body: r.json });
     if (!r.ok) process.exit(1);
   } else if (cmd === 'positions') {

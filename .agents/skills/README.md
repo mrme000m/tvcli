@@ -15,6 +15,7 @@ for working with the `tvcli` TradingView Pine pipeline.
 | `wundertrading` | WunderTrading execution-layer skill — classify a token's market regime (trend/chop/squeeze via public OHLCV), map it to a classic/DCA strategy config (TP ladders, stops, trailing, DCA sizing math), deploy and manage it through the wun MCP tools or HMAC-signed REST API, and prove reliability from exported strategy history before scaling. |
 | `web-discovery` | Turn ANY web platform into programmable automation — investigate the live UI and network layer (XHR/REST/WS) with bdg+cloak, codify verified findings into reverse-engineered API docs, then forge reusable platform CLIs, agent skills, dsh plugin rows and fleet presets, improving them from usage feedback. |
 | `grid-bot` | Create and configure a WunderTrading Grid bot for a token — screen the universe (mean-reversion/trend), derive a ready-to-apply Grid-bot config (grid type, ATR-band channel, ATR-derived Profit-per-GRID, grid count, sizing, Stop Trigger, Pump Protection) via repeatable scripts, then apply via web UI or webhook and verify on the reliability ladder. |
+| `stealth-browser` | Stealth browser automation (vibheksoni/stealth-browser-mcp) — 97-tool MCP via dsh-mcp-client (Cloudflare/anti-bot bypass with real Chrome/nodriver/CDP, element cloning, network hooks, visual workflows). Usable by dsh + prime agents. |
 
 ## Packaging
 

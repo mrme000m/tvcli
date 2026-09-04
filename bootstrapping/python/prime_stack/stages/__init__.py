@@ -8,7 +8,7 @@ bw-provision.sh).
 """
 
 from . import (agent, dsh, dsh_config, env_bridge, extras, fleet, packages,
-               plugin, preset, prime_config, secrets)
+               plugin, preset, prime_config, secrets, stealth_browser)
 
 STAGES = {
     "packages": packages.run,
@@ -27,6 +27,7 @@ STAGES = {
     "fleet-presets": fleet.run_presets,
     "fleet-patch": fleet.run_patch,
     "fleet-autoserve": fleet.run_autoserve,
+    "stealth-browser": stealth_browser.run,
 }
 
 GROUPS = {
@@ -46,4 +47,5 @@ GROUPS["all"] = [
     *GROUPS["extras"],
     "secrets",
     *GROUPS["fleet"],
+    "stealth-browser",
 ]

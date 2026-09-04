@@ -57,6 +57,12 @@ FLEET_PRESET_MARKER = ".plugin-managed.json"
 FLEET_PRESET_FILES = ["preset.yml", "agent.cordis.yml"]
 WT_MCP_URL = "https://wundertrading.com:2083/mcp"
 
+# --- stealth-browser-mcp ------------------------------------------------------
+
+STEALTH_BROWSER_REPO = "https://github.com/vibheksoni/stealth-browser-mcp.git"
+STEALTH_BROWSER_DIRNAME = "tools/stealth-browser-mcp"
+STEALTH_BROWSER_MCP_ID = "mcp-stealth-browser"
+
 # --- apt packages (python fallback stage; the playbook uses the apt module) -
 
 APT_PACKAGES = ["python3-yaml", "curl", "jq", "util-linux"]
@@ -226,6 +232,18 @@ class Config:
     @property
     def fleet_preset_src(self) -> Path:
         return self.workspace / "bootstrapping" / "presets"
+
+    @property
+    def stealth_browser_dir(self) -> Path:
+        return self.workspace / STEALTH_BROWSER_DIRNAME
+
+    @property
+    def stealth_browser_venv(self) -> Path:
+        return self.stealth_browser_dir / "venv"
+
+    @property
+    def stealth_browser_server(self) -> Path:
+        return self.stealth_browser_dir / "src" / "server.py"
 
     # ---- secrets (presence only; values never leave the process) ----------
 
