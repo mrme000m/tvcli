@@ -169,6 +169,59 @@ Notes:
   configs (ROI-ranked; fields `grid_trading_type`, `grid_levels`,
   `grid_percent_step`, `high/low/mid_price`, `pnl`, `roi`, `timeframe`).
 
+## Coverage matrix: help-center article vs API/CLI (audited 2026-09-04)
+
+Audited against "How the Grid Bot Works: Strategy & Setup Guide"
+(help.wundertrading.com article 8570328, fetched live through the browser).
+Every web-interface capability and its programmatic equivalent:
+
+| Web-UI capability (article) | API field / endpoint | CLI |
+|---|---|---|
+| Spot / Futures grid | `upsert?gridMarket=spot\|derivative` | `wt-grid create` (`gridMarketHint`) |
+| Exchange account (incl. Paper) | `profilesCodes` (paper profiles: `paperTrading: true`) | `wt-grid profiles` |
+| Pair | `pairCode` (resolve from `:2087/all-markets`) | `wt-grid analyze` |
+| Long / Neutral / Short GRID | `gridTradingType: long\|short\|neutral` | `wt-grid create` |
+| Hedge GRID (2 opposite per level, market enter/close) | `gridMethod: two_way` | `wt-grid create` |
+| Change midpoint (Neutral) | `midPrice` | `wt-grid create` |
+| Amount per trade | `amountPerTrade` + `amountPerTradeType: base\|percents` | `wt-grid create` |
+| GRID size Interval / Infinite | `gridType: interval\|infinite` (+high/low for interval) | `wt-grid create` / `wt-backtest` |
+| Higher / Lower price | `highPrice` / `lowPrice` | `wt-grid create` |
+| Profit per GRID (geometric) | `gridPercentStep` (decimal, ≤6dp) | `wt-grid create` / `wt-backtest optimize` |
+| GRIDs count | `gridLevels` | `wt-grid create` |
+| Take Profit / Stop Loss ($ on cumulative Total PnL) | `takeProfit`, `stopLoss`, `stopLossPnlCompareType` | `wt-grid create` |
+| Trailing Stop (activation + execute) | `trailingStopActivation`, `trailingStopExecute`, `trailingStopPnlCompareType` | `wt-grid create` |
+| Stop Trigger + spot conditions | `stopOnOutOfGrid` + `stopCondition: stop_only\|stop_and_close_all\|stop_and_close_all_and_convert_to_profit_currency` | `wt-grid create` |
+| Pump Protection | `pumpProtection`, `pumpProtectionOrderType` | `wt-grid create` |
+| Start condition: Immediate | `startCondition: immediate` | `wt-grid create` |
+| Start condition: RSI / MACD / Bollinger / Price Change | `startCondition: indicator` + `indicators: {rsi: {...}}` (periods per article) | `wt-grid create` |
+| Start condition: Webhook alert | `startCondition: webhook_alert` + `signalSource`; response returns the `signalCode` for the alert | `wt-grid create` (read `signalCode` from response) |
+| Allow to restart / stop alert action | `awaitStartSignal=true` on stop; stop alert action = `stopCondition` enum | `wt-grid stop` |
+| Positions Trailing Stop (30% of grid step) | `strategyProfitCondition: trailing_stop` | `wt-grid create` |
+| Positions Stop Loss | `strategyStopLossFixedPercentRatio` | `wt-grid create` |
+| Spot Investment Information | `investmentRef`, `investmentBase`, `profitCurrencyType` + `find_notional_prices` (server-computed) | `wt-grid analyze` + create payload |
+| Backtest (30d, positions/PnL, OL/CL/OS/CS chart) | client-side engine — ported verbatim | `wt-backtest backtest` (digit-for-digit parity) |
+| Optimize (profit-per-GRID sweep, apply optimized) | client-side sweep — ported | `wt-backtest optimize` (platform parity) + `sweep` (superset) |
+| Profit-Optimized Pairs (ROI cards, $500/$50 benchmark) | `GET …/grid_bots/presets` | `wt-grid presets [limit]` |
+| Stop (leave trades / close all) | `POST …/{code}/stop?stopCondition=…&awaitStartSignal=true` | `wt-grid stop` |
+| Positions (live + history) | `GET …/{code}/positions/grid`, `positions-history/grid` | `wt-grid positions` |
+| Start (restart with pre-configured settings) | `POST …/{code}/restart` | `wt-grid restart` |
+| Delete (stops + closes) | `DELETE …/{code}/delete` (requires stopped + flat) | `wt-grid delete` |
+| Edit active bot's settings | `POST …/upsert?code={code}` — **geometry applies live (server re-anchors the channel around the current price); trade-size changes need stop → edit → restart** (verified live) | `wt-grid create`-style POST with `code` |
+| Share | client-side modal (public stats URL); no dedicated API | — (not API-relevant) |
+| Logs (webhook bots) | `GET …/signal_bots/{signalCode}/trading_view_logs/show` (action link `signals_logs`) | action links in `wt-grid list` |
+
+**Verified edit semantics (live experiment, 2026-09-04):** POST `upsert?code=`
+on an ACTIVE bot: the channel/step/levels apply immediately (server re-anchors
+high/low/mid around the current price — send a fresh geometry); `amountPerTrade`
+is echoed but NOT applied while active. Stop → edit → restart applies sizing
+changes (verified: amount 20→30 took effect only after the stop-edit-restart
+cycle).
+
+Not covered by the API (by design / platform gap): the arithmetic grid step
+("coming soon" per the article), and the chart-drag interaction itself (pure
+UI convenience for setting `highPrice`/`lowPrice`/`midPrice` — the same
+values are payload fields).
+
 ## Gotchas (verified 2026-09-04)
 
 - The configurator SPA sometimes renders an empty shell after load (nav only).

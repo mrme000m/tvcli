@@ -1,8 +1,9 @@
 # WunderTrading Grid bot — mechanics, sizing & the tvcli→webhook loop
 
 Source: [How the Grid Bot Works: Strategy & Setup Guide](https://help.wundertrading.com/en/articles/8570328-how-the-grid-bot-works-strategy-setup-guide)
-(help.wundertrading.com is Cloudflare-gated; fetch via a reader proxy when
-re-reading).
+(help.wundertrading.com is Cloudflare-gated; re-read it by navigating the
+CloakBrowser tab to the article URL — every feature below is now mapped to the
+API in `browser-debug/docs/wt/grid-bot-api.md` § "Coverage matrix").
 
 The Grid bot is **not** part of the classic/DCA MCP/REST surface. It is a
 web-UI configurator (`wundertrading.com/en/grid-bot`) with its own parameter

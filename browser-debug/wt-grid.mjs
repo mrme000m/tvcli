@@ -142,6 +142,25 @@ const out = (v) => console.log(typeof v === 'string' ? v : JSON.stringify(v, nul
   } else if (cmd === 'positions') {
     const r = await callApi('GET', `/en/trader/grid_bots/${rest[0]}/positions/grid?page=1&limit=50`);
     out(r.json);
+  } else if (cmd === 'presets') {
+    // Profit-Optimized Pairs: platform-pre-backtested grid configs, ROI-ranked
+    // (benchmark: $500 portfolio, $50/trade). 'Use preset' = take the fields
+    // into a create payload: pair, grid_trading_type, grid_levels,
+    // grid_percent_step, high/low/mid_price, amount_per_trade, timeframe.
+    const limit = rest[0] || '10';
+    const r = await callApi('GET', `/en/trader/grid_bots/presets?page=1&limit=${limit}`);
+    if (!r.ok) throw new Error('presets failed: ' + JSON.stringify(r.json).slice(0, 200));
+    const items = r.json?._embedded?.items || [];
+    for (const it of items) {
+      out({
+        id: it.id, pair: it.code, exchange: it.markets?.[0]?.exchange,
+        gridTradingType: it.grid_trading_type, gridType: it.grid_type,
+        levels: it.grid_levels, percentStep: it.grid_percent_step,
+        high: it.high_price, low: it.low_price, mid: it.mid_price,
+        amountPerTrade: it.amount_per_trade, roi: it.roi, pnl: it.pnl,
+        timeframe: it.timeframe, marketCode: it.markets?.[0]?.code,
+      });
+    }
   } else if (cmd === 'profiles') {
     const r = await callApi('GET', '/en/trader/grid_bots/upsert');
     const profiles = r.json?.data?.exchangesProfiles || {};
@@ -153,7 +172,7 @@ const out = (v) => console.log(typeof v === 'string' ? v : JSON.stringify(v, nul
       }
     }
   } else {
-    console.error(`usage: node wt-grid.mjs <list [--all] | analyze EXCH:code | create config.json | stop code [stopCondition] | restart code | close-all code | delete code | positions code | profiles>`);
+    console.error(`usage: node wt-grid.mjs <list [--all] | analyze EXCH:code | create config.json | stop code [stopCondition] | restart code | close-all code | delete code | positions code | presets [limit] | profiles>`);
     process.exit(2);
   }
 })().catch(e => { console.error('FAIL: ' + e.message); process.exit(1); });
