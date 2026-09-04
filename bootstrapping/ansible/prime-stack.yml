@@ -254,15 +254,6 @@
       check_mode: false
       tags: [fleet]
 
-    - name: "stage: fleet-qdenv — QuantDinger gateway env bridge (qd-analyst)"
-      ansible.builtin.command:
-        cmd: python3 -m prime_stack fleet-qdenv
-      environment: "{{ prime_stage_env }}"
-      register: r_fleet_qdenv
-      changed_when: r_fleet_qdenv.stdout_lines and (r_fleet_qdenv.stdout_lines | last | from_json).changed | default(false)
-      check_mode: false
-      tags: [fleet]
-
     # ------------------------------------------------------------------ summary
     - name: Prime stack summary
       ansible.builtin.debug:
@@ -272,7 +263,7 @@
           {{ [r_dsh, r_plugin, r_agent, r_preset, r_env, r_dsh_config,
               r_prime_config, r_extras_plugins, r_extras_mnemon, r_extras_mobile,
               r_extras_mcp, r_secrets, r_fleet_presets, r_fleet_patch,
-              r_fleet_autoserve, r_fleet_qdenv]
+              r_fleet_autoserve]
              | selectattr('stdout_lines', 'defined')
              | map(attribute='stdout_lines')
              | map('last')
@@ -280,7 +271,7 @@
              | list }}
         prime_summary_lines: >-
           {{ prime_envelopes | map(attribute='summary_line') | list
-             + ['grid fleet blueprint: bootstrapping/docs/grid-fleet.md (research → screen → configure → manage loop)',
+             + ['grid fleet blueprint: bootstrapping/docs/grid-fleet.md (screen → configure → manage loop)',
                 "dsh web autostart: opt-in — 'touch .dsh-autoweb' in the repo root, then restart the codespace",
                 'standalone re-run: bootstrapping/python/bin/prime-stack --dry-run all (no ansible needed)'] }}
       tags: [always]

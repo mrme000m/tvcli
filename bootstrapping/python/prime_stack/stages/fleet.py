@@ -3,9 +3,9 @@
 Implements the autonomous grid-trading loop blueprint
 (bootstrapping/docs/grid-fleet.md):
 
-  qd-analyst      research (gateway klines/news + tvcli skills)
-  tv-investigator screen (tvcli /hunt fan-out across the accounts.json
-                  multi-account cookie pool + network-API investigation)
+  tv-investigator screen/research (tvcli /hunt fan-out across the
+                  accounts.json multi-account cookie pool + network-API
+                  investigation; regime ranking via token_screen.py)
   wt-investigator configure (WunderTrading bots — Grid/DCA/Signal/
                   Multi-Pair Grid — via wt CLI, REST, MCP, headful UI)
   tv-scout        confirm (visual confluence on the live chart)
@@ -20,7 +20,6 @@ Sub-stages (one CLI stage / playbook tag each):
                   logged) + the wt-tools cloak-dir override
   fleet-autoserve tvcli multi-account HTTP server (POST /hunt fan-out over
                   the account pool) autostart marker
-  fleet-qdenv     guarded QuantDinger gateway env bridge for qd-analyst
 
 Mac paths in the vendored preset copies are @TV_WORKSPACE@ / @CLOAK_DIR@
 placeholders, resolved at install time.
@@ -30,7 +29,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from pathlib import Path
 
 from ..config import FLEET_PRESET_FILES, WT_MCP_URL, Config
@@ -40,7 +38,6 @@ from .extras import _strip_placeholder_lists
 STAGE_PRESETS = "fleet-presets"
 STAGE_PATCH = "fleet-patch"
 STAGE_AUTOSERVE = "fleet-autoserve"
-STAGE_QDENV = "fleet-qdenv"
 
 
 # ---------------------------------------------------------------- presets ---
@@ -119,7 +116,7 @@ def run_presets(cfg: Config, ctx: Context) -> StageResult:
     return StageResult(
         STAGE_PRESETS, changed=changed, warnings=warnings,
         details={"presets": statuses},
-        summary_line="fleet presets (tv-scout, tv-investigator, qd-analyst, wt-investigator): "
+        summary_line="fleet presets (tv-scout, tv-investigator, wt-investigator): "
         + ("installed/updated this run" if changed else "present or user-preserved"),
     )
 
@@ -242,51 +239,4 @@ def run_autoserve(cfg: Config, ctx: Context) -> StageResult:
     return StageResult(
         STAGE_AUTOSERVE, changed=True,
         summary_line="tvcli multi-account autoserve (.tvcli-autoserve): enabled this run",
-    )
-
-
-# ------------------------------------------------------------------ qdenv ---
-
-def qd_env_block(qd_env_path: str) -> str:
-    return f'''# prime-stack fleet: guarded source of the QuantDinger gateway env
-# (a value applies only when the variable is unset — injected env wins).
-if [ -f "{qd_env_path}" ]; then
-  while IFS= read -r __qd_line; do
-    [ -n "$__qd_line" ] || continue
-    [ "${{__qd_line#\#}}" = "$__qd_line" ] || continue
-    __qd_k="${{__qd_line%%=*}}"
-    case "$__qd_k" in *[!A-Za-z0-9_]*) continue ;; esac
-    [ -n "${{!__qd_k:-}}" ] && continue
-    eval "export $__qd_line"
-  done < "{qd_env_path}"
-fi'''
-
-
-def run_qdenv(cfg: Config, ctx: Context) -> StageResult:
-    if not cfg.qd_runtime_env.is_file():
-        return StageResult(
-            STAGE_QDENV, skipped=True,
-            warnings=[f"{cfg.qd_runtime_env} not provisioned (optional — the "
-                      "backend auto-mints a short-lived read-only token when "
-                      "the gateway is reachable)"],
-            summary_line="QuantDinger gateway env (qd-analyst): SKIPPED (not provisioned)",
-        )
-    block = qd_env_block(str(cfg.qd_runtime_env))
-    changed = False
-    for name in (".profile", ".bashrc"):
-        rc_file = cfg.home / name
-        existing = rc_file.read_text() if rc_file.exists() else ""
-        if "qd-agent.env" in existing:
-            continue
-        new_text = existing
-        if new_text and not new_text.endswith("\n"):
-            new_text += "\n"
-        if new_text.strip():
-            new_text += "\n"
-        if ctx.write_text(rc_file, new_text + block + "\n"):
-            changed = True
-    return StageResult(
-        STAGE_QDENV, changed=changed,
-        summary_line="QuantDinger gateway env (qd-analyst): "
-        + ("bridged this run" if changed else "checked"),
     )

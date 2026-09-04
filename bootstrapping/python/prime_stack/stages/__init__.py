@@ -27,12 +27,11 @@ STAGES = {
     "fleet-presets": fleet.run_presets,
     "fleet-patch": fleet.run_patch,
     "fleet-autoserve": fleet.run_autoserve,
-    "fleet-qdenv": fleet.run_qdenv,
 }
 
 GROUPS = {
     "extras": ["extras-plugins", "extras-mnemon", "extras-mobile", "extras-mcp"],
-    "fleet": ["fleet-presets", "fleet-patch", "fleet-autoserve", "fleet-qdenv"],
+    "fleet": ["fleet-presets", "fleet-patch", "fleet-autoserve"],
 }
 
 GROUPS["all"] = [

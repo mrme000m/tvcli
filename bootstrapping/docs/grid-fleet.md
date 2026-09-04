@@ -15,20 +15,20 @@ operating blueprint the agents follow.
             └───────┬───────────────────────────────────────────▲──────────┘
                     │ delegate                                   │ report/verify
       ┌─────────────▼──────────┐        ┌────────────────────────┴─────────┐
-      │ research               │        │ manage                            │
-      │  qd-analyst            │        │  wt-investigator: live strategy   │
-      │  gateway klines/news,  │        │  edits (TP/SL/DCA/trailing),      │
-      │  tvcli indicator skills│        │  close/cancel/swing, grid re-arm  │
-      └─────────────┬──────────┘        └────────────────────────▲─────────┘
-                    │ regime + token candidates                   │ adaptation triggers
-      ┌─────────────▼──────────┐        ┌────────────────────────┴─────────┐
-      │ screen                 │        │ configure                         │
-      │  tv-investigator +     │        │  wt-investigator: grid/DCA/classic│
-      │  qd-analyst: /hunt     │        │  config on WunderTrading via      │
-      │  fan-out over the      │        │  wt_api / wt_mcp / headful UI     │
-      │  accounts.json pool    │        │  (bdg); pair codes resolved from  │
-      │  + token_screen.py     │        │  get_exchange_markets             │
-      └─────────────┬──────────┘        └───────────┬───────────────────────┘
+      │ research + screen      │        │ manage                            │
+      │  tv-investigator:      │        │  wt-investigator: live strategy   │
+      │  /hunt fan-out over    │        │  edits (TP/SL/DCA/trailing),      │
+      │  the accounts.json     │        │  close/cancel/swing, grid re-arm  │
+      │  pool, token_screen.py │        └────────────────────────▲─────────┘
+      │  regime ranking,       │                                 │ adaptation triggers
+      │  tvcli indicator skills│        ┌────────────────────────┴─────────┐
+      └─────────────┬──────────┘        │ configure                         │
+                    │                   │  wt-investigator: grid/DCA/classic│
+                    │                   │  config on WunderTrading via      │
+                    │                   │  wt_api / wt_mcp / headful UI     │
+                    │                   │  (bdg); pair codes resolved from  │
+                    │                   │  get_exchange_markets             │
+                    │                   └───────────┬───────────────────────┘
                     │ candidates + regime           │
                     └──────────► tv-scout: visual confluence on the live
                                   chart before anything goes live
@@ -47,8 +47,7 @@ playbook §5).
 | Preset | Role in the loop | Tool surface |
 |---|---|---|
 | `prime-orchestrator` | Coordinate: tracked goals, delegation to prime-agent workers, fleet column, workflow engine | prime_agent tool, workflow/subagent tools (plugin) |
-| `qd-analyst` | Research + first-line screening: klines/price/MarketStream from the QuantDinger gateway, news (Perplexity), tvcli Pine skills | curl to `$QD_AGENT_BASE_URL`, tvcli, skill-filesystem |
-| `tv-investigator` | Screening at scale: multi-session TradingView network API, protocol capture, tvcli extension | bdg `tv` command group, tvcli `/hunt`, skill-filesystem |
+| `tv-investigator` | Research + screening at scale: multi-session TradingView network API, protocol capture, tvcli extension, regime ranking | bdg `tv` command group, tvcli `/hunt`, skill-filesystem |
 | `wt-investigator` | Configure + manage WunderTrading bots: grid/DCA/signal config, exchange setup, API keys, backtesting UI | wt_* tools (wt CLI: session/login/browse/api/apikey/mcp), mcp-wundertrading row, bdg |
 | `tv-scout` | Confirm: render the thesis on the live chart, screenshot, vision confluence | tvvisual (CloakBrowser + CDP), tvcli, skill-filesystem |
 
@@ -128,8 +127,7 @@ Cross-cutting rules (from the wundertrading skill):
   from vault item `wundertrading-api` → `browser-debug/secrets/runtime/wt.env`,
   never committed, never logged).
 - `.tvcli-autoserve` marker (tvcli multi-account server on :8765) when
-  `accounts.json` is provisioned; QD gateway env bridged into login shells
-  when the optional runtime file exists.
+  `accounts.json` is provisioned.
 - Secrets stay in the Bitwarden vault (`keys.00m.indevs.in`):
   `wundertrading-login`, `wundertrading-session`, `wundertrading-api`,
   `tvcli-accounts-pool`, `tvcli-primary-env`, `browser-debug-env`.

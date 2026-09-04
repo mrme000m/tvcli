@@ -24,8 +24,7 @@ bootstrapping/
 │   └── tests/              stdlib unittest suite (python3 -m unittest discover)
 ├── presets/                vendored specialist agent presets (fleet tag)
 │   ├── tv-scout/           visual confluence on the live chart
-│   ├── tv-investigator/    multi-session TV network-API screening
-│   ├── qd-analyst/         QuantDinger gateway market research
+│   ├── tv-investigator/    multi-session TV network-API screening + research
 │   └── wt-investigator/    WunderTrading bot configuration + management
 └── docs/
     └── grid-fleet.md       the autonomous grid-trading loop blueprint
@@ -67,8 +66,7 @@ Stage list (mirrors the playbook tags):
 `packages` (python fallback; the playbook uses the apt module) · `dsh` ·
 `plugin` · `agent` · `preset` · `env` · `dsh-config` · `prime-config` ·
 `extras-plugins` · `extras-mnemon` · `extras-mobile` · `extras-mcp` ·
-`secrets` · `fleet-presets` · `fleet-patch` · `fleet-autoserve` ·
-`fleet-qdenv`
+`secrets` · `fleet-presets` · `fleet-patch` · `fleet-autoserve`
 
 ## Knobs (both runners)
 
@@ -95,7 +93,7 @@ Tags (unchanged from v1): `dsh`, `plugin`, `preset`, `agent`, `env`,
 | `prime-agent` CLI | Prime Intellect agent CLI (self-contained) | `~/.local/bin/prime-agent` |
 | CF Workers AI config | dsh `~/.dsh/settings.yaml` + prime-agent `~/.prime/agent/{models,auth,settings}.json`, all Cloudflare-account templated from env | `~/.dsh`, `~/.prime/agent` |
 | parity plugins | dsh-mnemon, pi2dsh, dsh-mobile, @deepseek-ai/dsh-mcp-client, pi-agent-memory, vendored dsh-restart | profile `web` |
-| specialist fleet | tv-scout, tv-investigator, qd-analyst, wt-investigator + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve, QD env bridge) | `$DSH_HOME/.agent-presets/` + web profile patch |
+| specialist fleet | tv-scout, tv-investigator, wt-investigator + grid-trading wiring (wundertrading MCP row, wt-tools cloakDir, tvcli autoserve) | `$DSH_HOME/.agent-presets/` + web profile patch |
 
 Default model: **`@cf/zai-org/glm-5.3`** on provider `cloudflare-workers-ai`,
 `defaultThinkingLevel: high`. The model catalog lives ONLY in
@@ -172,13 +170,14 @@ PATH, and the Cloudflare secrets are in the environment. Logs go to
 
 ## The specialist fleet (grid trading)
 
-The `fleet` stages install the four specialist agent presets vendored under
+The `fleet` stages install the three specialist agent presets vendored under
 `bootstrapping/presets/` (Mac paths are `@TV_WORKSPACE@` / `@CLOAK_DIR@`
 placeholders resolved at install time) with marker semantics — user-edited
 presets are preserved, unedited ones track the vendored copies. Together
 with the plugin-materialized `prime-orchestrator` they form the autonomous
-grid-trading loop — research (qd-analyst), screen (tv-investigator fanning
-tvcli `/hunt` across the `accounts.json` multi-account cookie pool),
+grid-trading loop — research/screen (tv-investigator fanning
+tvcli `/hunt` across the `accounts.json` multi-account cookie pool and
+ranking regimes via token_screen.py),
 configure (wt-investigator via the wt CLI / REST / MCP / headful UI),
 manage (prime-orchestrator reacting to `tvcli watch` triggers), confirm
 (tv-scout visual confluence). The regime→bot mapping, trigger set, and ops

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from prime_stack.stages.fleet import (load_env_file, preset_marker_status,
-                                      qd_env_block, upsert_grid_rows)
+                                      upsert_grid_rows)
 
 
 class PresetMarkerTests(unittest.TestCase):
@@ -59,33 +59,6 @@ class EnvFileTests(unittest.TestCase):
     def test_load_env_file(self):
         keys = load_env_file("# comment\nWT_API_KEY=abc\n WT_API_SECRET = def\nEMPTY=\n")
         self.assertEqual(keys, {"WT_API_KEY": "abc", "WT_API_SECRET": "def", "EMPTY": ""})
-
-
-class QdEnvBlockTests(unittest.TestCase):
-    def test_block_references_path_and_guards_names(self):
-        block = qd_env_block("/ws/browser-debug/secrets/runtime/qd-agent.env")
-        self.assertIn('if [ -f "/ws/browser-debug/secrets/runtime/qd-agent.env" ]', block)
-        self.assertIn('case "$__qd_k" in *[!A-Za-z0-9_]*) continue ;; esac', block)
-        self.assertIn('[ -n "${!__qd_k:-}" ] && continue', block)
-
-    def test_block_is_valid_guarded_shell(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            env_file = Path(tmp) / "qd-agent.env"
-            env_file.write_text("QD_AGENT_TOKEN=tok123\nBAD NAME=x\n# comment\n")
-            rc_file = Path(tmp) / ".profile"
-            rc_file.write_text(qd_env_block(str(env_file)) + "\n")
-            import subprocess
-            proc = subprocess.run(
-                ["bash", "-c", f'source "{rc_file}" && echo "$QD_AGENT_TOKEN"'],
-                capture_output=True, text=True,
-            )
-            self.assertEqual(proc.returncode, 0, proc.stderr)
-            self.assertEqual(proc.stdout.strip(), "tok123")
-            proc2 = subprocess.run(
-                ["bash", "-c", f'QD_AGENT_TOKEN=fromenv && source "{rc_file}" && echo "$QD_AGENT_TOKEN"'],
-                capture_output=True, text=True,
-            )
-            self.assertEqual(proc2.stdout.strip(), "fromenv")
 
 
 if __name__ == "__main__":

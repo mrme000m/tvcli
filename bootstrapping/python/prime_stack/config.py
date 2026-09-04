@@ -47,7 +47,7 @@ MOBILE_GATEWAY_PORT = 3443
 
 # --- fleet ------------------------------------------------------------------
 
-FLEET_PRESETS = ["tv-scout", "tv-investigator", "qd-analyst", "wt-investigator"]
+FLEET_PRESETS = ["tv-scout", "tv-investigator", "wt-investigator"]
 FLEET_MANAGED_BY = "prime-stack-bootstrap"
 FLEET_PRESET_MARKER = ".plugin-managed.json"
 FLEET_PRESET_FILES = ["preset.yml", "agent.cordis.yml"]
@@ -218,10 +218,6 @@ class Config:
     @property
     def wt_cloak_dir(self) -> Path:
         return self.workspace / "browser-debug"
-
-    @property
-    def qd_runtime_env(self) -> Path:
-        return self.workspace / "browser-debug" / "secrets" / "runtime" / "qd-agent.env"
 
     @property
     def fleet_preset_src(self) -> Path:

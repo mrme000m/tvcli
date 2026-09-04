@@ -6,8 +6,11 @@ Four independent sub-stages (one CLI stage each, one playbook tag each):
                   pi-agent-memory + the vendored dsh-restart. Each install
                   reuses the allowBuilds remedy from stages/plugin.py.
   extras-mnemon   mnemon settings + profile patch row (memory in the web UI)
-  extras-mobile   dsh-mobile gateway setup (mobile access in the web UI;
-                  codespace: HTTP gateway behind the forwarded https origin)
+  extras-mobile   dsh-mobile gateway (mobile access in the web UI; loopback
+                  listener — the codespace edge terminates TLS and rewrites
+                  Host, so phone pairing goes through the plugin's own
+                  remote providers, e.g. Tailscale Funnel, enabled from
+                  the web UI)
   extras-mcp      home-level cordis patch mounting the code-review-graph MCP
 """
 
@@ -181,19 +184,27 @@ def _env_with_login_shell_fallback(name: str) -> str:
     return (proc.stdout or "").strip()
 
 
-def build_mobile_setup_doc(doc: dict, cs_name: str, cs_domain: str,
-                           port: int, home: Path) -> dict:
-    """The codespace-forwarded gateway config.
+def build_mobile_setup_doc(doc: dict, port: int, home: Path) -> dict:
+    """The codespace mobile gateway config (empirically probed, 2026-09-04).
 
-    The plugin enforces "publicOrigin requires TLS" (parseGatewayConfig
-    demands tls.mode == "provided"), so the gateway serves the self-signed
-    cert the setup CLI generated — on loopback — and is published at the
-    forwarded https origin. `instanceId` is NOT a free token: the gateway
-    verifies it equals the fingerprint256 of the pairing CA (sha256 of the
-    cert DER, hex, lowercase, no colons) at boot — derive it from the
-    actual CA so a drifted value self-heals.
+    GitHub codespace forwarding terminates TLS at the edge (DigiCert
+    *.app.github.dev), dials the container over loopback with PLAIN http,
+    and rewrites Host to localhost:<port> (the public vhost rides only in
+    X-Forwarded-Host). That cannot front the gateway's direct Host/Origin
+    trust model under any setup.json shape: publicOrigin forces the listen
+    port to the URL port (443 -> EACCES) while the edge dials the subdomain
+    port; explicit authority ports must equal listenPort; and tls-disabled
+    makes the trust scheme http, so phone-side https Origin headers 403.
+    The gateway therefore keeps the plugin loopback shape — tls disabled,
+    loopback authorities — through which the dsh web sidebar proxies; the
+    public -<port> vhost serves GETs (no Origin on navigation); phone
+    PAIRING uses the plugin's own remote providers (Tailscale Funnel /
+    cpolar — publicTls gateways with matching authorities), enabled from
+    the web UI. `instanceId` is NOT a free token: the gateway verifies it
+    equals the fingerprint256 of the pairing CA (sha256 of the cert DER,
+    hex, lowercase, no colons) at boot — derive it from the actual CA so
+    a drifted value self-heals.
     """
-    tls = doc.get("tls") or {}
     instance_id = doc.get("instanceId")
     try:
         pem = (home / "tls" / "ca.pem").read_text()
@@ -204,16 +215,13 @@ def build_mobile_setup_doc(doc: dict, cs_name: str, cs_domain: str,
         pass  # no readable CA yet — keep whatever the setup CLI wrote
     return {
         "version": 1,
-        "publicOrigin": f"https://{cs_name}-{port}.{cs_domain}",
         "listenHost": "127.0.0.1",
+        "listenPort": port,
         "upstreamOrigin": "http://127.0.0.1:3081",
+        "publicAuthorities": [f"localhost:{port}", f"127.0.0.1:{port}"],
         "instanceId": instance_id,
         "pairingCaFile": str(home / "tls" / "ca.pem"),
-        "tls": {
-            "mode": "provided",
-            "certFile": tls.get("certFile") or str(home / "tls" / "server-cert.pem"),
-            "keyFile": tls.get("keyFile") or str(home / "tls" / "server-key.pem"),
-        },
+        "tls": {"mode": "disabled"},
         "allowedCidrs": ["127.0.0.0/8", "::1/128"],
     }
 
@@ -252,7 +260,7 @@ def run_mobile(cfg: Config, ctx: Context) -> StageResult:
             except Exception:
                 doc = {}
         out = build_mobile_setup_doc(doc if isinstance(doc, dict) else {},
-                                     cs_name, cs_domain, cfg.mobile_gateway_port, home)
+                                     cfg.mobile_gateway_port, home)
         if ctx.write_text(setup, json.dumps(out, indent=2) + "\n", mode=0o600):
             changed = True
         details["origin"] = "codespace"

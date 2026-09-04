@@ -1,6 +1,6 @@
 ---
 name: codespace-prime-stack
-description: Operate, verify, and extend the bootstrapped DSH prime-orchestrator stack in this repo's GitHub Codespace/devcontainer — dsh + dsh-prime-orchestrator plugin + prime-agent CLI with Cloudflare Workers AI models, plus the specialist agent fleet (tv-scout, tv-investigator, qd-analyst, wt-investigator) and its grid-trading wiring. Use when asked about the codespace prime stack, re-running or fixing the bootstrap playbook (bootstrapping/ansible/prime-stack.yml), starting or debugging the dsh Web GUI / Prime fleet column on port 3081, provisioning its secrets, adding plugins/presets to the codespace dsh installation, or operating the autonomous grid-trading loop (bootstrapping/docs/grid-fleet.md).
+description: Operate, verify, and extend the bootstrapped DSH prime-orchestrator stack in this repo's GitHub Codespace/devcontainer — dsh + dsh-prime-orchestrator plugin + prime-agent CLI with Cloudflare Workers AI models, plus the specialist agent fleet (tv-scout, tv-investigator, wt-investigator) and its grid-trading wiring. Use when asked about the codespace prime stack, re-running or fixing the bootstrap playbook (bootstrapping/ansible/prime-stack.yml), starting or debugging the dsh Web GUI / Prime fleet column on port 3081, provisioning its secrets, adding plugins/presets to the codespace dsh installation, or operating the autonomous grid-trading loop (bootstrapping/docs/grid-fleet.md).
 ---
 
 # codespace-prime-stack — the devcontainer's prime intelligence & agent fleet
@@ -19,7 +19,7 @@ PATH, and Cloudflare Workers AI as the LLM provider.
 | `dsh` CLI (npm global, exact `0.1.1-rc.2`) | `/usr/local/share/nvm/current/bin/dsh` — **resets on every codespace rebuild; the playbook reinstalls it** |
 | dsh profile `web` (bundles: `dsh-base`, `dsh-web-app`, `dsh-prime-orchestrator`) | `~/.dsh/profiles/web/` |
 | `prime-orchestrator` agent preset (plugin-managed, sha256 marker) | `~/.dsh/.agent-presets/prime-orchestrator/` |
-| Specialist fleet presets (vendored, marker `managedBy: prime-stack-bootstrap`) — tv-scout, tv-investigator, qd-analyst, wt-investigator | `~/.dsh/.agent-presets/<name>/` (sources: `bootstrapping/presets/`) |
+| Specialist fleet presets (vendored, marker `managedBy: prime-stack-bootstrap`) — tv-scout, tv-investigator, wt-investigator | `~/.dsh/.agent-presets/<name>/` (sources: `bootstrapping/presets/`) |
 | Grid-fleet profile rows: `mcp-wundertrading` MCP + `wt-tools` cloakDir override (keys templated from vault at provision time, mode 0600) | `~/.dsh/profiles/web/cordis.patch.yml` |
 | WunderTrading runtime env (vault item `wundertrading-api`: WT_API_KEY / WT_API_SECRET) | `browser-debug/secrets/runtime/wt.env` |
 | tvcli multi-account server autostart marker (`.tvcli-autoserve` → `/hunt` fan-out over the accounts.json pool on :8765) | repo root |
@@ -54,12 +54,11 @@ half-installed state (plugin listed but not built) self-heals.
 
 ## The specialist fleet (grid trading)
 
-The `fleet` tag installs the four vendored specialist presets and the
+The `fleet` tag installs the three vendored specialist presets and the
 grid-trading wiring so the dsh agents can run the autonomous loop described
 in [bootstrapping/docs/grid-fleet.md](../../bootstrapping/docs/grid-fleet.md):
 
-- **research** — qd-analyst (QuantDinger gateway klines/news + tvcli skills)
-- **screen** — tv-investigator + qd-analyst (tvcli `/hunt` fan-out across the
+- **research + screen** — tv-investigator (tvcli `/hunt` fan-out across the
   `accounts.json` multi-account cookie pool; `wundertrading` skill's
   token_screen.py regime ranking)
 - **configure** — wt-investigator (WunderTrading grid/DCA/signal bots via the
@@ -96,7 +95,7 @@ the row.
 dsh --version                                   # 0.1.1-rc.2
 prime-agent --version
 ls ~/.dsh/.agent-presets/prime-orchestrator/   # preset.yml + agent.cordis.yml
-ls ~/.dsh/.agent-presets/                      # + tv-scout, tv-investigator, qd-analyst, wt-investigator (fleet tag)
+ls ~/.dsh/.agent-presets/                      # + tv-scout, tv-investigator, wt-investigator (fleet tag)
 grep -c "mcp-wundertrading\|wt-tools" ~/.dsh/profiles/web/cordis.patch.yml  # 2 fleet rows
 grep -A2 agent-default-model ~/.dsh/settings.yaml   # cloudflare-workers-ai / glm-5.3
 test -f ~/.dsh/profiles/web/node_modules/dsh-prime-orchestrator/lib/index.js
