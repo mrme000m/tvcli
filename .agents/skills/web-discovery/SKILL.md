@@ -31,7 +31,7 @@ WunderTrading.
 
 | Piece | Role |
 |---|---|
-| `browser-debug/launch.mjs` | download + launch the stealth-patched CloakBrowser Chromium, headful, CDP on 9222..9321 (profile via `CB_PROFILE`) |
+| `browser-debug/launch.mjs` | download + launch the stealth-patched CloakBrowser Chromium, headful, CDP on 9222..9321 (profile via `CB_PROFILE`; robust defaults: `--ignore-gpu-blocklist`, `--disable-dev-shm-usage`, anti-throttling flags, `--no-sandbox`) |
 | `browser-debug/bdg/` | agent-friendly browser-debugger CLI: telemetry daemon over a page-level CDP target — network capture (`network list`, `network websockets`), DOM (`dom query`), console, a11y/role inference, dialogs, screenshots, arbitrary CDP (`cdp <Domain>.<Method>`) |
 | `browser-debug/tv.mjs`, `wt.mjs` | forged per-platform CLIs — session restore (cookies from the vault), in-page `fetch` API calls, eval, screenshots |
 | `browser-debug/vision.mjs` | Mistral vision model describing screenshots — the UI-understanding confluence check |
@@ -41,12 +41,17 @@ WunderTrading.
 Attach bdg to the running browser before investigating:
 
 ```sh
-node launch.mjs                                   # headful stealth browser
+node launch.mjs                                   # headful stealth browser (robust defaults)
+CB_FRESH_PROFILE=1 node launch.mjs                # wipe a corrupted profile
+node launch.mjs -- --enable-logging=stderr       # extra Chromium flags after --
 curl -s http://127.0.0.1:9222/json                # page webSocketDebuggerUrl
 node bdg/dist/index.js --chrome-ws-url "ws://…" --no-headless "https://<platform>/"
 node bdg/dist/index.js network list               # captured XHR/fetch
 node bdg/dist/index.js network websockets         # WS connections
 ```
+
+If the page body stays empty while CDP is alive, the renderer has likely stalled on a WebGL blocklist or small `/dev/shm`. `launch.mjs` now sets the flags that fix this; verify with
+`node browser-debug/hydration-check.mjs '<url>' 30000`.
 
 ## The five-phase loop
 

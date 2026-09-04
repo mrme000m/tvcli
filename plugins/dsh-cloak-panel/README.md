@@ -16,7 +16,7 @@ Installable DSH Web plugin — collapsible, resizable **right-side panel** that 
 ## Analysis
 
 **`browser-debug/`** (`launch.mjs`, `tv.mjs`, `wt.mjs`, `bdg/`, `AGENTS.md`):
-- `launch.mjs` downloads stealth-patched Chromium to `cloakbrowser/chromium-*`, launches headful (never `--headless`, macOS LaunchAgent path for Aqua activation), CDP 9222..9321, `CB_PROFILE` support, SOCKS5 relay.
+- `launch.mjs` downloads stealth-patched Chromium to `cloakbrowser/chromium-*`, launches headful (never `--headless`, macOS LaunchAgent path for Aqua activation), CDP 9222..9321, `CB_PROFILE` support, SOCKS5 relay, and **robust container defaults**: `--ignore-gpu-blocklist`, `--disable-dev-shm-usage`, anti-throttling flags, `--no-sandbox` (matching the official CloakBrowser wrapper). These are the defaults that make WebGL-heavy apps (TradingView chart, many /login pages) hydrate inside Xvfb instead of staying blank.
 - `tv.mjs` / `wt.mjs` restore TradingView / WunderTrading cookies via `Network.setCookie` over CDP WS and probe auth (`[aria-label^="Logged in as"]`, WunderTrading login CTA). WunderTrading fetch-inside-page pattern (`wt.mjs api …`) is the model for authenticated API discovery — Cloudflare fingerprint means raw HTTP 403, real-browser `fetch` is required.
 - `bdg` is a daemonized CDP CLI (644 methods, `tv` subcommands for chart/studies, network/console capture). Pattern: pick `webSocketDebuggerUrl` from `http://127.0.0.1:9222/json`, drive via WS.
 
@@ -67,4 +67,5 @@ Hard refresh the browser (Ctrl+Shift+R) — the panel appears docked on the righ
 - No layout override — the panel is a `shell.overlay` overlay (z-index 30), so the prime-orchestrator 4-column patch coexists.
 - Screenshot polling is passive; heavy work (study extraction, network capture) stays in the agent's CDP session (`bdg tv …`, `wt.mjs api …`, or `wt_browser.py`/`wt_httpx.py`).
 - For Kanban-style fleet work, keep one `launch.mjs` per profile (`CB_PROFILE`); the panel always shows the preferred page (`wundertrading.com` > `tradingview.com` > first page).
+- **If the panel is blank despite `:9222` being alive**, the culprit is usually WebGL blocked by the GPU blocklist or a wedged profile. `launch.mjs` now defaults to `--ignore-gpu-blocklist` and `--disable-dev-shm-usage`; for a hard wedge use `CB_FRESH_PROFILE=1 node browser-debug/launch.mjs` and re-attach bdg. Diagnose with `node browser-debug/hydration-check.mjs '<url>' 30000`.
 - The same `DISPLAY=:99` is reused by `stealth-browser-mcp` headful windows (see `stealth-browser` skill) — `noVNC` is the multi-window zoom viewer, the panel is the single-page CDP screenshot viewport with the new zoom controls.

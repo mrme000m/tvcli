@@ -192,5 +192,9 @@ engine.
   task in the playbook, a unit test in `bootstrapping/python/tests/`, and
   the stage list in `bootstrapping/README.md`.
 - The playbook lives in `bootstrapping/` (not `browser-debug/ansible/`,
-  which owns the CloakBrowser/debug stack only). See
-  `bootstrapping/README.md` for the full operator manual.
+  which owns the CloakBrowser/debug stack only). `browser-debug/launch.mjs`
+  now passes the robust container/headful defaults (`--ignore-gpu-blocklist`,
+  `--disable-dev-shm-usage`, anti-throttling flags, `--no-sandbox`) that keep
+  WebGL-heavy pages (TradingView chart, WunderTrading /login) from failing
+  hydration in Xvfb. See `browser-debug/AGENTS.md` for the full flag table.
+  `bootstrapping/README.md` has the rest of the operator manual.

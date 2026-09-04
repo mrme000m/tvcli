@@ -25,6 +25,12 @@ pip install -e .        # pulls cloakbrowser
 tvvisual install        # downloads the stealth Chromium (~once)
 ```
 
+`cloakbrowser.launch(headless=False)` already enables `--ignore-gpu-blocklist`
+and the other Playwright/headful defaults, so the chart should hydrate inside
+Xvfb. If you instead drive the shared `browser-debug/launch.mjs` CloakBrowser
+for tvvisual work, use that launcher — it now sets the same robust flags for
+the repo's CDP/x11vnc stack.
+
 ## Usage
 
 Session cookies (`SESSION`, `SIGNATURE`, `DEVICE_T`) are read from the
@@ -105,3 +111,9 @@ and optionally validates on-chart study values against tvcli-computed numbers
   it can change without notice.
 - The `--ind` indicator names must match TradingView's dialog titles (full
   names, e.g. "Relative Strength Index").
+- **Blank chart / hydration failure:** in the container, the most common cause
+  is Chromium's GPU blocklist disabling WebGL inside Xvfb. The cloakbrowser
+  wrapper and `browser-debug/launch.mjs` both pass `--ignore-gpu-blocklist` by
+  default. If a stale profile wedges, start fresh with
+  `CB_FRESH_PROFILE=1 node browser-debug/launch.mjs`, or diagnose with
+  `node browser-debug/hydration-check.mjs '<url>' 30000`.

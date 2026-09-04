@@ -15,8 +15,67 @@ IMPROVE) is codified in the `web-discovery` skill
 into a dedicated discovery + tool-forging worker.
 
 `launch.mjs` downloads + launches the stealth-patched CloakBrowser Chromium,
-headful, with CDP on port 9222 (or next free). Usage: `node launch.mjs [--force]`,
-profile via `CB_PROFILE=<dir>`.
+headful, with CDP on port 9222 (or next free). Usage: `node launch.mjs [--force] [--new]`,
+profile via `CB_PROFILE=<dir>`. `--new` forces a fresh browser even when another
+CDP session is already alive; use it with a different `CB_PROFILE` to run multiple
+instances.
+
+Robustness tuning is driven by environment variables; the defaults now match
+the official CloakBrowser wrapper as closely as possible for headful
+Docker/Xvfb use:
+
+| Env var | Default | Effect |
+|---|---|---|
+| `CB_PROFILE` | `<launch.mjs dir>/profile` | Persistent user-data dir |
+| `CB_FRESH_PROFILE` | unset | `1` = wipe profile before launch (fixes corrupted-profile render failures) |
+| `CB_NEW_INSTANCE` / `--new` | no | Launch a second browser on the next free port |
+| `CB_SANDBOX` | `0` | `1` = keep Chromium sandbox (default off, matching the official wrapper) |
+| `CB_IGNORE_GPU_BLOCKLIST` | `1` | `0` = disable `--ignore-gpu-blocklist` (only if a page breaks) |
+| `CB_DISABLE_DEV_SHM_USAGE` | `1` | `0` = let Chromium use `/dev/shm` |
+| `CB_LOCALE` / `CB_TIMEZONE` | system/`LANG`/`TZ` | Passed to the binary as `--lang`/`--fingerprint-locale`/`--fingerprint-timezone` |
+| `CB_FINGERPRINT` | random 5-digit | Fixed seed for a returning-visitor identity |
+| `CB_WINDOW_SIZE` | `1600,1000` | `--window-size` override |
+| `CB_START_MAXIMIZED` | unset | `1` = use `--start-maximized` instead of `--window-size` |
+| `CB_STORAGE_QUOTA` | unset | `--fingerprint-storage-quota` value in MB |
+| `CB_WEBRTC_IP` | unset | `--fingerprint-webrtc-ip` value (`auto` or IP) |
+| `CB_PROXY` | unset | Proxy URL (`--proxy-server`); authenticated SOCKS5 is relayed automatically |
+
+Pass any raw Chromium flag after a literal `--` separator, e.g.
+`node launch.mjs -- --enable-logging=stderr --v=1`.
+
+## Troubleshooting: the page looks blank / client-side hydration fails
+
+Symptom: CDP responds (`curl :9222/json/version` works), the browser process is
+alive, but navigating to a React/Next.js/TradingView/WunderTrading page leaves
+the body empty and JS-dependent UI never appears.
+
+Root causes found in this environment:
+
+1. **WebGL blocked on the virtual GPU** — inside Xvfb/Docker, Chromium's GPU
+   blocklist disables WebGL unless `--ignore-gpu-blocklist` is passed. WebGL-
+   dependent apps (TradingView chart, map-heavy sites, many animated login pages)
+   then fail to hydrate. `launch.mjs` now adds this by default.
+2. **`/dev/shm` too small** — the container `/dev/shm` is 64 MB. Chromium's
+   renderer can OOM/wedge on large hydrated pages. `launch.mjs` adds
+   `--disable-dev-shm-usage` by default.
+3. **Timer/network throttling when not focused** — agents drive the browser over
+   CDP, so the window may be unfocused; Chromium throttles timers and the page
+   stalls. `launch.mjs` disables background timer/renderer throttling.
+4. **Corrupted profile** — a stale/crashed profile can break all page rendering.
+   `CB_FRESH_PROFILE=1` wipes it and re-creates it.
+
+Diagnostic: `node browser-debug/hydration-check.mjs 'https://your-page' 30000`
+reports `readyState`, `body children`, console errors, and saves a screenshot to
+`browser-debug/shots/`.
+
+Fast recovery:
+```sh
+# Kill stale CloakBrowser and start with a fresh profile
+pkill -f 'user-data-dir=.*/browser-debug/profile'
+CB_FRESH_PROFILE=1 node browser-debug/launch.mjs
+# Then re-verify
+node browser-debug/hydration-check.mjs 'https://www.tradingview.com/chart/' 30000
+```
 
 ## Critical gotcha: never pass `--headless`
 

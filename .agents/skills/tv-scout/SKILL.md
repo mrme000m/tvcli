@@ -130,17 +130,27 @@ Loop:
 
 **Mode A — attach to a RUNNING CloakBrowser (debug / cross-verify tvvisual).**
 Launch the same stealth binary tvvisual uses, with a CDP port, on the logged-in
-profile; then attach bdg to its page WebSocket:
+profile; then attach bdg to its page WebSocket. The repo's `browser-debug/launch.mjs`
+wraps this with the robust container flags (`--ignore-gpu-blocklist`,
+`--disable-dev-shm-usage`, anti-throttling) that make TradingView hydrate reliably
+inside the Xvfb display:
 ```bash
-BIN=$(python3 -c "from cloakbrowser import ensure_binary; print(ensure_binary())")
-"$BIN" --remote-debugging-port=9222 --user-data-dir=~/.tvvisual/profile \
-       --no-first-run --no-default-browser-check about:blank &   # keep alive
+node browser-debug/launch.mjs        # headful CloakBrowser on :9222 with robust defaults
 WS=$(curl -s http://127.0.0.1:9222/json | python3 -c "import json,sys;print([p['webSocketDebuggerUrl'] for p in json.load(sys.stdin) if p.get('type')=='page'][0])")
 bdg --chrome-ws-url "$WS" --no-headless -t 3600 "https://www.tradingview.com/chart/"
 # then:
 bdg cdp Runtime.evaluate --params '{"expression":"(/* TradingViewApi reads */)()","returnByValue":true}'
 bdg network list --type XHR,Fetch -j
 bdg dom eval '(/* expr */)()' ; bdg status ; bdg stop
+```
+If you use the bare binary directly, pass the same defaults to avoid a blank chart:
+```bash
+BIN=$(python3 -c "from cloakbrowser import ensure_binary; print(ensure_binary())")
+"$BIN" --remote-debugging-port=9222 --user-data-dir=~/.tvvisual/profile \
+       --no-sandbox --disable-setuid-sandbox --disable-dev-shm-usage \
+       --ignore-gpu-blocklist --disable-background-timer-throttling \
+       --disable-backgrounding-occluded-windows --disable-renderer-backgrounding \
+       --no-first-run --no-default-browser-check about:blank &   # keep alive
 ```
 This reproduced the entire confluence pipeline from an INDEPENDENT CDP client —
 exact drift +0.0000 vs tvcli on the same bar (`bdg-exact-confluence-verified`).

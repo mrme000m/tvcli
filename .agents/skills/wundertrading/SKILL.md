@@ -20,7 +20,7 @@ Three interfaces, one account:
   [references/mcp-tools.md](references/mcp-tools.md). Also via `scripts/wt_httpx.py mcp` (httpx without browser, same `X-API-Key`/`X-Secret-Key`).
 - **REST HMAC** (scripting/automation): `https://wundertrading.com/open_api/*`,
   HMAC-SHA256 signing — verified recipe in [references/rest-api.md](references/rest-api.md), also via `scripts/wt_httpx.py open_api` (pure httpx, no browser).
-- **Session web** (grid bots, no HMAC): Cloudflare-fingerprinted `/en/trader/*` configurator — grid bots live here only (see [references/grid-bot.md](references/grid-bot.md)). Use `scripts/wt_browser.py` (httpx **with** CloakBrowser via CDP `fetch()` in-page, `node browser-debug/wt-grid.mjs` parity, verified live) or best-effort `scripts/wt_httpx.py session` (raw httpx replay; needs fresh `cf_clearance`, else 403 `Just a moment…`).
+- **Session web** (grid bots, no HMAC): Cloudflare-fingerprinted `/en/trader/*` configurator — grid bots live here only (see [references/grid-bot.md](references/grid-bot.md)). Use `scripts/wt_browser.py` (httpx **with** CloakBrowser via CDP `fetch()` in-page, `node browser-debug/wt-grid.mjs` parity, verified live) or best-effort `scripts/wt_httpx.py session` (raw httpx replay; needs fresh `cf_clearance`, else 403 `Just a moment…`). Launch CloakBrowser with `node browser-debug/launch.mjs` so the Xvfb/WebGL robustness flags (`--ignore-gpu-blocklist`, `--disable-dev-shm-usage`, etc.) are set; otherwise the WunderTrading /login and grid configurator may stay blank.
 
 Keys: created in the cabinet API page (max 10; **expire in 3 months unless
 IP-whitelisted**; shown once). MCP auth = `X-API-Key` + `X-Secret-Key`
@@ -40,7 +40,7 @@ wun.rest.exchanges()                       # HMAC REST, no browser
 wun.mcp.api_profiles(limit=5)              # MCP, no browser
 wun.mcp.export_strategies_history(statuses=["completed"])
 
-wun = WunderTrading(browser=True)          # needs a running CloakBrowser tab
+wun = WunderTrading(browser=True)          # needs a running CloakBrowser tab; start it with node browser-debug/launch.mjs
 wun.grid.list()
 wun.grid.analyze("HYPERLIQUID_SWAP:191")
 wun.market.ohlc_last("HYPERLIQUID_SWAP:191", timeframe=15)

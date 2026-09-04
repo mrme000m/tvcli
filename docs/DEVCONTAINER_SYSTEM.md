@@ -13,7 +13,7 @@ ever committed or inlined into shell profiles.
 |---|---|---|
 | Headless engine | `tvcli` (Go, built by post-create) | compile/run/extract signals from any Pine script; 20-skill registry; `eval`/`run`/`analyze`/`backtest`/`scan`; async HTTP server `:8765` |
 | Multi-account pool | `accounts.json` (provisioned from vault) | 40+ TradingView accounts, per-account tier limits (free = 2 studies), round-robin failover; `POST /hunt` fans one skill across N symbols in parallel |
-| Headful browser | CloakBrowser (stealth Chromium) + `launch.mjs`/`tv.mjs` | authenticated headful chart on a virtual display; cookie injection from `browser-debug/.env` |
+| Headful browser | CloakBrowser (stealth Chromium) + `launch.mjs`/`tv.mjs` | authenticated headful chart on a virtual display; cookie injection from `browser-debug/.env`; `launch.mjs` sets `--ignore-gpu-blocklist`, `--disable-dev-shm-usage`, anti-throttling flags, and `--no-sandbox` so TradingView/WunderTrading pages hydrate reliably in Xvfb |
 | CDP debugger | `bdg` (browser-debugger-cli, `bdg/dist/index.js`) | attach to the live browser: raw CDP, DOM, network capture, `tv` command group (WS protocol capture, studies add/remove, drawings, chart model) |
 | Display stack | Xvfb `:99` + x11vnc `:5900` + noVNC `:6080` | virtual screen for headful Chromium on headless hosts; watch the chart over VNC/noVNC |
 | Frontend tooling | `chart-control.mjs`, `max-chart.mjs`, `toggle-widgets.mjs` | right-rail UI automation with real CDP input events, before/after screenshots |
@@ -78,6 +78,10 @@ node bdg/dist/index.js tv studies             # what's on the chart
 node bdg/dist/index.js tv study add "RSI" --inputs '{"length":21}'
 node bdg/dist/index.js network list            # captured API calls
 ```
+If the chart/login page renders blank while CDP is alive, the renderer has
+stalled on WebGL or a small `/dev/shm`. `launch.mjs` now passes the flags that
+fix this; use `CB_FRESH_PROFILE=1 node browser-debug/launch.mjs` for a hard
+reset, and `node browser-debug/hydration-check.mjs '<url>' 30000` to diagnose.
 
 ### 5. Visual confluence (represent + confirm)
 The tvvisual package is vendored **inside this repo** at `visual/` (package

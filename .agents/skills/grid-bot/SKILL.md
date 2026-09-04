@@ -94,7 +94,8 @@ Tune `--band-atr`, `--step-factor`, `--step-min/max` per regime — see
 
 - **Grid-bot web API (preferred for grids — verified 2026-09-04)** — the
   configurator's XHR surface is fully replayable from the logged-in
-  CloakBrowser page:
+  CloakBrowser page. Start CloakBrowser with `node browser-debug/launch.mjs`
+  (it passes the Xvfb/WebGL robustness flags the configurator needs):
   ```bash
   node browser-debug/wt-grid.mjs profiles                  # pick profile code (paper: paperTrading=true)
   node browser-debug/wt-grid.mjs analyze HYPERLIQUID_SWAP:159   # market meta + last candle + 30d hi/lo

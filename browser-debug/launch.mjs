@@ -248,18 +248,31 @@ async function main() {
   const bin = await ensureBinary(version, force);
 
   // Idempotent re-runs: if a CDP session is already up, attach to it instead
-  // of launching a second instance against the same profile dir.
-  for (let port = 9222; port < 9322; port++) {
-    if (await cdpAlive(port)) {
-      await printSession(port, null);
-      console.log(`\nCDP already running on :${port} — attached above (no new launch).`);
-      console.log('Run with a different CB_PROFILE to start a second instance.');
-      process.exit(0);
+  // of launching a second instance against the same profile dir. Pass --new
+  // (or CB_NEW_INSTANCE=1) to force a fresh browser even when another is alive.
+  const forceNew = process.argv.includes('--new') || process.env.CB_NEW_INSTANCE === '1';
+  if (!forceNew) {
+    for (let port = 9222; port < 9322; port++) {
+      if (await cdpAlive(port)) {
+        await printSession(port, null);
+        console.log(`\nCDP already running on :${port} — attached above (no new launch).`);
+        console.log('Pass --new to launch a second instance with a different CB_PROFILE.');
+        process.exit(0);
+      }
     }
   }
 
   const port = await pickPort();
   const profile = process.env.CB_PROFILE || join(SCRIPT_DIR, 'profile');
+
+  // Fresh-profile mode: wipe the profile before launch. Useful when a stale or
+  // corrupted profile is causing render/hydration issues (set CB_FRESH_PROFILE=1).
+  // For normal session persistence leave it unset so cookies/localStorage survive.
+  if (process.env.CB_FRESH_PROFILE === '1') {
+    console.log(`  fresh profile requested — removing ${profile}`);
+    rmSync(profile, { recursive: true, force: true });
+  }
+
   mkdirSync(profile, { recursive: true });
 
   // Stale-profile recovery (containers / hard kills): a Chromium process from
@@ -300,22 +313,56 @@ async function main() {
     }
   }
 
+  // Extra Chromium args passed after a literal `--` separator.
+  const dashIdx = process.argv.indexOf('--');
+  const extraChromeArgs = dashIdx !== -1 ? process.argv.slice(dashIdx + 1) : [];
+
+  // Tuning: match the official CloakBrowser wrapper defaults as closely as
+  // possible when launching the binary directly. These flags are what make
+  // modern client-side apps (React/Next.js, TradingView, WunderTrading, etc.)
+  // hydrate and render reliably inside a Docker/Xvfb environment.
+  const useSandbox = process.env.CB_SANDBOX === '1';
+  const ignoreGpuBlocklist = process.env.CB_IGNORE_GPU_BLOCKLIST !== '0';
+  const disableShm = process.env.CB_DISABLE_DEV_SHM_USAGE !== '0';
+  const fingerprint = process.env.CB_FINGERPRINT || String(10000 + Math.floor(Math.random() * 90000));
+  const platform = TAG.startsWith('darwin') ? 'macos' : 'windows';
+  const locale = process.env.CB_LOCALE || process.env.LANG?.split('.')[0];
+  const timezone = process.env.CB_TIMEZONE || process.env.TZ;
+
   const args = [
     `--remote-debugging-port=${port}`,
     '--remote-allow-origins=*',
-    // ponytail: NO `--headless` flag at all. The stealth-patched Chromium treats
-    // the mere presence of `--headless` (even `=false`) as headless-ish and sets
-    // its macOS activation policy to background-only => CDP works but no window.
-    // --no-sandbox only when Chromium genuinely needs it (running as root on
-    // Linux); everywhere else it just prints the unsupported-flag warning and
-    // disables the sandbox for no reason.
-    ...(TAG.startsWith('linux') && process.getuid?.() === 0 ? ['--no-sandbox'] : []),
+    // The binary is intended for automation; disable the sandbox for the same
+    // reason the official wrapper does. Opt back in with CB_SANDBOX=1.
+    ...(useSandbox ? [] : ['--no-sandbox', '--disable-setuid-sandbox']),
+    // /dev/shm is tiny in containers (64 MB in this Codespace) and Chromium's
+    // renderer can OOM/wedge on large hydrated apps. Use disk-backed tmp instead.
+    ...(disableShm ? ['--disable-dev-shm-usage'] : []),
+    // Headful inside Docker/Xvfb presents a software GPU. Without this, Chromium
+    // blocks WebGL and pages that depend on it (charts, maps, WebGL backgrounds)
+    // can fail client-side hydration while CDP itself looks healthy. The official
+    // wrapper adds this for headed launches and on Windows.
+    ...(ignoreGpuBlocklist ? ['--ignore-gpu-blocklist'] : []),
+    // Prevent the browser from throttling timers/net when the window is not
+    // focused. Agents drive it over CDP; a throttled page can stall hydration.
+    '--disable-background-timer-throttling',
+    '--disable-backgrounding-occluded-windows',
+    '--disable-renderer-backgrounding',
+    // Keep the browser from asking to save passwords / use the OS keychain.
+    '--password-store=basic',
+    '--use-mock-keychain',
+    ...(['linux', 'win32'].includes(process.platform) ? ['--disable-features=LockProfileCookieDatabase'] : []),
     ...(proxyArg ? [`--proxy-server=${proxyArg}`] : []),
-    `--fingerprint=${10000 + Math.floor(Math.random() * 90000)}`,
-    ...(TAG.startsWith('darwin') ? ['--fingerprint-platform=macos'] : ['--fingerprint-platform=windows']),
+    `--fingerprint=${fingerprint}`,
+    `--fingerprint-platform=${platform}`,
+    ...(locale ? [`--lang=${locale}`, `--fingerprint-locale=${locale}`] : []),
+    ...(timezone ? [`--fingerprint-timezone=${timezone}`] : []),
+    ...(process.env.CB_STORAGE_QUOTA ? [`--fingerprint-storage-quota=${process.env.CB_STORAGE_QUOTA}`] : []),
+    ...(process.env.CB_WEBRTC_IP ? [`--fingerprint-webrtc-ip=${process.env.CB_WEBRTC_IP}`] : []),
     `--user-data-dir=${profile}`,
-    '--window-size=1600,1000',
+    ...(process.env.CB_WINDOW_SIZE ? [`--window-size=${process.env.CB_WINDOW_SIZE}`] : process.env.CB_START_MAXIMIZED === '1' ? ['--start-maximized'] : ['--window-size=1600,1000']),
     '--no-first-run',
+    ...extraChromeArgs,
   ];
   console.log(`launching headful on CDP port ${port}...`);
   console.log(`  ${bin}`);

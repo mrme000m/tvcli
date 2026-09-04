@@ -97,12 +97,17 @@ async def cdp_call(ws_url: str, method: str, params: dict | None = None, timeout
             raise RuntimeError(msg["error"].get("message", str(msg["error"])))
         return msg
 
-async def fetch_in_page(ws_url: str, method: str, path: str, body: dict | None = None) -> dict:
+async def fetch_in_page(ws_url: str, method: str, path: str, body: dict | None = None, _csrf_retry: bool = True) -> dict:
     """Browser fetch() via Runtime.evaluate — imitates wt-grid.mjs callApi.
 
     Headers: Accept: application/json, Content-Type when body, X-W-CSRF-Token
     for non-safe methods (from window.baseServerConfig.appCsrfToken).
     credentials: include so PHPSESSID/cf_clearance ride.
+
+    CSRF rotation: appCsrfToken goes stale once the page has been open for
+    a while (server: 400 "Invalid CSRF token ... Refresh the page"). On that
+    exact failure for a state-changing method, reload the page once (fresh
+    token) and retry.
     """
     # build JS that runs inside the page; body is JSON-stringified in JS
     body_js = "undefined" if body is None else json.dumps(body)
@@ -130,6 +135,31 @@ async def fetch_in_page(ws_url: str, method: str, path: str, body: dict | None =
         if val is None:
             exc = msg.get("result", {}).get("exceptionDetails")
             raise RuntimeError(f"no result: {json.dumps(exc)[:300] if exc else 'empty'}")
+        # stale-CSRF retry: navigate to the canonical trader page (always
+        # repopulates window.baseServerConfig.appCsrfToken), then re-run
+        async def _csrf_reload():
+            async with websockets.connect(ws_url, max_size=None) as wsr:
+                await wsr.send(json.dumps({"id": 2, "method": "Runtime.evaluate",
+                                           "params": {"expression":
+                                               "location.href='https://wundertrading.com/en/trader/grid_bots'"}}))
+            for _ in range(12):  # wait up to ~24s for the SPA + token
+                await asyncio.sleep(2)
+                async with websockets.connect(ws_url, max_size=None) as wst:
+                    await wst.send(json.dumps({"id": 3, "method": "Runtime.evaluate",
+                                               "params": {"expression":
+                                                   "(window.baseServerConfig && window.baseServerConfig.appCsrfToken) ? 'ready' : 'waiting'",
+                                                   "returnByValue": True}}))
+                    rawt = await asyncio.wait_for(wst.recv(), timeout=10)
+                    if json.loads(rawt).get("result", {}).get("result", {}).get("value") == "ready":
+                        return True
+            return False
+        if _csrf_retry and method.upper() not in ("GET", "HEAD") and not val.get("ok") \
+                and val.get("status") == 400 and "CSRF" in json.dumps(val.get("json") or val.get("text") or ""):
+            try:
+                if await _csrf_reload():
+                    return await fetch_in_page(ws_url, method, path, body, _csrf_retry=False)
+            except Exception:
+                pass
         return val
 
 async def fetch_market_in_page(ws_url: str, url: str) -> dict:

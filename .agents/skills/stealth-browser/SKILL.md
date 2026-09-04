@@ -138,6 +138,17 @@ Headful stealth browsers run on the same `DISPLAY=:99` (`Xvfb 1600x1000` → `x1
 
 If you need the stealth image inside the panel instead of VNC, have the agent call `take_screenshot` on its `instance_id` and POST the PNG to a custom `/cloak/stealth/*` bridge, or just observe via noVNC — VNC is the scalable, multi-window viewer; the panel is the single-page CDP screenshot viewport with the new zoom controls.
 
+## CloakBrowser (the shared CDP browser)
+
+The `browser-debug/launch.mjs` CloakBrowser that the panel and `bdg` attach to
+now launches with container/headful robustness defaults: `--ignore-gpu-blocklist`
+(so WebGL-dependent pages hydrate inside Xvfb), `--disable-dev-shm-usage`,
+anti-throttling flags, and `--no-sandbox` (matching the official CloakBrowser
+wrapper). If the Cloak panel ever shows a blank screenshot while `:9222` is
+alive, kill the browser and restart with `CB_FRESH_PROFILE=1 node browser-debug/launch.mjs`,
+or run `node browser-debug/hydration-check.mjs '<url>' 30000` to capture the
+page state and console errors.
+
 ## Gotchas (verified)
 
 - **stdio stdout must stay clean** — debug logs go to stderr; keep `STEALTH_BROWSER_DEBUG=0` in normal MCP runs or tools hang with malformed JSON.
