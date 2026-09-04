@@ -38,6 +38,30 @@ REPORTS_DIR = "reports"
 _RANGE_FAMILY = {"chop_high_volatility", "squeeze", "neutral"}
 _TREND_FAMILY = {"trend_up", "trend_down"}
 
+# ── PocketBase write-through (optional, non-fatal) ────────────────────
+# The decisions.jsonl file is the system of record; this mirrors each decision
+# and outcome into the PocketBase side channel when it is configured and up.
+try:
+    from pbclient import PB as _PB  # noqa: F401
+    _HAS_PB = True
+except Exception:
+    _HAS_PB = False
+    _PB = None
+
+_pb = None
+
+
+def _pb_mirror():
+    global _pb
+    if not _HAS_PB or _PB is None:
+        return None
+    if _pb is None:
+        try:
+            _pb = _PB()
+        except Exception:
+            _pb = False
+    return _pb or None
+
 
 def _state_dir():
     """Effective state dir — env override wins, else the repo default."""
@@ -186,6 +210,12 @@ def record_decision(ticket, brief, action, payloads=None):
         "payload_digest": _payload_digest(payloads),
     }
     _append_json_line(path, line)
+    _pb = _pb_mirror()
+    if _pb is not None:
+        try:
+            _pb.decision(line)
+        except Exception:
+            pass
     return decision_id
 
 
@@ -227,6 +257,12 @@ def record_outcome(decision_id, final):
         if lines:
             f.write("\n")
     os.replace(tmp, path)
+    _pb = _pb_mirror()
+    if _pb is not None:
+        try:
+            _pb.decision_outcome(decision_id, final)
+        except Exception:
+            pass
 
 
 def _regime_family(regime):

@@ -36,6 +36,24 @@ eval "$CF_ENV"
 
 mkdir -p "$STATE_DIR"
 
+# 1.5. Co-start PocketBase (event-driven persistence side channel) + source its
+# env. PB is non-fatal: a failure here must NOT block the daemon. setup is
+# idempotent (downloads/creates/starts only when needed) and writes pb.env
+# exporting PB_URL / PB_TOKEN / PB_ADMIN_*. We source it so pbclient (wired into
+# log()/save_state()/etc.) inherits the token and writes through immediately.
+PB_ENV="$HERE/.pocketbase/pb.env"
+if [ -f "$PB_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$PB_ENV"
+fi
+if ! bash "$HERE/scripts/setup_pocketbase.sh" >/dev/null 2>&1; then
+  echo "WARN: PocketBase co-start failed; daemon will run without the PB side channel." >&2
+elif [ -f "$PB_ENV" ]; then
+  # Re-source after setup so a freshly-written token is picked up.
+  # shellcheck disable=SC1090
+  . "$PB_ENV"
+fi
+
 if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
   echo "ERROR: daemon already running (PID $(cat "$PID_FILE")). Stop it first: scripts/stop.sh" >&2
   exit 1

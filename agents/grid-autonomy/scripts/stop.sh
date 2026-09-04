@@ -44,3 +44,17 @@ fi
 
 rm -f "$PID_FILE"
 echo "daemon stopped (was PID $PID)"
+
+# 3. Also stop PocketBase (the event-driven persistence side channel), if we
+# started it. Low risk: leaves pb_data intact so state survives a restart.
+PB_PID_FILE="$HERE/.pocketbase/pb.pid"
+if [ -f "$PB_PID_FILE" ]; then
+  PB_PID="$(cat "$PB_PID_FILE")"
+  if kill -0 "$PB_PID" 2>/dev/null; then
+    kill -TERM "$PB_PID" 2>/dev/null || true
+    echo "PocketBase stopped (was PID $PB_PID)"
+  else
+    echo "PocketBase already stopped (stale PID $PB_PID)."
+  fi
+  rm -f "$PB_PID_FILE"
+fi

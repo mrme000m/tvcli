@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import subprocess
+from datetime import datetime, timezone
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +28,32 @@ WT_BROWSER = os.path.join(WUN_SCRIPTS, "wt_browser.py")
 PROFIT_FACTOR_CAP = 99.0
 RECENT_WINDOW = 20
 PNL_SCALE = 10000.0  # positions-history profitLoss is USD × 1e4
+
+# ── PocketBase write-through (optional, non-fatal) ────────────────────
+# reliability.json is the system of record; this mirrors the ledger into the
+# PocketBase side channel when it is configured and up. pbclient.py lives in
+# GRID_HOME, so add it to sys.path defensively.
+try:
+    sys.path.insert(0, GRID_HOME)
+    from pbclient import PB as _PB  # noqa: F401
+    _HAS_PB = True
+except Exception:
+    _HAS_PB = False
+    _PB = None
+
+_pb = None
+
+
+def _pb_mirror():
+    global _pb
+    if not _HAS_PB or _PB is None:
+        return None
+    if _pb is None:
+        try:
+            _pb = _PB()
+        except Exception:
+            _pb = False
+    return _pb or None
 
 
 def _ts_epoch(value):
@@ -193,6 +220,15 @@ def save(data):
         return True
     except Exception:
         return False
+    finally:
+        # Non-fatal write-through: mirror the ledger into PocketBase.
+        _pb = _pb_mirror()
+        if _pb is not None:
+            try:
+                _pb.reliability({"ledger": data if isinstance(data, dict) else {},
+                                 "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})
+            except Exception:
+                pass
 
 
 def load():

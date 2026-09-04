@@ -132,6 +132,59 @@ except Exception:
     def write_run_card(cycle_report):
         return None
 
+# ── PocketBase write-through side channel (defensive) ─────────────────
+# PocketBase is an optional, best-effort projection: the file layer stays the
+# system of record, and this mirrors journal/decisions/reliability/bots/slots
+# into a queryable + realtime (SSE) backend. Never fatal: if the client is
+# missing or the server is down, writes are silently skipped.
+try:
+    from pbclient import PB as _PB  # noqa: F401
+    HAS_PB = True
+except Exception:
+    HAS_PB = False
+    _PB = None
+
+_pb_cache = None
+
+
+def _pb():
+    """Lazy, non-fatal PocketBase client. None => write-through disabled."""
+    global _pb_cache
+    if not HAS_PB or _PB is None:
+        return None
+    if _pb_cache is None:
+        try:
+            _pb_cache = _PB()
+        except Exception:
+            _pb_cache = False
+    return _pb_cache or None
+
+
+def _pb_journal(event):
+    pb = _pb()
+    if pb is not None:
+        try:
+            pb.journal(event)
+        except Exception:
+            pass
+
+
+def _pb_mirror_state(state):
+    """Mirror bots/slots from state.json into the PB side channel."""
+    pb = _pb()
+    if pb is None:
+        return
+    try:
+        for slot, bot in (state.get("active_bots") or {}).items():
+            pb.create("bots", {
+                "slot": str(slot),
+                "spec": bot if isinstance(bot, dict) else {},
+            })
+        for slot, plan in (state.get("slots") or {}).items():
+            pb.create("slots", {"slot": str(slot), "plan": plan})
+    except Exception:
+        pass
+
 # Real-money profile hard denylist (refused even if allowlisted by mistake).
 PROFILE_DENYLIST = {"c629f5ba3a643a82137e7864"}
 
@@ -206,6 +259,7 @@ def log(state, event):
     event["at"] = utcnow()
     state.setdefault("journal", []).append(event)
     state["journal"] = state["journal"][-200:]
+    _pb_journal(event)
     print(f"[{event['at']}] {event.get('kind')}: {event.get('msg')}", flush=True)
 
 
@@ -228,6 +282,7 @@ def save_state(state):
     with open(tmp, "w") as f:
         json.dump(state, f, indent=2)
     os.replace(tmp, STATE_PATH)
+    _pb_mirror_state(state)
 
 
 def should_rotate(candidate, incumbent, policy, observed, now_epoch,
