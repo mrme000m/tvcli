@@ -227,15 +227,18 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      // register in shell.overlay (list slot, additive)
-      ctx.effect(() => {
-        return ctx.slots.inject("shell.overlay", () => {
-          return ctx.slots.register({ name: "shell.overlay", id: "cloak-panel", order: 10 }, CloakPanel);
-        });
-      }, "cloak-panel overlay");
+      // 'slots' is a Cordis service — must be injected before access.
+      ctx.inject(['slots'], (scoped) => {
+        scoped.effect(() => {
+          return scoped.slots.inject("shell.overlay", () => {
+            return scoped.slots.register({ name: "shell.overlay", id: "cloak-panel", order: 10 }, CloakPanel);
+          });
+        }, "cloak-panel overlay");
+      });
     }
 
     exports.apply = apply;
+    exports.inject = ['slots'];
     return module.exports;
   }
 });
