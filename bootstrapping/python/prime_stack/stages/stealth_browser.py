@@ -132,6 +132,52 @@ def _upsert_row(doc: list, row: dict) -> tuple[list, bool]:
     return doc, before != after
 
 
+def _ensure_browser_symlink(cfg: Config, ctx: Context) -> tuple[str, bool]:
+    """Ensure a Chrome binary is discoverable via PATH for stealth-browser.
+
+    Codespaces have no system chrome — the stealth CloakBrowser checkout
+    (browser-debug/cloakbrowser/chromium-*/chrome) is the only binary.
+    platform_utils.check_browser_executable searches /usr/bin + `which`.
+    Idempotent: create symlinks to the cloak binary when no executable is
+    found, so spawn_browser(headless=False) lands on DISPLAY=:99 and is
+    visible via x11vnc:5900 / noVNC:6080 (shared Xvfb).
+    """
+    import shutil, os
+    # fast path: already resolvable
+    venv_py = _venv_python(cfg)
+    if venv_py.is_file():
+        proc = ctx.exec(f'"{venv_py}" -c \'import sys; sys.path.insert(0, "{cfg.stealth_browser_dir}/src"); from platform_utils import check_browser_executable; print(check_browser_executable() or "")\' 2>&1', timeout=10)
+        if proc.stdout.strip():
+            return "present", False
+    # also check host which
+    for name in ("google-chrome", "google-chrome-stable", "chrome", "chromium"):
+        if shutil.which(name):
+            return "present", False
+    # find cloak binary
+    cloak_candidates = sorted(cfg.workspace.glob("browser-debug/cloakbrowser/chromium-*/chrome"))
+    cloak_bin = cloak_candidates[-1] if cloak_candidates else None
+    if not cloak_bin or not cloak_bin.is_file():
+        return "skipped (no cloak binary)", False
+    # symlink into /usr/local/bin + /usr/bin (best-effort, needs sudo)
+    # Use ctx.mutate so --dry-run is faithful and failures are non-fatal.
+    link_targets = ["/usr/local/bin/chrome", "/usr/bin/google-chrome", "/usr/bin/chromium"]
+    changed = False
+    for link in link_targets:
+        proc = ctx.mutate(f'sudo ln -sf "{cloak_bin}" "{link}" 2>&1 || ln -sf "{cloak_bin}" "{link}" 2>&1; test -x "{link}" && echo ok', timeout=10)
+        if "ok" in (proc.stdout or ""):
+            # first successful link is enough to unblock platform_utils.which
+            changed = True
+            break
+    if not changed:
+        # fallback: prepend cloak dir to PATH via env bridge? for now warn
+        return "skipped (symlink failed)", False
+    # verify
+    proc = ctx.exec(f'"{venv_py}" -c \'import sys; sys.path.insert(0, "{cfg.stealth_browser_dir}/src"); from platform_utils import check_browser_executable; print(check_browser_executable() or "")\' 2>&1', timeout=10)
+    if proc.stdout.strip():
+        return "symlinked", True
+    return "symlinked (unverified)", True
+
+
 def _wire_mcp(cfg: Config, ctx: Context) -> tuple[str, bool, list]:
     warnings: list[str] = []
     server = _server_py(cfg)
@@ -194,16 +240,27 @@ def run(cfg: Config, ctx: Context) -> StageResult:
     except Exception as exc:
         return StageResult(STAGE, failed=True, error=str(exc), warnings=warnings, summary_line=f"stealth-browser: FAILED (pip install: {exc})")
 
-    # 4. wire MCP row
+    # 4. ensure browser binary is discoverable (cloak → /usr/bin) for headful VNC
+    try:
+        b_status, b_changed = _ensure_browser_symlink(cfg, ctx)
+        details["browser_bin"] = b_status
+        changed_any |= b_changed
+        if b_status.startswith("skipped"):
+            warnings.append(f"browser symlink {b_status} — headless stealth still works, headful needs a Chrome binary on PATH")
+    except Exception as exc:  # non-fatal
+        details["browser_bin"] = f"error: {exc}"
+        warnings.append(f"browser symlink failed: {exc}")
+
+    # 5. wire MCP row
     mcp_status, mcp_changed, mcp_warnings = _wire_mcp(cfg, ctx)
     details["mcp"] = mcp_status
     warnings.extend(mcp_warnings)
     changed_any |= mcp_changed
 
-    # 5. also ensure runtime file-upload allow dirs include workspace (for file_upload tool)
+    # 6. also ensure runtime file-upload allow dirs include workspace (for file_upload tool)
     # non-fatal hint only
 
-    summary = "stealth-browser-mcp: " + ("installed/configured this run" if changed_any else "present (checkout, venv, deps, MCP row current)")
+    summary = "stealth-browser-mcp: " + ("installed/configured this run" if changed_any else "present (checkout, venv, deps, MCP row current + headful via VNC)")
     if warnings:
         summary += f" ({len(warnings)} warning(s))"
     return StageResult(STAGE, changed=changed_any, warnings=warnings, details=details, summary_line=summary)
