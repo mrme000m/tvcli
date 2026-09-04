@@ -121,6 +121,23 @@ Trim with server flags: `--minimal` (20 core tools), `--xpool-safe` (83, disable
 
 HTTP mode (`--transport http --host 127.0.0.1 --port 8000`) requires `STEALTH_BROWSER_MCP_AUTH_TOKEN` if exposed beyond loopback — the default stdio row does not.
 
+## Headful + web viewer (scaling/zoom)
+
+Any `spawn_browser` is headless by default. For a **visible** session agents can do:
+
+```json
+// MCP call
+spawn_browser(headless=false, viewport_width=1280, viewport_height=900)
+```
+
+Headful stealth browsers run on the same `DISPLAY=:99` (`Xvfb 1600x1000` → `x11vnc :5900` → `websockify :6080`) that already hosts the CloakBrowser. They are therefore visible in two places:
+
+1. **dsh Cloak panel (right dock, :3081)** — the panel now has **scaling/zoom** (this patch): `−`/`+` buttons, `Fit` (width-fit) vs `Actual` (scroll-to-pan), range slider `25%–300%`, `Ctrl+wheel` zoom, and `100%` reset. The panel polls `GET /cloak/screenshot` (`Page.captureScreenshot` → PNG, ~1.6s, 700 ms throttle) and posts `POST /cloak/click` with normalized `xRatio/yRatio` → `Input.dispatchMouseEvent`. It shows the CloakBrowser target (`wundertrading.com` > `tradingview.com` > first page) on `CDP 9222..9321`. Click-to-interact works at any zoom because ratios are computed from the transformed `getBoundingClientRect`. The footer now links to `noVNC` and `/cloak/targets`.
+
+2. **Full desktop via noVNC (you want this for stealth headful)** — `https://<codespace>-6080.app.github.dev/vnc.html?autoconnect=1&resize=scale` (forwarded `6080`, also `5900` raw VNC). noVNC’s `resize=scale` already gives viewport scaling, and the panel’s `noVNC ↗` link opens it. Every headful stealth instance (and the CloakBrowser) shares `DISPLAY=:99`, so you see all windows, can `Ctrl+wheel` zoom in the panel or `scale` in noVNC, and interact via VNC while agents drive the same windows via MCP/CDP. `DISPLAY=:99` is set in `devcontainer.json:15`; `Xvfb`, `x11vnc`, `websockify` are up at boot (`ps` shows all three).
+
+If you need the stealth image inside the panel instead of VNC, have the agent call `take_screenshot` on its `instance_id` and POST the PNG to a custom `/cloak/stealth/*` bridge, or just observe via noVNC — VNC is the scalable, multi-window viewer; the panel is the single-page CDP screenshot viewport with the new zoom controls.
+
 ## Gotchas (verified)
 
 - **stdio stdout must stay clean** — debug logs go to stderr; keep `STEALTH_BROWSER_DEBUG=0` in normal MCP runs or tools hang with malformed JSON.

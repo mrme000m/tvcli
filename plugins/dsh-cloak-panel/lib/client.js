@@ -34,6 +34,16 @@ window.__ModuleLoader__.load({
 .cloak-panel-quick button:hover{background:var(--dsw-alias-bg-hover,#eef2ff)}
 .cloak-panel-body{flex:1;overflow:auto;background:#0b1220;position:relative;display:flex;flex-direction:column}
 .cloak-panel-body img{width:100%;height:auto;display:block;cursor:crosshair;user-select:none}
+.cloak-panel-zoombar{display:flex;align-items:center;gap:6px;padding:6px 10px;border-bottom:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-base,#fff);flex:none}
+.cloak-panel-zoombar button{border:1px solid var(--dsw-alias-border-l2,#e5e7eb);background:var(--dsw-alias-bg-base,#fff);border-radius:6px;padding:4px 8px;font-size:12px;cursor:pointer;min-width:28px}
+.cloak-panel-zoombar button:hover{background:var(--dsw-alias-bg-hover,#f1f5f9)}
+.cloak-panel-zoombar button.active{background:#0b1220;color:#fff;border-color:#0b1220}
+.cloak-panel-zoombar input[type=range]{flex:1;min-width:60px}
+.cloak-panel-zoomlabel{font-size:11px;color:var(--dsw-alias-text-secondary,#64748b);min-width:36px;text-align:center}
+.cloak-panel-imgwrap{flex:1;overflow:auto;background:#0b1220;position:relative;display:flex;justify-content:center;align-items:flex-start;padding:0}
+.cloak-panel-imgwrap img{transform-origin:top center;display:block;cursor:crosshair;user-select:none;max-width:none}
+.cloak-panel-imgwrap[data-fit="contain"] img{width:100%;height:auto;max-width:100%}
+.cloak-panel-imgwrap[data-fit="actual"] img{width:auto;height:auto}
 .cloak-panel-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:24px;color:#94a3b8;text-align:center}
 .cloak-panel-empty code{background:rgba(255,255,255,.08);padding:2px 6px;border-radius:4px;font-size:11px}
 .cloak-panel-meta{display:flex;gap:8px;padding:6px 10px;border-top:1px solid var(--dsw-alias-border-l2,#e5e7eb);font-size:11px;color:var(--dsw-alias-text-secondary,#64748b);flex:none;align-items:center}
@@ -79,6 +89,9 @@ window.__ModuleLoader__.load({
       const imgRef = React.useRef(null);
       const dragOrigin = React.useRef(0);
       const dragBase = React.useRef(DEFAULT_W);
+      const [zoom, setZoom] = usePersisted("dsh.cloakPanel.zoom", 1);
+      const [fit, setFit] = usePersisted("dsh.cloakPanel.fit", "contain"); // contain | actual
+      const wrapRef = React.useRef(null);
 
       // show toast helper
       const showToast = React.useCallback((msg) => { setToast(msg); setTimeout(() => setToast(""), 2000); }, []);
@@ -135,6 +148,8 @@ window.__ModuleLoader__.load({
 
       const onClickImage = React.useCallback(async (e) => {
         if (!status?.alive || busy) return;
+        // use the rendered img rect (already scaled); ratio is 0-1 over the
+        // underlying cssContentSize, so zoom/pan via scroll is handled.
         const rect = e.currentTarget.getBoundingClientRect();
         const xRatio = (e.clientX - rect.left) / rect.width;
         const yRatio = (e.clientY - rect.top) / rect.height;
@@ -145,6 +160,18 @@ window.__ModuleLoader__.load({
           setTimeout(() => setShotTick(x => x + 1), 500);
         } catch {}
       }, [status, busy, showToast]);
+
+      const setZoomClamped = React.useCallback((v) => {
+        const n = Math.min(3, Math.max(0.25, Math.round(v * 100) / 100));
+        setZoom(n);
+        if (n !== 1) setFit("actual");
+      }, [setZoom, setFit]);
+      const onWheelZoom = React.useCallback((e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        const delta = e.deltaY > 0 ? -0.1 : 0.1;
+        setZoomClamped(zoom + delta);
+      }, [zoom, setZoomClamped]);
 
       // drag handle
       const onPointerDown = React.useCallback((e) => {
@@ -201,10 +228,25 @@ window.__ModuleLoader__.load({
           React.createElement("button", { onClick: async () => { try { await navigator.clipboard.writeText(currentUrl); showToast("URL copied"); } catch {} }, disabled: !currentUrl }, "Copy URL"),
           React.createElement("span", { style: { marginLeft: "auto", fontSize: 10, color: "#64748b" } }, alive ? `:${status.port} • ${status.targets?.length||0} targets` : "no CDP")
         ),
+        // zoom bar
+        React.createElement("div", { className: "cloak-panel-zoombar" },
+          React.createElement("button", { onClick: () => setZoomClamped(zoom - 0.25), title: "Zoom out (Ctrl+wheel)" }, "−"),
+          React.createElement("input", { type: "range", min: 0.25, max: 3, step: 0.25, value: zoom, onChange: (e) => setZoomClamped(parseFloat(e.target.value)) }),
+          React.createElement("button", { onClick: () => setZoomClamped(zoom + 0.25), title: "Zoom in (Ctrl+wheel)" }, "+"),
+          React.createElement("span", { className: "cloak-panel-zoomlabel" }, Math.round(zoom * 100) + "%"),
+          React.createElement("button", { onClick: () => { setZoom(1); setFit("contain"); }, title: "Reset zoom" }, "100%"),
+          React.createElement("button", { className: fit === "contain" ? "active" : "", onClick: () => { setFit("contain"); setZoom(1); }, title: "Fit to panel width" }, "Fit"),
+          React.createElement("button", { className: fit === "actual" ? "active" : "", onClick: () => { setFit("actual"); }, title: "Actual size (scroll to pan)" }, "Actual"),
+          React.createElement("span", { style: { marginLeft: "auto", fontSize: 10, color: "#64748b" } }, "Ctrl+wheel to zoom • drag to pan when zoomed")
+        ),
         // body
         React.createElement("div", { className: "cloak-panel-body" },
           alive && screenshotUrl
-            ? React.createElement("img", { ref: imgRef, src: screenshotUrl, alt: "CloakBrowser view", onClick: onClickImage, onError: () => setImgError("screenshot failed"), onLoad: () => setImgError(null), style: { opacity: busy ? .7 : 1 } })
+            ? React.createElement("div", { ref: wrapRef, className: "cloak-panel-imgwrap", "data-fit": fit, onWheel: onWheelZoom },
+                React.createElement("img", { ref: imgRef, src: screenshotUrl, alt: "CloakBrowser view",
+                  onClick: onClickImage, onError: () => setImgError("screenshot failed"), onLoad: () => setImgError(null),
+                  style: { opacity: busy ? .7 : 1, transform: fit === "contain" ? "none" : `scale(${zoom})`, width: fit === "contain" ? "100%" : "auto" } })
+              )
             : React.createElement("div", { className: "cloak-panel-empty" },
                 React.createElement("div", { style: { fontSize: 13, fontWeight: 600 } }, alive ? "No screenshot" : "CloakBrowser offline"),
                 React.createElement("div", { style: { fontSize: 11, lineHeight: 1.5, maxWidth: 320 } },
@@ -221,7 +263,9 @@ window.__ModuleLoader__.load({
         React.createElement("div", { className: "cloak-panel-meta" },
           React.createElement("span", null, currentUrl ? new URL(currentUrl).hostname : ""),
           React.createElement("span", { className: "spacer" }),
-          React.createElement("span", null, "Click image to interact • drag left edge to resize")
+          React.createElement("span", null, "Click to interact • Ctrl+wheel zoom • drag left edge to resize • noVNC on :6080 for full desktop"),
+          React.createElement("a", { href: "/cloak/targets", target: "_blank", style: { marginLeft: 8, fontSize: 10 } }, "targets"),
+          React.createElement("a", { href: "http://" + (typeof location !== "undefined" ? location.hostname : "localhost") + ":6080/vnc.html?autoconnect=1&resize=scale", target: "_blank", style: { fontSize: 10 } }, "noVNC ↗")
         )
       );
     }
