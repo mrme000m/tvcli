@@ -67,7 +67,10 @@ function connectWs(url) {
       return new Promise((res) => {
         const i = ++id
         pending.set(i, res)
-        try { ws.send(JSON.stringify({ id: i, method, params })) } catch (e) { pending.delete(i); res({ error: { message: String(e) } }) }
+        // Per-command timeout: a wedged renderer must never hang the panel.
+        const to = setTimeout(() => { if (pending.has(i)) { pending.delete(i); res({ error: { message: method + ' timeout' } }) } }, 8000)
+        const orig = pending.get.bind(pending)
+        try { ws.send(JSON.stringify({ id: i, method, params })) } catch (e) { clearTimeout(to); pending.delete(i); res({ error: { message: String(e) } }) }
       })
     }
   })
@@ -78,13 +81,40 @@ async function cdpCall(target, method, params) {
   try { return await send(method, params) } finally { try { ws.close() } catch {} }
 }
 
-async function captureScreenshot(target, opts = {}) {
+// A wedged renderer (observed on long-lived WunderTrading tabs) makes
+// Page.captureScreenshot fail with "Internal error" and Runtime.evaluate
+// hang. Recovery (verified 2026-09-04): Page.navigate to the same URL —
+// browser-level, works even when the renderer is dead — then wait for the
+// SPA to boot. One or two refreshes bring the UI back.
+async function refreshPage(target, waitMs = 8000) {
   const { ws, send } = await connectWs(target.webSocketDebuggerUrl)
   try {
-    const r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, ...opts })
-    if (r.error) throw new Error(r.error.message || JSON.stringify(r.error))
-    return r.result?.data || null
+    const loc = await send('Runtime.evaluate', { expression: 'location.href', returnByValue: true })
+    const url = loc.result?.result?.value || target.url
+    await send('Page.navigate', { url })
   } finally { try { ws.close() } catch {} }
+  await new Promise(r => setTimeout(r, waitMs))
+}
+
+async function captureScreenshot(target, opts = {}) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { ws, send } = await connectWs(target.webSocketDebuggerUrl)
+    let r
+    try {
+      r = await send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false, ...opts })
+    } catch (e) {
+      r = { error: { message: String(e?.message || e) } }
+    } finally { try { ws.close() } catch {} }
+    if (!r.error && r.result?.data) return r.result.data
+    const msg = r.error?.message || 'empty screenshot'
+    // Wedged renderer: refresh (up to 2 times) and retry.
+    if (attempt < 2 && (/Internal error/i.test(msg) || /timeout/i.test(msg))) {
+      try { await refreshPage(target) } catch {}
+      continue
+    }
+    throw new Error(msg)
+  }
+  throw new Error('screenshot failed after retries')
 }
 
 // Throttle screenshots: at most 1 per 800ms per process

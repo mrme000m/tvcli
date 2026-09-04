@@ -3,6 +3,13 @@
 Installable DSH Web plugin — collapsible, resizable **right-side panel** that streams the headful **CloakBrowser** (stealth Chromium) agents use while discovering / reverse-engineering backend APIs of external systems (TradingView, WunderTrading, etc.).
 
 - **Right dock:** fixed `shell.overlay` panel, 320–860 px drag-resizable, persisted in `localStorage`, collapsible to a 36 px rail.
+- **Wedge recovery (verified 2026-09-04):** long-lived WunderTrading tabs
+  periodically wedge their renderer — `Page.captureScreenshot` returns
+  `Internal error` and `Runtime.evaluate` hangs. `/cloak/screenshot` now
+  auto-recovers: on `Internal error`/timeout it refreshes the page via
+  browser-level `Page.navigate` (works even with a dead renderer) and
+  retries, up to 2 refreshes. Every CDP `send` also has an 8 s command
+  timeout so a wedged renderer can never hang the panel.
 - **Live view:** polls `GET /cloak/screenshot` (CDP `Page.captureScreenshot` → PNG, ~1.6 s interval, ~100 kB/frame) and `GET /cloak/status`. Click-to-interact via `POST /cloak/click` (normalized `xRatio/yRatio` → `Input.dispatchMouseEvent`), URL bar → `POST /cloak/navigate`.
 - **Headful source:** the same `browser-debug/launch.mjs` CloakBrowser (`--remote-debugging-port=9222`, profile `browser-debug/profile`) that `tv.mjs`/`wt.mjs` and the `bdg` CLI attach to. No extra browser — the panel is a **read-only viewport** into the agent's real session.
 

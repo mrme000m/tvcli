@@ -115,13 +115,54 @@ Start-condition pairing: `chop`/`squeeze` → `RSI` or `Bollinger`; `trend` →
 `MACD` or `Webhook` (tvcli confluence); confirmed classified regimes with no
 entry filter → `Immediate`.
 
-## 9. Gaps vs the MCP/REST surface
+## 9. Programmatic API (reverse-engineered, verified 2026-09-04)
+
+The Grid bot is now **fully API-reachable** through the session-auth web
+surface (NOT the HMAC `/open_api` — that stays classic/DCA only). Full
+reference with payload schemas, enums and gotchas:
+[**docs/wt/grid-bot-api.md**](../../../../browser-debug/docs/wt/grid-bot-api.md)
+in the repo (`browser-debug/docs/wt/grid-bot-api.md`). Ready-made CLI:
+`node browser-debug/wt-grid.mjs <list|analyze|create|stop|restart|close-all|delete|positions|profiles>`
+(fetch-in-page via the logged-in CloakBrowser; CSRF handled automatically).
+
+Key facts (all live-verified on the `demo-hype` paper profile):
+
+- **Auth**: session cookies + `X-W-CSRF-Token: window.baseServerConfig.appCsrfToken`
+  on every POST/DELETE; must run as fetch inside the logged-in page (`wt.mjs eval` /
+  `wt-grid.mjs`). Raw HTTP gets Cloudflare-403.
+- **Create/edit**: `POST /en/trader/grid_bots/upsert?gridMarket=spot|derivative[&code=<botCode>]`
+  with the full payload (exchangeCode, pairCode, profilesCodes, gridType
+  `interval|infinite`, gridMethod `classic|two_way`, gridTradingType
+  `long|short|neutral`, gridPercentStep, gridLevels, mid/initPrice,
+  closestHigh/LowLevelPrice, high/lowPrice, amountPerTrade(+Type
+  `base|percents`), startCondition `immediate|indicator|webhook_alert`,
+  stopCondition `stop_only|stop_and_close_all|stop_and_close_all_and_convert…`,
+  optional TP/SL/trailing/pumpProtection/positions-SL blocks).
+  Response returns `gridBotCode`.
+- **Management** (per-bot, deterministic URLs):
+  `GET …/grid_bots/{code}/positions/grid` (live) and `…/positions-history/grid`;
+  `POST …/{code}/stop?stopCondition=…&awaitStartSignal=true`;
+  `POST …/{code}/restart`; `POST …/{code}/close-all`;
+  `DELETE …/{code}/delete` (requires stopped + no open positions).
+  The bots list (`GET …/grid_bots/grid`) embeds per-bot `actions` links with
+  `can.violations` explaining any disabled action.
+- **Symbol analysis** (public, no auth, port **2087**): `GET :2087/all-markets`,
+  `:2087/market?marketCode=`, `:2087/ohlc/last?code=`, `:2087/ohlc?code=&from=&timeframe=&limit=`,
+  `:2087/ohlc/low-high`. Hyperliquid pairCodes are numeric strings
+  (BTC=0, ETH=1, SOL=5, HYPE=159, HYPER=191) — resolve via `all-markets`.
+- **Backtest/Optimize are client-side** in the configurator over that OHLC —
+  no dedicated endpoint; agents replicate with the same data (or tvcli fetch).
+- **Validation**: one grid bot per pair per API profile (paper profiles too);
+  errors return `violations[]` per field.
+- **Paper testing**: `paperTrading: true` profiles (e.g. `demo-hype` on
+  HYPERLIQUID_SWAP) take the same API with virtual balances — the safe
+  end-to-end automation test target.
+
+## 10. Gaps vs the MCP/REST surface
 
 - Grid bots are **not** reachable through `place_strategy_trade` /
-  `edit_trade_strategy` (those are classic/DCA). Configure grids via the web
-  UI (headful `wt-investigator` + bdg) or the webhook start condition.
-- WunderTrading still has **no candles endpoint**; grid sizing/investment is
-  computed platform-side from the settings you enter.
+  `edit_trade_strategy` (those are classic/DCA) — use the web-session API above.
+- The `/open_api` HMAC surface still does not cover grid bots.
 - Every live deployment still requires the Phase E checklist and explicit
   user confirmation (see SKILL.md) — the webhook only *arms/triggers* an
   already-approved, already-configured bot.
