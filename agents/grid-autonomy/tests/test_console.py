@@ -324,6 +324,62 @@ class TestHTTP(ConsoleTestCase):
                                headers={"Origin": "https://evil.example"})
         self.assertEqual(code, 403)
 
+    # ── dev-script actions ────────────────────────────────────────────
+
+    def test_dev_actions_require_confirm(self):
+        for action in ("reset", "reset-wt", "clean"):
+            code, body = self.call(f"/api/dev/{action}", "POST", {})
+            self.assertEqual(code, 400)
+            self.assertIn("confirm", body["error"])
+
+    def test_dev_action_missing_script(self):
+        real = server.DEV_SCRIPT
+        server.DEV_SCRIPT = os.path.join(self.tmp, "no-such-dev")
+        try:
+            for action in ("reset", "reset-wt", "clean"):
+                code, body = self.call(f"/api/dev/{action}", "POST",
+                                        {"confirm": True})
+                self.assertEqual(code, 500)
+                self.assertIn("not found", body["error"])
+        finally:
+            server.DEV_SCRIPT = real
+
+    def test_dev_action_spawns_detached(self):
+        """confirm:true → 200 started + the dev script is spawned detached."""
+        import subprocess as sp
+
+        spawned = {}
+
+        class FakePopen:
+            def __init__(self, args, **kw):
+                spawned["args"] = args
+                spawned["kw"] = kw
+
+        real_popen, real_script = sp.Popen, server.DEV_SCRIPT
+        # point at this test file so isfile() passes
+        server.DEV_SCRIPT = os.path.abspath(__file__)
+        sp.Popen = FakePopen
+        try:
+            for action, extra in (("reset", {"keep_decisions": True,
+                                            "start": True}),
+                                  ("reset-wt", {}), ("clean", {})):
+                code, body = self.call(f"/api/dev/{action}", "POST",
+                                       {"confirm": True, **extra})
+                self.assertEqual(code, 200)
+                self.assertTrue(body["started"])
+                self.assertEqual(body["action"], action)
+                self.assertEqual(spawned["args"][0], server.DEV_SCRIPT)
+                self.assertEqual(spawned["args"][1], action)
+                self.assertIn("--yes", spawned["args"])
+                self.assertEqual(spawned["kw"]["cwd"], server.GRID_HOME)
+                self.assertTrue(spawned["kw"]["start_new_session"])
+                if action == "reset":
+                    self.assertIn("--keep-decisions", spawned["args"])
+                    self.assertIn("--start", spawned["args"])
+        finally:
+            sp.Popen = real_popen
+            server.DEV_SCRIPT = real_script
+
 
 if __name__ == "__main__":
     unittest.main()

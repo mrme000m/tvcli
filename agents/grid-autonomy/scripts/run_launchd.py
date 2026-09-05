@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 HERE = os.path.dirname(os.path.abspath(os.path.dirname(__file__)))  # grid-autonomy/
 STATE_DIR = os.path.join(HERE, "state")
@@ -93,8 +94,35 @@ def load_pb_env():
         pass
 
 
+def redirect_stdio_to_state_log():
+    """Point stdout/stderr at state/logs/daemon-launchd.log (append).
+
+    launchd itself cannot open files on this removable volume (no TCC
+    "Removable Volumes" grant — the job dies with EX_CONFIG 78 if the plist
+    points StandardOutPath here), but THIS interpreter holds the grant, so
+    the redirect is done in-process. The plist sends launchd's own early
+    stdio to /dev/null; anything printed after this call lands inside the
+    repo. Early-boot failures before the redirect are still visible via
+    `launchctl print gui/<uid>/com.tvcli.grid-autonomy` (last exit code).
+    """
+    try:
+        log_dir = os.path.join(STATE_DIR, "logs")
+        os.makedirs(log_dir, exist_ok=True)
+        path = os.path.join(log_dir, "daemon-launchd.log")
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o644)
+        os.dup2(fd, 1)
+        os.dup2(fd, 2)
+        if fd > 2:
+            os.close(fd)
+        print(f"--- run_launchd start {time.strftime('%Y-%m-%dT%H:%M:%S%z')} "
+              f"pid {os.getpid()} ---", flush=True)
+    except OSError:
+        pass  # never block startup on logging
+
+
 def main():
     os.makedirs(STATE_DIR, exist_ok=True)
+    redirect_stdio_to_state_log()
     # a start.sh-launched daemon already alive: let it be (clean exit →
     # launchd does not restart-loop)
     try:

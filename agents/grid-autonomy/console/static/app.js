@@ -788,6 +788,63 @@ async function ctlUnkill() {
 }
 $("#ctl-unkill").addEventListener("click", ctlUnkill);
 
+/* ── dev maintenance (the single `dev` script, run detached by the backend) ── */
+
+async function devAction(action, body, title, lines, label) {
+  const { ok } = await confirmDialog({
+    title,
+    body: lines.map((t) => el("div", {}, t)),
+    label,
+    danger: true,
+  });
+  if (!ok) return;
+  try {
+    const r = await api(`/api/dev/${action}`, { method: "POST", body: { confirm: true, ...body } });
+    toast(`${action} started — output in state/logs/dev.log; console may restart.`, true, 6500);
+    setTimeout(() => location.reload(), 6000);
+    return r;
+  } catch (e) { toast(`${action} failed: ${e.data && e.data.error || e.message}`, true, 6500); }
+}
+
+$("#dev-clean").addEventListener("click", () => devAction("clean", {},
+  "Clear logs & runtime artifacts",
+  ["Run cards, market-map caches, watch specs, daemon/console/PB logs.",
+   "Daemon state, decisions and the reliability ledger are kept."],
+  "Clean"));
+
+$("#dev-reset-wt").addEventListener("click", () => devAction("reset-wt", {},
+  "Reset WunderTrading paper accounts",
+  ["Stops the daemon, then stops + deletes EVERY paper grid bot on",
+   "WunderTrading (clears plan capacity and positions).",
+   "Real-money bots and profiles are never touched; paper profiles are kept.",
+   "The daemon must be started again afterwards."],
+  "Reset WT paper bots"));
+
+$("#dev-reset").addEventListener("click", devResetDialog);
+
+async function devResetDialog() {
+  const { ok, checked } = await confirmDialog({
+    title: "Reset the system",
+    body: [
+      el("div", {}, "Stops the whole stack and wipes daemon runtime state:"),
+      el("div", {}, "state.json, decisions journal, reliability ledger + archive, run cards, market caches, watch specs, logs, PocketBase data."),
+      el("div", {}, "config.yaml and WunderTrading bots are NOT touched (use “Reset WT paper bots” for those). A backup is kept under state/backups/."),
+    ],
+    label: "Reset system",
+    danger: true,
+    checkbox: "Keep the learning journal (decisions + reliability)",
+  });
+  if (!ok) return;
+  try {
+    await api("/api/dev/reset", {
+      method: "POST",
+      body: { confirm: true, keep_decisions: !!checked, start: false },
+    });
+    toast("reset started — the console and daemon are stopping; run `dev start` (or wait) and reload.", true, 8000);
+    setTimeout(() => location.reload(), 6000);
+  } catch (e) { toast(`reset failed: ${e.data && e.data.error || e.message}`, true, 6500); }
+}
+
 async function ctlStart(livePaper) {
   const killArmed = lastOverview && lastOverview.daemon && lastOverview.daemon.kill_file;
   const { ok, checked } = await confirmDialog({

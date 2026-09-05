@@ -144,6 +144,7 @@ Accuracy note: every fact below is verified against the code at
 
 | Path | Role |
 |------|------|
+| `dev` | **The single dev script** — start/stop/restart/status/reset/reset-wt/clean/logs for the whole local stack (daemon + console + PocketBase + tvcli serve check). |
 | `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
 | `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
 | `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
@@ -163,10 +164,12 @@ Accuracy note: every fact below is verified against the code at
 | `policy/stagnation.py` | Per-token stagnation policy + slot allocator. |
 | `watch/spec.py` | Per-bot tvcli watch spec generator. |
 | `scripts/start.sh` / `stop.sh` | Start (CF env from `dsh web`) / stop (POST /kill). |
-| `scripts/run_launchd.py` | launchd entrypoint (foreground, CF env import, PID file). |
+| `scripts/run_launchd.py` | launchd entrypoint (foreground, CF env import, PID file, in-process stdio redirect to `state/logs/daemon-launchd.log`). |
+| `scripts/run_console.py` | launchd entrypoint for the console (stdio → `state/logs/console.log`). |
+| `scripts/wt_reset.py` | `dev reset-wt` worker: stop + delete all WunderTrading paper bots (real-money bots never touched). |
 | `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
-| `tests/` | Offline unit tests — 197 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
+| `tests/` | Offline unit tests — 201 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -240,6 +243,34 @@ whether the daemon actually reads it:
 All commands run from `agents/grid-autonomy/` (the scripts `cd` there
 themselves).
 
+**The single dev script.** `./dev` is the one entry point for operating the
+whole local system — daemon, mission console, PocketBase side channel, and
+the tvcli serve confluence backend (repo-level, shared):
+
+```sh
+./dev status                  # health of every component + last journal lines
+./dev start                   # PB + daemon (live-paper) + console + serve check
+./dev start --dry-run         # daemon in planning-only mode instead
+./dev stop [--all]            # console + daemon + PB (--all also tvcli serve)
+./dev restart                 # stop + start
+./dev logs [daemon|console|pb|serve|dev] [-f] [-n N]
+./dev reset [--keep-decisions] [--no-backup] [--start]
+                              # wipe runtime state (backup under state/backups)
+./dev reset-wt                # delete ALL WunderTrading paper bots + clear
+                              # daemon bot state (profiles/journals kept)
+./dev clean [--all]           # clear logs, run cards, market caches, specs
+                              # (--all also wipes the PocketBase data dir)
+```
+
+Everything `dev` and the system write lives **inside `agents/grid-autonomy/`**
+(`state/`, `state/logs/`, `.pocketbase/`); the only external footprint is the
+launchd agent registration in `~/Library/LaunchAgents` and tvcli serve's own
+log. Component logs: `state/logs/daemon-launchd.log` (supervised daemon),
+`state/logs/console.log` (console), `.pocketbase/pb.log` (PocketBase) —
+`dev logs <what>` reads them. The console's **Dev maintenance** panel runs
+the same `dev reset` / `dev reset-wt` / `dev clean` through
+`POST /api/dev/*` (confirm-gated, detached, output in `state/logs/dev.log`).
+
 **Single writer.** The daemon refuses to start while another live process
 holds `state/daemon.pid` (launchd/start.sh write that file with the daemon's
 own pid, so the normal paths always pass). A second instance — e.g.
@@ -247,8 +278,11 @@ own pid, so the normal paths always pass). A second instance — e.g.
 clobber `state.json` (observed live 2026-09-05). Set `GRID_NO_PIDGUARD=1`
 to override deliberately. A ctl-port bind failure is journaled as
 `ctl-error` instead of killing the control plane silently. Note the launchd
-daemon's stdout/stderr goes to `~/Library/Logs/grid-autonomy-launchd.log`,
-not `state/daemon.log` (that one only collects start.sh launches).
+daemon's stdout/stderr goes to `state/logs/daemon-launchd.log`
+(redirected in-process by `run_launchd.py` — launchd itself cannot open
+files on this removable volume, so its plist sends early stdio to
+`/dev/null`), not `state/daemon.log` (that one only collects start.sh
+launches).
 
 **Start (dry-run planning):**
 
@@ -298,12 +332,15 @@ scripts/stop.sh
 **Supervision (survive crashes + reboots):**
 
 ```sh
-scripts/install_launchd.sh   # installs + loads two per-user LaunchAgents
+scripts/install_launchd.sh   # installs + loads three per-user LaunchAgents
 ```
 
 - `com.tvcli.grid-autonomy` — runs `scripts/run_launchd.py` **in the
   foreground** with `--live-paper` (imports the CF keys from the `dsh web`
   process env, writes the PID file, then runs `daemon.py` in-process).
+- `com.tvcli.grid-autonomy-console` — runs `scripts/run_console.py` in the
+  foreground (mission console on `:8798`, stdio redirected in-process to
+  `state/logs/console.log`).
 - `com.tvcli.serve` — runs `tvcli serve` in the foreground (`:8765`,
   the confluence backend).
 - Restart policy: `KeepAlive={SuccessfulExit: false}` — a crash (non-zero
@@ -477,13 +514,13 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-197 tests as of 2026-09-05, all offline (network/browser calls are mocked
+201 tests as of 2026-09-05, all offline (network/browser calls are mocked
 or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
 also disables the PocketBase write-through so tests can never pollute the
 live side channel). Expected output:
 
 ```
-Ran 197 tests in …
+Ran 201 tests in …
 OK
 ```
 

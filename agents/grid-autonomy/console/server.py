@@ -41,6 +41,14 @@ API (all JSON):
                               live_paper, clear_kill}
     POST /api/daemon/restart  launchd kickstart or stop+start   {confirm,
                               clear_kill}
+    POST /api/dev/reset       run `dev reset` (detached; wipes runtime
+                              state, stops the stack, optionally
+                              --keep-decisions / --start)   {confirm,
+                              keep_decisions, start}
+    POST /api/dev/reset-wt    run `dev reset-wt` (detached; deletes all
+                              WunderTrading PAPER grid bots) {confirm}
+    POST /api/dev/clean       run `dev clean` (detached; clears logs +
+                              runtime artifacts)            {confirm}
 """
 from __future__ import annotations
 
@@ -71,6 +79,12 @@ CONFIG_PATH = os.path.join(GRID_HOME, "config.yaml")
 STATIC_DIR = os.path.join(HERE, "static")
 KILL_FILE = os.path.join(GRID_HOME, "KILL")
 LAUNCHD_LABEL = "com.tvcli.grid-autonomy"
+# The launchd-supervised daemon's stdout/stderr go here (see
+# launchd/com.tvcli.grid-autonomy.plist), NOT state/daemon.log — start.sh
+# writes daemon.log only for manual/nohup launches. The console must read
+# the right file depending on the supervisor, or the Logs view silently
+# shows a stale/empty file in the normal (supervised) production case.
+LAUNCHD_LOG = os.path.join(STATE_DIR, "logs", "daemon-launchd.log")
 PB_URL = os.environ.get("PB_URL", "http://127.0.0.1:8090").rstrip("/")
 
 DEFAULT_CTL_PORT = 8799
@@ -226,6 +240,38 @@ def _launchd_managed() -> bool:
         return False
 
 
+def _log_source() -> dict:
+    """Resolve which file actually holds the daemon's stdout/stderr.
+
+    The supervisor decides the sink: the launchd daemon redirects its stdio
+    in-process to LAUNCHD_LOG (launchd itself cannot open files on this
+    removable volume, so the plist sends early stdio to /dev/null), while
+    start.sh/manual runs append to state/daemon.log. Prefer the supervised file when launchd manages the
+    daemon (the normal production case) but fall back to the state log when
+    the supervised file is absent/empty — e.g. a manual run while the agent
+    is loaded-but-not-running, or a fresh install before first supervised
+    boot. Report both the chosen path and which source is authoritative so
+    the UI can label the view honestly instead of showing a silently wrong
+    file.
+    """
+    state_log = os.path.join(STATE_DIR, "daemon.log")
+    managed = _launchd_managed()
+
+    def _nonempty(path):
+        try:
+            return os.path.getsize(path) > 0
+        except OSError:
+            return False
+
+    if managed and _nonempty(LAUNCHD_LOG):
+        return {"path": LAUNCHD_LOG, "source": "launchd",
+                "managed": True, "state_log": state_log}
+    # Not supervised, or supervised file missing/empty — state log is the
+    # best available (and correct for manual/start.sh runs).
+    return {"path": state_log, "source": "state",
+            "managed": managed, "state_log": state_log}
+
+
 def _mode(pid) -> str:
     cmd = (_ps(pid, "command") or "") if pid else ""
     if "run_launchd.py" in cmd:
@@ -234,7 +280,7 @@ def _mode(pid) -> str:
         return "live-paper"
     if cmd and "daemon.py" in cmd:
         return "dry-run"
-    m = re.findall(r"dry_run=(True|False)", _tail(os.path.join(STATE_DIR, "daemon.log"),
+    m = re.findall(r"dry_run=(True|False)", _tail(_log_source()["path"],
                                                   64 * 1024))
     if m:
         return "live-paper" if m[-1] == "False" else "dry-run"
@@ -396,12 +442,16 @@ def reports_index() -> list[dict]:
 
 
 def logs_payload(lines: int, grep: str | None) -> dict:
-    text = _tail(os.path.join(STATE_DIR, "daemon.log"), 1024 * 1024)
+    # the supervisor decides the sink (launchd in-process redirect vs the
+    # manual start.sh log) — read whichever is authoritative, and report it
+    log = _log_source()
+    text = _tail(log["path"], 1024 * 1024)
     rows = text.splitlines()
     if grep:
         pat = re.compile(grep, re.IGNORECASE)
         rows = [r for r in rows if pat.search(r)]
-    return {"lines": rows[-max(1, min(lines, 2000)):], "total": len(rows)}
+    return {"lines": rows[-max(1, min(lines, 2000)):], "total": len(rows),
+            "path": log["path"], "source": log["source"]}
 
 
 def config_payload() -> dict:
@@ -864,8 +914,48 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(400, {"error": 'pass {"confirm": true}'})
                 return
             self._json(*daemon_restart(clear_kill=bool(body.get("clear_kill"))))
+        elif route in ("/api/dev/reset", "/api/dev/reset-wt", "/api/dev/clean"):
+            if not confirmed:
+                self._json(400, {"error": 'pass {"confirm": true}'})
+                return
+            self._json(*dev_action(route.rsplit("/", 1)[1], body))
         else:
             self._json(404, {"error": "unknown path"})
+
+
+# ── dev-script actions ─────────────────────────────────────────────────
+
+DEV_SCRIPT = os.path.join(GRID_HOME, "dev")
+DEV_LOG = os.path.join(STATE_DIR, "logs", "dev.log")
+
+
+def dev_action(action: str, body: dict) -> tuple[int, dict]:
+    """Run a `dev <action>` through the single dev script, detached.
+
+    reset/reset-wt stop the daemon AND this console (the dev script
+    supervises the whole stack), so the command must run detached —
+    its output lands in state/logs/dev.log and the frontend reloads
+    once the console is back. `clean` does not stop the console, but
+    uses the same path for uniformity.
+    """
+    if not os.path.isfile(DEV_SCRIPT):
+        return 500, {"error": f"dev script not found: {DEV_SCRIPT}"}
+    args = [DEV_SCRIPT, action, "--yes"]
+    if action == "reset":
+        if body.get("keep_decisions"):
+            args.append("--keep-decisions")
+        if body.get("start"):
+            args.append("--start")
+    os.makedirs(os.path.dirname(DEV_LOG), exist_ok=True)
+    try:
+        with open(DEV_LOG, "ab") as log:
+            subprocess.Popen(args, cwd=GRID_HOME, stdout=log, stderr=log,
+                             stdin=subprocess.DEVNULL,
+                             start_new_session=True)
+    except Exception as exc:  # noqa: BLE001
+        return 500, {"error": f"spawn failed: {exc}"}
+    return 200, {"started": True, "action": action, "args": args,
+                 "log": "state/logs/dev.log"}
 
 
 SERVER = None
@@ -873,6 +963,10 @@ SERVER = None
 
 def main():
     global SERVER
+    # Graceful SIGTERM: exit 0 so a supervisor (launchd KeepAlive with
+    # SuccessfulExit=false) does not treat a stop as a crash and restart it.
+    import signal
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     srv = ThreadingHTTPServer(("127.0.0.1", CONSOLE_PORT), Handler)
     SERVER = srv
     srv.started = utcnow()

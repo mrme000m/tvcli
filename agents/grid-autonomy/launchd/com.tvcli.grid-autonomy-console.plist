@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.tvcli.grid-autonomy</string>
+    <string>com.tvcli.grid-autonomy-console</string>
     <key>ProgramArguments</key>
     <array>
         <string>/opt/homebrew/bin/python3</string>
-        <string>/Volumes/ExMac/code/tradingview/go/agents/grid-autonomy/scripts/run_launchd.py</string>
+        <string>/Volumes/ExMac/code/tradingview/go/agents/grid-autonomy/scripts/run_console.py</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/Volumes/ExMac/code/tradingview/go/agents/grid-autonomy</string>
@@ -20,6 +20,9 @@
     </dict>
     <key>ThrottleInterval</key>
     <integer>30</integer>
+    <!-- stdio is redirected in-process to state/logs/console.log (launchd
+         cannot open files on this removable volume — see run_console.py).
+         Early-boot failures show up via `launchctl print .../console`. -->
     <key>StandardOutPath</key>
     <string>/dev/null</string>
     <key>StandardErrorPath</key>

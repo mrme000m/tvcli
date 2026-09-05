@@ -20,11 +20,21 @@ browser ── http://127.0.0.1:8798 ──> console/server.py
 
 ```sh
 cd agents/grid-autonomy
-python3 console/server.py            # http://127.0.0.1:8798
+./dev start                    # starts the console with the whole stack
+python3 console/server.py      # standalone: http://127.0.0.1:8798
 CONSOLE_PORT=8800 python3 console/server.py   # override port
 ```
 
 Stdlib only — no pip installs, no build step. Binds `127.0.0.1` only.
+
+Under `scripts/install_launchd.sh` the console is supervised as
+`com.tvcli.grid-autonomy-console` (via `scripts/run_console.py`, stdio
+redirected in-process to `state/logs/console.log`); SIGTERM exits 0 so
+`dev stop` keeps it stopped instead of restart-looping. The **Dev
+maintenance** panel (Fleet view rail) runs the single `dev` script
+detached: `POST /api/dev/reset`, `/api/dev/reset-wt`, `/api/dev/clean`
+(confirm-gated; output in `state/logs/dev.log`; `reset`/`reset-wt` stop the
+console itself, so the frontend reloads after a few seconds).
 
 The console can run (and show last-persisted state) whether the daemon is
 up or down; live values (status chips, ladder cursors, feed) update every
@@ -68,6 +78,9 @@ Everything the UI does is a plain JSON endpoint (safe to curl):
 | POST | `/api/daemon/stop` `{confirm, force}` | KILL + SIGTERM (+SIGKILL with force). |
 | POST | `/api/daemon/start` `{confirm, live_paper, clear_kill}` | `scripts/start.sh`, optionally `--live-paper`. |
 | POST | `/api/daemon/restart` `{confirm, clear_kill}` | launchd kickstart (supervised) or stop+start. |
+| POST | `/api/dev/reset` `{confirm, keep_decisions, start}` | run `dev reset` detached — wipes runtime state, stops the stack. |
+| POST | `/api/dev/reset-wt` `{confirm}` | run `dev reset-wt` detached — deletes all WT paper bots + clears daemon bot state. |
+| POST | `/api/dev/clean` `{confirm}` | run `dev clean` detached — clears logs + runtime artifacts. |
 
 ### Safety model
 

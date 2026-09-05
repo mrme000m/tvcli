@@ -1,0 +1,660 @@
+#!/usr/bin/env bash
+# dev — the single entry point for developing and operating grid-autonomy.
+#
+# One script to start, stop, restart, inspect, and reset the whole local
+# system (daemon, mission console, PocketBase side channel, tvcli serve
+# confluence backend) — plus reset the daemon's runtime state, reset the
+# WunderTrading PAPER accounts (delete all paper grid bots), and clear logs
+# and runtime artifacts. Everything lives inside agents/grid-autonomy/
+# (state/, .pocketbase/, state/logs/); nothing is written outside except
+# the launchd agent registration itself.
+#
+# Usage:  dev <command> [options]
+#
+#   status                     health of all components + last journal lines
+#   start [--dry-run]          start PB + daemon (live-paper default,
+#                              --dry-run = planning only) + console;
+#                              ensures tvcli serve is up (confluence)
+#   stop [--all]               stop console + daemon + PocketBase
+#                              (--all also stops tvcli serve)
+#   restart [--dry-run]        stop + start
+#   logs [what] [-f] [-n N]   what: daemon | console | pb | serve | dev
+#                              (default daemon); -f follow, -n lines
+#   reset [--yes] [--keep-decisions] [--no-backup] [--start]
+#                              stop everything, wipe daemon runtime state
+#                              (state.json, decisions, reliability,
+#                              reports, market caches, watch specs, logs,
+#                              PocketBase data); backup under state/backups
+#                              unless --no-backup; --keep-decisions
+#                              preserves decisions.jsonl + reliability*;
+#                              --start brings the system back up
+#   reset-wt [--yes]           stop the daemon, then stop+delete ALL paper
+#                              grid bots on WunderTrading (clears plan
+#                              capacity/positions) and clear the daemon's
+#                              bot state. Real-money bots are never touched.
+#                              Paper profiles and the decisions/reliability
+#                              journals are kept.
+#   clean [--yes] [--all]      clear logs + runtime artifacts (reports,
+#                              market caches, watch specs, PB log);
+#                              --all additionally wipes PocketBase data
+#                              and run-card index (NOT state.json/
+#                              decisions — use `reset` for that)
+#   config                     print parsed config.yaml (grouped) + the
+#                              current value of every editable knob
+#   config get <path>          print one value (e.g. watch.interval_s)
+#   config set <path> <value>  apply one whitelisted edit (type + range
+#                              checked, comments preserved, .bak backup);
+#                              the daemon reads config at startup, so a
+#                              restart is required for it to take effect
+#   config validate            parse config.yaml + confirm every editable
+#                              path resolves (exit non-zero on failure)
+#
+# Component map (all supervised by launchd once installed via
+# scripts/install_launchd.sh; manual fallbacks otherwise):
+#   com.tvcli.grid-autonomy           daemon    ctl :8799  (log state/logs/daemon-launchd.log)
+#   com.tvcli.grid-autonomy-console   console       :8798  (log state/logs/console.log)
+#   com.tvcli.serve                   tvcli         :8765  (repo-level, shared)
+#   PocketBase                        side channel  :8090   (.pocketbase/, pb_data inside)
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$HERE"
+
+STATE_DIR="$HERE/state"
+LOG_DIR="$STATE_DIR/logs"
+BACKUP_DIR="$STATE_DIR/backups"
+PB_DIR="$HERE/.pocketbase"
+UID_="$(id -u)"
+DAEMON_LABEL="com.tvcli.grid-autonomy"
+CONSOLE_LABEL="com.tvcli.grid-autonomy-console"
+SERVE_LABEL="com.tvcli.serve"
+CTL_PORT="${GRID_DAEMON_PORT:-8799}"
+CONSOLE_PORT="${CONSOLE_PORT:-8798}"
+
+say()  { printf '%s\n' "$*"; }
+err()  { printf 'ERROR: %s\n' "$*" >&2; }
+hr()   { printf -- '--- %s ---\n' "$*"; }
+
+confirm() { # confirm <question>  (respects --yes via $ASSUME_YES)
+  [ "${ASSUME_YES:-0}" = "1" ] && return 0
+  local reply
+  printf '%s [y/N] ' "$*" >&2
+  read -r reply
+  [[ "$reply" =~ ^[Yy]([Ee][Ss])?$ ]]
+}
+
+port_up() { curl -s -m 2 -o /dev/null "http://127.0.0.1:$1" 2>/dev/null && return 0 || return 1; }
+ctl_up()  { curl -s -m 2 -o /dev/null "http://127.0.0.1:$CTL_PORT/health" 2>/dev/null; }
+pb_up()   { curl -s -m 2 -o /dev/null "http://127.0.0.1:8090/api/health" 2>/dev/null; }
+serve_up(){ curl -s -m 2 -o /dev/null "http://127.0.0.1:8765/health" 2>/dev/null; }
+
+label_loaded() { launchctl print "gui/$UID_/$1" >/dev/null 2>&1; }
+label_pid() {
+  # POSIX awk: no \s — match the field tokens instead of the indentation
+  launchctl print "gui/$UID_/$1" 2>/dev/null | awk '$1 == "pid" {print $3; exit}'
+}
+plist_installed() { [ -f "$HOME/Library/LaunchAgents/$1.plist" ]; }
+
+ensure_launchd() { # ensure_launchd <label>  — bootstrap if needed
+  local label="$1"
+  if ! plist_installed "$label"; then
+    return 1
+  fi
+  if ! label_loaded "$label"; then
+    launchctl bootstrap "gui/$UID_" "$HOME/Library/LaunchAgents/$label.plist" 2>/dev/null || true
+    sleep 1
+  fi
+  return 0
+}
+
+# ── status ─────────────────────────────────────────────────────────────
+cmd_status() {
+  hr "components"
+  if ctl_up >/dev/null; then
+    local health; health="$(ctl_up 2>/dev/null || true)"
+    local pid; pid="$(label_pid "$DAEMON_LABEL" 2>/dev/null || true)"
+    say "daemon     UP   ctl :$CTL_PORT  (launchd pid ${pid:-manual})"
+  else
+    say "daemon     DOWN (ctl :$CTL_PORT unreachable)"
+  fi
+  if port_up "$CONSOLE_PORT"; then
+    say "console    UP   http://127.0.0.1:$CONSOLE_PORT  (launchd pid $(label_pid "$CONSOLE_LABEL" 2>/dev/null || echo manual))"
+  else
+    say "console    DOWN (:$CONSOLE_PORT unreachable)"
+  fi
+  if pb_up; then say "pocketbase UP   :8090 (data $PB_DIR/pb_data)"; else say "pocketbase DOWN (:8090)"; fi
+  if serve_up; then say "tvcli      UP   :8765 (confluence backend, label $SERVE_LABEL)"; else say "tvcli      DOWN (:8765 — confluence disabled; screen still works)"; fi
+  if curl -s -m 2 -o /dev/null http://127.0.0.1:9222/json/version 2>/dev/null; then
+    say "browser    UP   CDP :9222 (WT session transport)"
+  else
+    say "browser    DOWN CDP :9222 (WT session transport — needed for deploy/observe)"
+  fi
+  hr "state"
+  say "active bots: $(python3 - <<'PY'
+import json, os
+try:
+    st = json.load(open("state/state.json"))
+    ab = st.get("active_bots") or {}
+    print(", ".join(f"{v.get('venue')}:{v.get('symbol')}" for v in ab.values()) or "none")
+except Exception:
+    print("no state.json")
+PY
+)"
+  say "last cycle:  $(python3 - <<'PY'
+import json
+try:
+    print(json.load(open("state/state.json")).get("last_cycle"))
+except Exception:
+    print("—")
+PY
+)"
+  say "committed:   $(python3 - <<'PY'
+import json
+try:
+    print(json.dumps(json.load(open("state/state.json")).get("committed") or {}) or "{}")
+except Exception:
+    print("—")
+PY
+)"
+  hr "last journal lines"
+  python3 - <<'PY' 2>/dev/null || say "(no state)"
+import json
+try:
+    st = json.load(open("state/state.json"))
+    for e in (st.get("journal") or [])[-5:]:
+        print(f"{e.get('at')} {e.get('kind')} {(e.get('msg') or '')[:100]}")
+except Exception:
+    pass
+PY
+}
+
+# ── start ─────────────────────────────────────────────────────────────
+start_pb() {
+  if pb_up; then say "pocketbase already up"; return 0; fi
+  hr "starting PocketBase"
+  bash scripts/setup_pocketbase.sh || { err "PocketBase failed to start (daemon will run without the PB side channel)"; return 0; }
+}
+
+start_daemon() { # start_daemon live|dry
+  local mode="$1"
+  if ctl_up >/dev/null; then say "daemon already up (ctl :$CTL_PORT)"; return 0; fi
+  rm -f KILL
+  if [ "$mode" = "live" ] && ensure_launchd "$DAEMON_LABEL"; then
+    hr "starting daemon (launchd, --live-paper)"
+    launchctl kickstart -k "gui/$UID_/$DAEMON_LABEL"
+  else
+    if [ "$mode" = "live" ]; then
+      hr "starting daemon (manual, --live-paper)"
+      bash scripts/start.sh --live-paper
+    else
+      hr "starting daemon (manual, dry-run)"
+      bash scripts/start.sh
+    fi
+  fi
+  local waited=0
+  while ! ctl_up >/dev/null && [ "$waited" -lt 20 ]; do sleep 1; waited=$((waited+1)); done
+  ctl_up >/dev/null && say "daemon up (ctl :$CTL_PORT)" || err "daemon did not come up (check state/logs/daemon-launchd.log / state/daemon.log)"
+}
+
+start_console() {
+  if port_up "$CONSOLE_PORT"; then say "console already up"; return 0; fi
+  if ensure_launchd "$CONSOLE_LABEL"; then
+    hr "starting console (launchd)"
+    launchctl kickstart -k "gui/$UID_/$CONSOLE_LABEL"
+  else
+    hr "starting console (manual)"
+    mkdir -p "$LOG_DIR"
+    nohup python3 console/server.py >> "$LOG_DIR/console.log" 2>&1 &
+    say "console started (pid $!) → http://127.0.0.1:$CONSOLE_PORT"
+  fi
+  local waited=0
+  while ! port_up "$CONSOLE_PORT" && [ "$waited" -lt 15 ]; do sleep 1; waited=$((waited+1)); done
+  port_up "$CONSOLE_PORT" && say "console up (:$CONSOLE_PORT)" || err "console did not come up (check state/logs/console.log)"
+}
+
+start_serve() {
+  if serve_up; then say "tvcli serve already up"; return 0; fi
+  if ensure_launchd "$SERVE_LABEL"; then
+    hr "starting tvcli serve (launchd)"
+    launchctl kickstart -k "gui/$UID_/$SERVE_LABEL"
+  else
+    say "NOTE: tvcli serve not running and no launchd agent installed."
+    say "      Confluence scoring will be skipped; start it with:"
+    say "      (cd ../.. && nohup ./tvcli serve --daemon >/dev/null 2>&1 &)"
+    return 0
+  fi
+  local waited=0
+  while ! serve_up && [ "$waited" -lt 20 ]; do sleep 1; waited=$((waited+1)); done
+  serve_up && say "tvcli serve up (:8765)" || err "tvcli serve did not come up"
+}
+
+cmd_start() {
+  local mode="live"
+  if [ "${1:-}" = "--dry-run" ]; then mode="dry"; fi
+  start_pb
+  start_daemon "$mode"
+  start_console
+  start_serve
+  say ""
+  cmd_status | tail -n +2
+}
+
+# ── stop ──────────────────────────────────────────────────────────────
+stop_console() {
+  if label_loaded "$CONSOLE_LABEL" && plist_installed "$CONSOLE_LABEL"; then
+    launchctl bootout "gui/$UID_/$CONSOLE_LABEL" 2>/dev/null && say "console stopped (launchd)" || say "console launchd agent not running"
+    return 0
+  fi
+  local pid
+  pid="$(lsof -nP -t -iTCP:$CONSOLE_PORT -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+  if [ -n "$pid" ]; then
+    kill -TERM "$pid" 2>/dev/null || true
+    sleep 1
+    kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    say "console stopped (pid $pid)"
+  else
+    say "console not running"
+  fi
+}
+
+stop_daemon() {
+  if [ -f "$STATE_DIR/daemon.pid" ]; then
+    bash scripts/stop.sh
+  elif label_loaded "$DAEMON_LABEL"; then
+    launchctl bootout "gui/$UID_/$DAEMON_LABEL" 2>/dev/null && say "daemon stopped (launchd)" || true
+  else
+    say "daemon not running"
+  fi
+}
+
+stop_pb() {
+  local pb_pid_file="$PB_DIR/pb.pid"
+  if [ -f "$pb_pid_file" ] && kill -0 "$(cat "$pb_pid_file")" 2>/dev/null; then
+    kill -TERM "$(cat "$pb_pid_file")" 2>/dev/null || true
+    say "pocketbase stopped"
+  elif pb_up; then
+    local pid; pid="$(lsof -nP -t -iTCP:8090 -sTCP:LISTEN 2>/dev/null | head -1 || true)"
+    [ -n "$pid" ] && kill -TERM "$pid" 2>/dev/null && say "pocketbase stopped (pid $pid)" || say "pocketbase not running"
+  else
+    say "pocketbase not running"
+  fi
+  rm -f "$pb_pid_file"
+}
+
+cmd_stop() {
+  local all=0
+  [ "${1:-}" = "--all" ] && all=1
+  stop_console
+  stop_daemon   # also stops PB
+  stop_pb
+  if [ "$all" = "1" ]; then
+    launchctl bootout "gui/$UID_/$SERVE_LABEL" 2>/dev/null && say "tvcli serve stopped (launchd)" || say "tvcli serve not running"
+  else
+    say "(tvcli serve left running — pass --all to stop it too)"
+  fi
+}
+
+# ── restart ───────────────────────────────────────────────────────────
+cmd_restart() {
+  cmd_stop
+  say ""
+  cmd_start "${1:-}"
+}
+
+# ── logs ──────────────────────────────────────────────────────────────
+cmd_logs() {
+  local what="daemon" follow=0 lines=50
+  local args=()
+  for a in "$@"; do
+    case "$a" in
+      daemon|console|pb|serve|dev) what="$a" ;;
+      -f|--follow) follow=1 ;;
+      -n) : ;; # consumed below via manual scan
+      *) lines="$a" ;;
+    esac
+  done
+  local path
+  case "$what" in
+    daemon) path="$STATE_DIR/daemon.log"; [ -f "$LOG_DIR/daemon-launchd.log" ] && path="$LOG_DIR/daemon-launchd.log" ;;
+    console) path="$LOG_DIR/console.log" ;;
+    pb)      path="$PB_DIR/pb.log" ;;
+    serve)   path="$HOME/Library/Logs/tvcli-serve-launchd.log" ;;
+    dev)     path="$LOG_DIR/dev.log" ;;
+  esac
+  if [ ! -f "$path" ]; then err "no log at $path"; exit 1; fi
+  if [ "$follow" = "1" ]; then
+    tail -n "$lines" -F "$path"
+  else
+    tail -n "$lines" "$path"
+  fi
+}
+
+# ── reset ─────────────────────────────────────────────────────────────
+cmd_reset() {
+  local keep_decisions=0 do_backup=1 do_start=0
+  for a in "$@"; do
+    case "$a" in
+      --keep-decisions) keep_decisions=1 ;;
+      --no-backup) do_backup=0 ;;
+      --start) do_start=1 ;;
+    esac
+  done
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    say "RESET wipes the daemon runtime state: state.json, decisions journal,"
+    say "reliability ledger + archive, run cards, market caches, watch specs,"
+    say "logs, and the PocketBase data dir (all inside agents/grid-autonomy/)."
+    say "config.yaml and the WunderTrading paper profiles are NOT touched."
+    say "WunderTrading bots are NOT deleted (use: dev reset-wt)."
+    confirm "Proceed?" || { say "aborted"; exit 1; }
+  fi
+  cmd_stop >/dev/null 2>&1 || true
+  sleep 1
+  if [ "$do_backup" = "1" ]; then
+    local ts; ts="$(date -u +%Y%m%dT%H%M%SZ)"
+    local bk="$BACKUP_DIR/$ts"
+    mkdir -p "$bk"
+    local f
+    for f in state.json decisions.jsonl reliability.json reliability_archive.json; do
+      if [ -f "$STATE_DIR/$f" ]; then cp "$STATE_DIR/$f" "$bk/"; fi
+    done
+    if [ -d "$STATE_DIR/reports" ]; then cp -R "$STATE_DIR/reports" "$bk/reports"; fi
+    say "backup → $bk"
+  fi
+  rm -rf "$STATE_DIR/reports"
+  rm -f "$STATE_DIR/state.json" "$STATE_DIR/decisions.jsonl" \
+        "$STATE_DIR/reliability.json" "$STATE_DIR/reliability_archive.json" \
+        "$STATE_DIR"/market_map-*.json "$STATE_DIR/market_meta.json" \
+        "$STATE_DIR/daemon.pid" "$STATE_DIR/console.log" \
+        "$STATE_DIR"/daemon-launchd.log "$LOG_DIR"/*.log 2>/dev/null || true
+  rm -rf "$STATE_DIR/watch/specs" 2>/dev/null || true
+  rm -f KILL
+  # PocketBase: wipe data (fresh collections on next setup), keep pb.env creds
+  rm -rf "$PB_DIR/pb_data" "$PB_DIR/pb.log" "$PB_DIR/pb.pid" 2>/dev/null || true
+  if [ "$keep_decisions" = "1" ] && [ "$do_backup" = "1" ]; then
+    local latest; latest="$(ls -1dt "$BACKUP_DIR"/*/ 2>/dev/null | head -1 || true)"
+    if [ -n "${latest:-}" ]; then
+      if [ -f "$latest/decisions.jsonl" ]; then cp "$latest/decisions.jsonl" "$STATE_DIR/"; fi
+      if [ -f "$latest/reliability.json" ]; then cp "$latest/reliability.json" "$STATE_DIR/"; fi
+      if [ -f "$latest/reliability_archive.json" ]; then cp "$latest/reliability_archive.json" "$STATE_DIR/"; fi
+      say "kept: decisions.jsonl + reliability ledger (learning journal preserved)"
+    fi
+  fi
+  say "reset complete."
+  if [ "$do_start" = "1" ]; then
+    say ""
+    cmd_start
+  else
+    say "start again with: dev start"
+  fi
+}
+
+# ── reset-wt ──────────────────────────────────────────────────────────
+cmd_reset_wt() {
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    say "RESET-WT stops the daemon, then stops + deletes EVERY paper grid bot"
+    say "on WunderTrading (clears plan capacity and positions), then clears"
+    say "the daemon's bot state. Real-money bots/profiles are never touched;"
+    say "paper profiles and the decisions/reliability journals are kept."
+    confirm "Proceed?" || { say "aborted"; exit 1; }
+  fi
+  hr "stopping daemon"
+  stop_daemon; stop_pb
+  hr "resetting WunderTrading paper accounts"
+  python3 scripts/wt_reset.py --yes
+  local rc=$?
+  if [ "$rc" = "0" ]; then
+    # the deleted bots are still referenced by state.json — leave it in
+    # place and the daemon would try to observe/rotate missing bots (stop
+    # fails, rotation wedges). A fresh state.json is regenerated on next
+    # start; the decisions journal + reliability ledger are NOT touched.
+    rm -f "$STATE_DIR/state.json" "$STATE_DIR/daemon.pid"
+    rm -f KILL
+    say ""
+    say "WT paper accounts clean + daemon state cleared (decisions/reliability"
+    say "kept). Start with: dev start — the daemon will deploy fresh bots."
+  else
+    say ""
+    err "some bots could not be deleted (see above) — re-run dev reset-wt"
+    say "state.json was NOT cleared (bots may still exist on WT)."
+  fi
+  return "$rc"
+}
+
+# ── clean ─────────────────────────────────────────────────────────────
+cmd_clean() {
+  local all=0
+  for a in "$@"; do
+    [ "$a" = "--all" ] && all=1
+  done
+  if [ "${ASSUME_YES:-0}" != "1" ]; then
+    say "CLEAN clears runtime artifacts: run cards (state/reports), market-map"
+    say "caches, watch specs, daemon/console/PB logs."
+    if [ "$all" = "1" ]; then
+      say "--all also wipes the PocketBase data dir (side channel is rebuilt
+on next start; decisions.jsonl and state.json are NOT touched)."
+    fi
+    confirm "Proceed?" || { say "aborted"; exit 1; }
+  fi
+  rm -rf "$STATE_DIR/reports"
+  rm -f "$STATE_DIR"/market_map-*.json "$STATE_DIR/market_meta.json"
+  rm -rf "$STATE_DIR/watch/specs" 2>/dev/null || true
+  rm -f "$STATE_DIR/console.log" "$STATE_DIR"/daemon-launchd.log "$LOG_DIR"/*.log 2>/dev/null || true
+  rm -f "$STATE_DIR/daemon.log" "$PB_DIR/pb.log" 2>/dev/null || true
+  rm -f "$HOME/Library/Logs/grid-autonomy-launchd.log" 2>/dev/null || true
+  if [ "$all" = "1" ]; then
+    rm -rf "$PB_DIR/pb_data" "$PB_DIR/pb.pid" 2>/dev/null || true
+  fi
+  say "clean complete (runtime artifacts cleared; daemon state kept)."
+}
+
+# ── config ───────────────────────────────────────────────────────────
+# Reuses the console's EDITABLE whitelist + comment-preserving yaml_edit so
+# the CLI and the web console enforce identical rules. The daemon reads
+# config.yaml once at startup, so a `set` needs a restart to take effect.
+cmd_config() {
+  local sub="${1:-show}"; shift 2>/dev/null || true
+  PYTHONPATH="$HERE:$HERE/console" python3 - "$sub" "$@" <<'PY'
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.getcwd(), "console"))  # yaml_edit
+sys.path.insert(0, os.getcwd())                            # config_lite
+import yaml_edit
+from config_lite import load_yaml
+
+CONFIG = os.path.join(os.getcwd(), "config.yaml")
+# Mirrors console/server.py EDITABLE — keep in sync.
+EDITABLE = {
+    "portfolio.total_usd": dict(t="float", min=10, max=1_000_000, group="Portfolio", label="Fund size", unit="USD"),
+    "portfolio.slots_default": dict(t="int", min=1, max=10, group="Portfolio", label="Slots"),
+    "portfolio.max_alloc_per_slot": dict(t="float", min=0.05, max=1.0, group="Portfolio", label="Max allocation per slot", unit="fraction"),
+    "portfolio.cash_buffer_pct": dict(t="float", min=0.0, max=0.9, group="Portfolio", label="Cash buffer", unit="fraction"),
+    "portfolio.venues.hyperliquid.balance_usd": dict(t="float", min=0, max=1_000_000, group="Portfolio", label="Hyperliquid sleeve", unit="USD"),
+    "portfolio.venues.binance.balance_usd": dict(t="float", min=0, max=1_000_000, group="Portfolio", label="Binance sleeve", unit="USD"),
+    "screen.rescreen_minutes": dict(t="float", min=5, max=1440, group="Cadence", label="Rescreen cadence", unit="min"),
+    "watch.interval_s": dict(t="float", min=10, max=3600, group="Cadence", label="Health poll", unit="s"),
+    "watch.adjust_steps_threshold": dict(t="float", min=0.5, max=10, group="Cadence", label="Re-centre drift", unit="steps"),
+    "policy.hysteresis_score": dict(t="float", min=0, max=50, group="Policy", label="Rotation hysteresis", unit="pts"),
+    "policy.min_hold_h": dict(t="float", min=0, max=720, group="Policy", label="Min hold", unit="h"),
+    "autonomy.base_pct": dict(t="float", min=0.01, max=1.0, group="Sizing ladder", label="Base tier", unit="fraction"),
+    "autonomy.probe_pct": dict(t="float", min=0.01, max=1.0, group="Sizing ladder", label="Probe tier", unit="fraction"),
+    "autonomy.full_pct": dict(t="float", min=0.01, max=1.0, group="Sizing ladder", label="Full tier", unit="fraction"),
+    "memory.k": dict(t="int", min=1, max=10, group="Deliberation", label="Memories per candidate"),
+}
+
+
+def read_text():
+    if not os.path.isfile(CONFIG):
+        print(f"ERROR: config.yaml not found at {CONFIG}", file=sys.stderr)
+        sys.exit(1)
+    with open(CONFIG) as f:
+        return f.read()
+
+
+def show():
+    if not os.path.isfile(CONFIG):
+        print(f"ERROR: config.yaml not found at {CONFIG}", file=sys.stderr)
+        sys.exit(1)
+    cfg = load_yaml(open(CONFIG).read()) or {}
+    text = read_text()
+    # editable knobs first (what the console/CLI can change), grouped
+    by_group = {}
+    for path, rule in EDITABLE.items():
+        val, ok = yaml_edit.get_value(text, path)
+        by_group.setdefault(rule["group"], []).append(
+            (rule["label"], path, val, ok, rule))
+    print("── editable knobs ──")
+    for group in ("Portfolio", "Cadence", "Policy", "Sizing ladder", "Deliberation"):
+        if group not in by_group:
+            continue
+        print(f"  {group}")
+        for label, path, val, ok, rule in by_group[group]:
+            u = f" {rule['unit']}" if rule.get("unit") else ""
+            rng = f"  [{rule['min']}..{rule['max']}{u}]"
+            if ok:
+                print(f"    {path:<40} = {val!s:<10}  {label}{rng}")
+            else:
+                print(f"    {path:<40} = (missing)  {label}{rng}")
+    print("── full config (non-editable context) ──")
+    _dump(cfg, 0)
+
+
+def _dump(node, depth, prefix=""):
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if isinstance(v, (dict, list)):
+                print(f"{prefix}{'  '*depth}{k}:")
+                _dump(v, depth + 1)
+            else:
+                print(f"{prefix}{'  '*depth}{k}: {v}")
+    elif isinstance(node, list):
+        for item in node:
+            if isinstance(item, (dict, list)):
+                _dump(item, depth + 1, prefix="- ")
+            else:
+                print(f"{prefix}{'  '*depth}- {item}")
+
+
+def get(path):
+    if path not in EDITABLE:
+        print(f"ERROR: '{path}' is not an editable knob. Editable paths:", file=sys.stderr)
+        for p in EDITABLE:
+            print(f"  {p}", file=sys.stderr)
+        sys.exit(1)
+    text = read_text()
+    val, ok = yaml_edit.get_value(text, path)
+    if not ok:
+        print(f"ERROR: '{path}' not found in config.yaml", file=sys.stderr)
+        sys.exit(1)
+    print(f"{path} = {val}")
+
+
+def _coerce(rule, raw):
+    try:
+        if rule["t"] == "int":
+            v = int(raw)
+        else:
+            v = float(raw)
+    except (TypeError, ValueError):
+        print(f"ERROR: '{raw}' is not a {rule['t']}", file=sys.stderr)
+        sys.exit(1)
+    if not (rule["min"] <= v <= rule["max"]):
+        print(f"ERROR: {v} out of range [{rule['min']}, {rule['max']}]", file=sys.stderr)
+        sys.exit(1)
+    return v
+
+
+def set_(path, raw):
+    if path not in EDITABLE:
+        print(f"ERROR: '{path}' is not an editable knob. Editable paths:", file=sys.stderr)
+        for p in EDITABLE:
+            print(f"  {p}", file=sys.stderr)
+        sys.exit(1)
+    rule = EDITABLE[path]
+    value = _coerce(rule, raw)
+    text = read_text()
+    new_text = yaml_edit.set_value(text, path, value)
+    if new_text is None:
+        print(f"ERROR: '{path}' not found in config.yaml", file=sys.stderr)
+        sys.exit(1)
+    parsed = load_yaml(new_text)
+    node = parsed
+    for part in path.split("."):
+        node = (node or {}).get(part)
+    if node != value:
+        print(f"ERROR: round-trip check failed for '{path}'", file=sys.stderr)
+        sys.exit(1)
+    import shutil
+    shutil.copy2(CONFIG, CONFIG + ".bak")
+    tmp = CONFIG + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(new_text)
+    os.replace(tmp, CONFIG)
+    print(f"{path} = {value}  (backup: config.yaml.bak)")
+    print("NOTE: the daemon reads config.yaml at startup — restart to apply.")
+
+
+def validate():
+    if not os.path.isfile(CONFIG):
+        print(f"ERROR: config.yaml not found at {CONFIG}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        cfg = load_yaml(open(CONFIG).read())
+    except Exception as exc:
+        print(f"FAIL: config.yaml does not parse: {exc}", file=sys.stderr)
+        sys.exit(1)
+    text = read_text()
+    missing = [p for p in EDITABLE if not yaml_edit.get_value(text, p)[1]]
+    if missing:
+        print("FAIL: these editable paths are missing from config.yaml:", file=sys.stderr)
+        for p in missing:
+            print(f"  {p}", file=sys.stderr)
+        sys.exit(1)
+    print("OK: config.yaml parses and all editable paths resolve.")
+
+
+def main():
+    sub = sys.argv[1] if len(sys.argv) > 1 else "show"
+    if sub in ("show", ""):
+        show()
+    elif sub == "get":
+        if len(sys.argv) < 3:
+            print("usage: dev config get <path>", file=sys.stderr); sys.exit(1)
+        get(sys.argv[2])
+    elif sub == "set":
+        if len(sys.argv) < 4:
+            print("usage: dev config set <path> <value>", file=sys.stderr); sys.exit(1)
+        set_(sys.argv[2], sys.argv[3])
+    elif sub == "validate":
+        validate()
+    else:
+        print(f"unknown config subcommand: {sub}", file=sys.stderr)
+        print("usage: dev config [show|get <path>|set <path> <value>|validate]", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
+PY
+}
+
+# ── main dispatch ────────────────────────────────────────────────────
+cmd="${1:-help}"; shift 2>/dev/null || true
+for a in "$@"; do
+  if [ "$a" = "--yes" ] || [ "$a" = "-y" ]; then ASSUME_YES=1; fi
+done
+case "$cmd" in
+  status)    cmd_status ;;
+  start)     cmd_start "$@" ;;
+  stop)      cmd_stop "$@" ;;
+  restart)   cmd_restart "$@" ;;
+  logs)      cmd_logs "$@" ;;
+  reset)     cmd_reset "$@" ;;
+  reset-wt)  cmd_reset_wt "$@" ;;
+  clean)     cmd_clean "$@" ;;
+  config)    cmd_config "$@" ;;
+  help|-h|--help|"")
+    sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//' ;;
+  *) err "unknown command: $cmd (see: dev help)"; exit 1 ;;
+esac

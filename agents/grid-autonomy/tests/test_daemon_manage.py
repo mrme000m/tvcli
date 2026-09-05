@@ -100,6 +100,10 @@ class ManageTestCase(unittest.TestCase):
             "daemon.STATE_PATH": state_path,
             # never mirror test state into the live PocketBase side channel
             "daemon._pb": lambda *a, **k: None,
+            # never merge the real state/reliability_archive.json into test
+            # reliability recomputes (rotated-out bots' trades)
+            "daemon.archived_by_archetype": lambda: {},
+            "daemon.archive_trades": lambda trades, arch: True,
             "daemon.SPECS_DIR": os.path.join(self.tmp.name, "watch", "specs"),
             "daemon.deliberate": fake_deliberate,
             "daemon.memories_for_safe": lambda brief, k=3: [],
@@ -402,6 +406,29 @@ class ManageTestCase(unittest.TestCase):
         self.assertEqual(stats["samples"], 2)
         self.assertEqual(stats["profit_factor"], 2.5)  # 10 / 4
         self.assertEqual(stats["win_rate"], 0.5)
+
+    def test_reliability_cycle_merges_archive(self):
+        # archived (rotated-out) trades must feed the recompute together
+        # with the active bots' trades
+        d = self.make_daemon()
+        self._seed_reliability_bot(d)  # active bot, archetype Neutral Grid
+        d.state["active_bots"]["1"]["archetype"] = "chop"
+        archived = {"trend": [{"pnl_usd": 2.0, "close_ts": 1,
+                               "entered_at": None, "strategy_id": "a"},
+                              {"pnl_usd": -1.0, "close_ts": 2,
+                               "entered_at": None, "strategy_id": "b"}]}
+        saved = {}
+        def fake_save(data):
+            saved.update(data)
+            return True
+        with mock.patch("daemon.bot_trades", return_value=[]), \
+             mock.patch("daemon.archived_by_archetype",
+                        return_value=archived), \
+             mock.patch("daemon.save_reliability", side_effect=fake_save):
+            d.reliability_cycle()
+        self.assertIn("trend", saved)
+        self.assertEqual(saved["trend"]["samples"], 2)
+        self.assertAlmostEqual(saved["trend"]["profit_factor"], 2.0, places=4)
 
     def test_reliability_cycle_zero_samples_keep_existing_ledger(self):
         d = self.make_daemon()

@@ -43,6 +43,29 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 
 All commands from `agents/grid-autonomy/`.
 
+**The single dev script** (preferred entry point — manages daemon +
+console + PocketBase + tvcli serve, all launchd-supervised after
+`scripts/install_launchd.sh`):
+
+```sh
+./dev status              # health of every component + last journal lines
+./dev start [--dry-run]   # start the whole stack (live-paper default)
+./dev stop [--all]        # stop console + daemon + PB (--all + tvcli serve)
+./dev restart             # stop + start
+./dev logs daemon|console|pb|serve [-f]   # tail any component log
+./dev reset [--keep-decisions] [--start]  # wipe runtime state (backup kept)
+./dev reset-wt            # delete ALL WT paper bots + clear daemon bot state
+./dev clean [--all]       # clear logs, run cards, market caches, specs
+```
+
+Everything the system writes stays inside `agents/grid-autonomy/`
+(`state/`, `state/logs/`, `.pocketbase/`); the only external footprint is
+the launchd registration. The console's Dev-maintenance panel runs the same
+`dev` commands via `POST /api/dev/{reset,reset-wt,clean}` (detached,
+confirm-gated, output in `state/logs/dev.log`).
+
+Lower-level equivalents:
+
 ```sh
 scripts/start.sh                # dry-run planning (default; creates nothing)
 scripts/start.sh --live-paper   # actually create paper bots
@@ -149,4 +172,4 @@ re-login in the browser window (or vault `wundertrading-session` →
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 197 offline tests as of 2026-09-05; trust the runner output over any count in docs.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 201 offline tests as of 2026-09-05; trust the runner output over any count in docs.

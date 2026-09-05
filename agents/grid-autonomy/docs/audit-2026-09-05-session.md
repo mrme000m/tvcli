@@ -109,3 +109,58 @@ env per chain link, browser CDP, PocketBase, enforced venue capacity
 profile is flagged red), and worker capabilities. Purely additive
 (`_readiness()` derives from the existing ctl `/status` payload);
 `console/README.md` updated to match. Verified live on :8798.
+
+
+---
+
+# Session 2 — console integration, containment, and the `dev` script (2026-09-05, later)
+
+## Console → backend integration (now complete)
+
+- The console is **launchd-supervised** as `com.tvcli.grid-autonomy-console`
+  via `scripts/run_console.py` (foreground, in-process stdio redirect to
+  `state/logs/console.log`, SIGTERM → exit 0 so stops stay stopped).
+  `scripts/install_launchd.sh` installs all three agents (daemon, console,
+  tvcli serve) and now waits out the bootout race that previously caused
+  EIO-5 bootstrap failures.
+- Fixed a latent bug: the console's Logs view always read
+  `state/daemon.log` even when the daemon was launchd-supervised — it now
+  uses the `_log_source()` chooser and reports which file/source it read.
+- The console's **Dev maintenance** panel drives the single `dev` script
+  (`POST /api/dev/{reset,reset-wt,clean}`, confirm-gated, detached;
+  output in `state/logs/dev.log`).
+
+## Local containment
+
+launchd itself cannot open files on this removable volume (TCC — a plist
+`StandardOutPath` here makes the job die with EX_CONFIG 78, verified live).
+Both launchd entrypoints (`run_launchd.py`, `run_console.py`) therefore
+redirect stdio **in-process** (Homebrew python3 holds the grant) into
+`state/logs/`. The plists send early stdio to `/dev/null`. Result: **every
+runtime artifact — state, logs, PB data, caches — lives inside
+`agents/grid-autonomy/`**; the only external footprint is the launchd
+registration in `~/Library/LaunchAgents` and tvcli serve's own repo-level
+log.
+
+## The single dev script (`agents/grid-autonomy/dev`)
+
+`status | start [--dry-run] | stop [--all] | restart | logs | reset |
+reset-wt | clean` — verified live, command by command:
+
+- `start` brought up PocketBase (fresh token), daemon (launchd
+  `--live-paper`), console (launchd), and verified tvcli serve.
+- `stop` cleanly stopped console + daemon + PB (tvcli serve kept by
+  default).
+- `clean` cleared 76 run cards + market caches + logs, keeping
+  state.json/decisions.
+- `reset-wt` deleted all 5 WunderTrading paper bots (stop → verify →
+  delete; two deletes hit a transient WT 403 while positions were still
+  closing — now retried with backoff; both deleted on retry) and cleared
+  the daemon's phantom bot state. Real-money profiles/bots never touched.
+- `reset --keep-decisions --start` wiped runtime state (backup under
+  `state/backups/`), preserved the 14-decision learning journal, and
+  restarted the full stack — the fresh daemon then re-deployed bots
+  autonomously within minutes (CHIP, XMR observed).
+
+Tests: 201 offline, all passing (new: dev-action console endpoints, archive
+merge, observe-outage rotation skip, pidguard, stopped_with_unrealized).
