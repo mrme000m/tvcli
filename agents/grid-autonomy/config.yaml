@@ -8,7 +8,10 @@ portfolio:
     hyperliquid: { balance_usd: 300.0, market: perps, grids: [Long, Short, Neutral] }
     binance:     { balance_usd: 200.0, market: spot,  grids: [Long, Neutral] }  # spot-like sleeve: NO Short (kept even on the futures paper stand-in)
   slots_min: 3
-  slots_max: 5
+  slots_max: 5                  # dynamic ceiling — a venue slot opens BEYOND
+                                # slots_default when a token scores ≥
+                                # screen.open_slot_min_score and deployable
+                                # capital is spare (daemon open_slot)
   slots_default: 4
   max_alloc_per_slot: 0.5      # worst-case commitment ≤ 50% of slot
   cash_buffer_pct: 0.15        # portfolio deployable ceiling = 85% of 500
@@ -18,10 +21,14 @@ screen:
   interval: 1h
   confirm_interval: 4h         # direction must agree on 1h + 4h for trend grids
   limit: 300
-  min_volume_usd: 5000000
+  min_volume_usd: 2000000      # moderately significant: ≥ $2M 24h quote volume
+  universe_max_symbols: 100    # scan breadth per venue (top-N by 24h volume) —
+                               # the EV + tvcli passes pick winners, not a
+                               # hand-curated list
   top_per_preset_venue: 30
   confluence_top: 10
-  confluence_skills: [squeeze, choppiness, mtf-confluence]
+  confluence_skills: [squeeze, choppiness, mtf-confluence, dvi]  # tvcli /hunt
+  open_slot_min_score: 40.0    # new-venue-slot floor (see portfolio.slots_max)
   rescreen_minutes: 60         # daemon re-runs merge+swarm every 60m
 
 grid_defaults:                 # passed through to grid_config.py

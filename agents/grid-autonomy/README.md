@@ -61,9 +61,20 @@ Accuracy note: every fact below is verified against the code at
    spot (venue fetches are serial, not threaded): public OHLCV → regime classification (`market_regime`),
    preset scoring (`universe_screen`, presets `grid-neutral` +
    `grid-directional`), real Binance book-ticker spreads
-   (`execution/spreads.py`), optional tvcli `/hunt` confluence (squeeze +
-   choppiness + mtf-confluence), and 4h directional re-confirmation for
+   (`execution/spreads.py`), and 4h directional re-confirmation for
    trend candidates (full ticker — `ZKPUSDT`, not `ZKP` — on Binance).
+   The scan is **broad by design**: every moderately significant token
+   (≥ `screen.min_volume_usd`, top `screen.universe_max_symbols` by 24h
+   volume per venue) is screened, so the fitness passes below — not a
+   hand-curated list — decide what gets a slot.
+   The tvcli server (`server.tvcli`, :8765) computes a **numeric fitness
+   read** per shortlisted token via `/hunt` (`screen.confluence_skills`:
+   squeeze + choppiness + mtf-confluence + dvi): "moves large" (ATR% ≥ 1.5,
+   mtf volRatio ≥ 1.5) and "moves fast" (squeeze released with momentum,
+   ≥ 6-bar squeeze coil, DVI trend agreeing with the 1h regime) bonuses,
+   CHOP-based harvestability, direction agreement, RSI-overheated penalty —
+   bonus capped at +6, fail-soft when tvcli is down (`tvcli_fitness` in
+   `screen/merge.py`, recorded per candidate as `tvcli_fit`).
    Selection hygiene layers on top: USD-stable bases (RLUSD, USD1, USDE,
    PYUSD, …) never enter the universe, a global **dead-tape floor** drops
    candidates with ATR < 0.25% (below every preset's harvestable range,
@@ -74,7 +85,11 @@ Accuracy note: every fact below is verified against the code at
    = fills × (step − round-trip fees)) and adjusts the ranking: dead tapes
    (< 0.1%/day net harvest) lose 10 points, oscillators gain up to +3, so
    the fleet deploys tokens that actually oscillate through their grid.
-   Output: ranked candidates with `score_final` + EV fields.
+   Output: ranked candidates with `score_final`, `tvcli_fit` + EV fields.
+   The per-venue universe fetches retry with backoff and fail **soft per
+   venue** (`retry_urlopen_json`, `screen_errors` in the report): a
+   transient Binance/Hyperliquid API blip degrades that venue to zero
+   candidates instead of killing the whole screen cycle.
 2. **Deliberate.** `agents/swarm.py` runs a TradingAgents-style pipeline per
    candidate — bull open → bear open → bull/bear rebuttals → facilitator →
    seeking/neutral/conservative risk team — via `llm/provider.py`
@@ -214,7 +229,7 @@ whether the daemon actually reads it:
 | `portfolio.venues.binance.balance_usd` | Binance sleeve (`200.0`). | yes |
 | `portfolio.venues.*.market` | `perps` / `spot` label. | doc only |
 | `portfolio.venues.*.grids` | Allowed grid types per venue. | doc only |
-| `portfolio.slots_min` / `slots_max` | 3 / 5. | doc only (bounds) |
+| `portfolio.slots_min` / `slots_max` | 3 / 5 — `slots_max` is the dynamic ceiling: a venue slot opens beyond `slots_default` when a token scores ≥ `screen.open_slot_min_score` and deployable capital is spare. | `slots_max` yes / `slots_min` doc only |
 | `portfolio.slots_default` | Number of slots (`4`). | yes |
 | `portfolio.max_alloc_per_slot` | Per-slot worst-case commitment cap (`0.5`). | yes |
 | `portfolio.cash_buffer_pct` | Deployable ceiling = total × (1 − buffer) = 85%. | yes |
@@ -222,10 +237,12 @@ whether the daemon actually reads it:
 | `screen.interval` | Screen candle interval `1h`. | doc only (merge.py default) |
 | `screen.confirm_interval` | 4h directional confirmation. | yes (merge.py reads it) |
 | `screen.limit` | Candle limit `300`. | doc only (merge.py default) |
-| `screen.min_volume_usd` | 24h quote-volume floor `5000000`. | doc only (merge.py default) |
-| `screen.top_per_preset_venue` | Shortlist size per preset/venue. | doc only |
-| `screen.confluence_top` | Candidates sent to tvcli `/hunt` (`10`). | doc only (daemon default) |
-| `screen.confluence_skills` | `squeeze,choppiness,mtf-confluence`. | doc only (merge.py constant) |
+| `screen.min_volume_usd` | 24h quote-volume floor (`2000000`) — moderately significant tokens enter the scan. | yes (daemon → merge.py) |
+| `screen.universe_max_symbols` | Universe cap per venue (`100`, top-N by 24h volume). | yes (daemon → merge.py) |
+| `screen.top_per_preset_venue` | Screen width passed to merge (`30`). | yes (daemon → merge.py) |
+| `screen.confluence_top` | Candidates sent to tvcli `/hunt` (`10`). | yes (daemon → merge.py) |
+| `screen.confluence_skills` | `squeeze,choppiness,mtf-confluence,dvi` — tvcli fitness hunts. | yes (merge.py reads it) |
+| `screen.open_slot_min_score` | New-venue-slot floor (`40.0`). | yes (daemon `open_slot` gate) |
 | `screen.rescreen_minutes` | Rescreen cadence (`60`). | yes |
 | `grid_defaults.band_atr` | ATR-band width `3.0`. | doc only (`grid_args` default) |
 | `grid_defaults.step_factor` | ATR→step multiplier `0.5`. | doc only (`grid_args` default) |

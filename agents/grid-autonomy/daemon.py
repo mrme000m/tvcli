@@ -331,8 +331,13 @@ def _pidguard_ok():
     try:
         os.kill(other, 0)
         alive = True
+    except ProcessLookupError:
+        alive = False  # no such pid — the guard file is stale
     except OSError:
-        alive = False
+        # EPERM probing a foreign-uid pid (e.g. pid 1 on macOS): we cannot
+        # disprove liveness, so fail closed — a live daemon must never be
+        # doubled, and a stale file is cheaper than a double-writer
+        alive = True
     if alive:
         print(f"refusing to start: daemon pid {other} is live "
               f"(state/daemon.pid) — stop it first, or set "
@@ -364,7 +369,17 @@ DEFAULT_CONFIG = {
         "slots_min": 3, "slots_max": 5, "slots_default": 4,
         "max_alloc_per_slot": 0.5, "cash_buffer_pct": 0.15,
     },
-    "screen": {"rescreen_minutes": 60, "confirm_interval": "4h"},
+    "screen": {"rescreen_minutes": 60, "confirm_interval": "4h",
+               # scan breadth: all moderately significant tokens are screened
+               # (top-N by 24h volume) so the EV + tvcli passes — not a
+               # hand-picked list — decide what gets a slot
+               "min_volume_usd": 2_000_000, "universe_max_symbols": 100,
+               "top_per_preset_venue": 30, "confluence_top": 10,
+               "confluence_skills": ["squeeze", "choppiness",
+                                     "mtf-confluence", "dvi"],
+               # a venue slot opens for a new candidate only at/above this
+               # score (and only with spare deployable capital)
+               "open_slot_min_score": 40.0},
     "watch": {"interval_s": 60, "adjust_steps_threshold": 2.0,
               # browser watchdog: every WunderTrading session-API call rides
               # the headful CloakBrowser on CDP — when it dies the daemon is
@@ -472,9 +487,14 @@ def should_rotate(candidate, incumbent, policy, observed, now_epoch,
     return True, reasons + [f"Δscore {dscore:.1f}"]
 
 
-def run_merge(top=30, confluence_top=10, no_confluence=False):
+def run_merge(top=30, confluence_top=10, no_confluence=False,
+              min_volume=None, max_symbols=None):
     cmd = [sys.executable, os.path.join(HERE, "screen", "merge.py"),
            "--top", str(top), "--confluence-top", str(confluence_top), "--json"]
+    if min_volume:
+        cmd += ["--min-volume", str(min_volume)]
+    if max_symbols:
+        cmd += ["--max-symbols", str(max_symbols)]
     if no_confluence:
         cmd.append("--no-confluence")
     p = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
@@ -992,6 +1012,55 @@ class Daemon:
         return slot_plan(p["total_usd"], venues, p["slots_default"],
                          p["max_alloc_per_slot"], p["cash_buffer_pct"])
 
+    def open_slot(self, venue):
+        """Append a new slot for `venue` — the venue's slots are all occupied
+        but a profitable candidate is waiting and deployable capital is spare.
+
+        Gates (fail-closed — any refusal leaves the slot count unchanged):
+          1. total slots < portfolio.slots_max (config, default 5)
+          2. venue is funded in the portfolio
+          3. spare deployable capital ≥ the new slot's worst-case commitment
+        Returns (slot, None) on open, (None, reason) on refusal. Existing
+        same-venue slot budgets are re-normalized to the new split so every
+        future deploy into that venue sizes from one per-slot budget.
+        """
+        p = self.config["portfolio"]
+        slots_max = int(p.get("slots_max", 5))
+        cur = list(self.state["slots"])
+        if len(cur) >= slots_max:
+            return None, f"already at slots_max {slots_max}"
+        venues = {k: v.get("balance_usd", 0) or 0
+                  for k, v in p["venues"].items()}
+        sleeve = venues.get(venue, 0)
+        if sleeve <= 0:
+            return None, f"venue {venue} not funded"
+        ceiling = self.plan_slots()["deployable_ceiling"]
+        committed = sum(self.state["committed"].values())
+        venue_slots = 1 + sum(1 for s in cur if s["venue"] == venue)
+        balance = round(sleeve / venue_slots, 2)
+        max_commitment = round(balance * float(p["max_alloc_per_slot"]), 2)
+        spare = ceiling - committed
+        if spare < max_commitment - 1e-9:
+            return None, (f"spare ${spare:.2f} < new-slot worst-case "
+                          f"${max_commitment:.2f}")
+        new_slot = {"slot": max(s["slot"] for s in cur) + 1, "venue": venue,
+                    "balance": balance, "max_commitment": max_commitment,
+                    "venue_sleeve": sleeve, "venue_slots": venue_slots}
+        # re-normalize the venue's existing slot budgets to the new split so
+        # a later deploy into a freed slot sizes like one into the new slot
+        for s in cur:
+            if s["venue"] == venue:
+                s["balance"] = balance
+                s["max_commitment"] = max_commitment
+                s["venue_slots"] = venue_slots
+        self.state["slots"] = cur + [new_slot]
+        log(self.state, {"kind": "slot-open", "slot": new_slot["slot"],
+                         "msg": (f"{venue} slot {new_slot['slot']} opened "
+                                 f"(${balance:.0f} budget, worst-case "
+                                 f"${max_commitment:.0f}); spare ${spare:.0f} "
+                                 f"of ${ceiling:.0f} deployable")})
+        return new_slot, None
+
     # ── plan + commit one candidate (shared by rescreen and rotation) ──
     def plan_candidate(self, cand, slot, dry_run, is_rotation=False,
                        incumbent=None, cooldown_ok=True):
@@ -1364,7 +1433,8 @@ class Daemon:
     def rescreen_cycle(self, dry_run=True, no_confluence=False, max_new=2,
                        top=None):
         actions = []
-        top = top or getattr(self, "top", 30)
+        screen_cfg = self.config.get("screen", {}) or {}
+        top = top or int(screen_cfg.get("top_per_preset_venue", 30))
         # LLM env can heal at any time (dsh web restarted with keys, etc.) —
         # cheap no-op when the env is already complete
         self_heal_env(self.state)
@@ -1408,11 +1478,18 @@ class Daemon:
                                     f"premium={caps.get('premium')} "
                                     f"[premium: {','.join(premium_ex) or 'none'}]"})
         capacity_noted = set()  # one capacity-veto log per venue per cycle
+        slot_open_noted = set()  # one slot-open-veto log per venue per cycle
         plan = self.plan_slots()
         if not self.state["slots"]:
             self.state["slots"] = plan["slots"]
         try:
-            report = run_merge(top=top, no_confluence=no_confluence)
+            report = run_merge(
+                top=top, no_confluence=no_confluence,
+                confluence_top=int(screen_cfg.get("confluence_top", 10)),
+                min_volume=int(screen_cfg.get(
+                    "min_volume_usd", 2_000_000)),
+                max_symbols=int(screen_cfg.get(
+                    "universe_max_symbols", 100)))
         except Exception as exc:
             log(self.state, {"kind": "screen-error", "msg": str(exc)[:200]})
             save_state(self.state)
@@ -1425,11 +1502,13 @@ class Daemon:
         used_slots = {int(s) for s in self.state["active_bots"]}
         active_keys = {f"{b.get('venue')}:{b.get('symbol')}"
                        for b in self.state["active_bots"].values()}
-        free = [s for s in plan["slots"] if s["slot"] not in used_slots]
+        # persisted slots (possibly grown by open_slot) are the source of
+        # truth — plan_slots() only seeds the initial set
+        free = [s for s in self.state["slots"] if s["slot"] not in used_slots]
         deployed = 0
         deliberations, guards, deployments = [], [], []
         for cand in cands:
-            if deployed >= max_new or not free:
+            if deployed >= max_new:
                 break
             key = f"{cand['venue']}:{cand['symbol']}"
             if key in active_keys:
@@ -1437,9 +1516,6 @@ class Daemon:
             if key in self.state["cooldowns_until"] and \
                     time.time() < self.state["cooldowns_until"][key]:
                 continue
-            slot = next((s for s in free if s["venue"] == cand["venue"]), None)
-            if slot is None:
-                continue  # no free slot on this venue
             blocked = self.venue_capacity_block(cand, capacity)
             if blocked:
                 if cand["venue"] not in capacity_noted:
@@ -1447,6 +1523,23 @@ class Daemon:
                     log(self.state, {"kind": "capacity-veto",
                                      "msg": f"{key}: {blocked}"})
                 continue
+            slot = next((s for s in free if s["venue"] == cand["venue"]), None)
+            if slot is None:
+                # every slot on this venue is occupied — open another one
+                # when the token is strong enough and deployable capital is
+                # spare (open_slot is fail-closed; a refusal costs nothing)
+                floor = float(screen_cfg.get("open_slot_min_score", 40.0))
+                if (cand.get("score_final") or 0) < floor:
+                    continue  # below the open-slot floor
+                if dry_run:
+                    continue  # dry runs never grow the persisted slot plan
+                slot, open_err = self.open_slot(cand["venue"])
+                if slot is None:
+                    if cand["venue"] not in slot_open_noted:
+                        slot_open_noted.add(cand["venue"])
+                        log(self.state, {"kind": "slot-open-veto",
+                                         "msg": f"{key}: {open_err}"})
+                    continue
             action, ticket, payloads, brief = self.plan_candidate(cand, slot, dry_run)
             deliberations.append({
                 "symbol": cand["symbol"], "venue": cand["venue"],
@@ -1475,7 +1568,8 @@ class Daemon:
                 "multiplier": action.get("size_multiplier"),
                 "paper": dry_run,
             })
-            free.remove(slot)
+            if slot in free:
+                free.remove(slot)
             deployed += 1
             active_keys.add(key)  # a later duplicate candidate must not re-deploy
 
@@ -1773,8 +1867,8 @@ class Daemon:
             return False
         key = f"{incumbent.get('venue')}:{incumbent.get('symbol')}"
         cooldown_ok = time.time() >= self.state["cooldowns_until"].get(key, 0)
-        plan = self.plan_slots()
-        slot = next((s for s in plan["slots"] if s["slot"] == int(slot_key)), None)
+        slot = next((s for s in self.state["slots"]
+                     if s["slot"] == int(slot_key)), None)
         if slot is None:
             log(self.state, {"kind": "rotation-veto", "slot": slot_key,
                              "msg": "slot missing from plan"})
@@ -1917,9 +2011,10 @@ class Daemon:
         bots = grid_status_safe()
         if not bots:
             return
-        plan = self.plan_slots()
+        if not self.state.get("slots"):
+            self.state["slots"] = self.plan_slots()["slots"]
         occupied = set(self.state["active_bots"])
-        free = [s for s in plan["slots"]
+        free = [s for s in self.state["slots"]
                 if str(s["slot"]) not in occupied]
         # never double-track: skip bots already known to state (by code) and
         # symbols already active in another slot (duplicate deploy)
