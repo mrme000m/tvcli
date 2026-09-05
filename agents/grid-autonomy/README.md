@@ -108,7 +108,14 @@ Accuracy note: every fact below is verified against the code at
     `Daemon.venue_capacity_block()`) skips venues whose exchange tier is at
     its active-grid-bot cap (free plan: HYPERLIQUID_SWAP is premium/200 via
     WT's 0.035% builder-fee arrangement, everything else allows one active
-    bot) with a `capacity-veto` journal entry. `execution/grid_adapter.py`
+    bot) with a `capacity-veto` journal entry. When a venue's slots are all
+    occupied, `Daemon.open_slot` opens another one — for Hyperliquid
+    (default `portfolio.dynamic_slot_venues`) in **dynamic mode**: as long
+    as the candidate clears `screen.open_slot_min_score` and spare
+    deployable capital covers the new slot's worst case (capital is the
+    ceiling, not a slot count; `slots_hard_max` is the runaway guard,
+    `min_slot_usd` the viability floor); for every other venue the sleeve
+    re-splits under the fixed `slots_max` cap. `execution/grid_adapter.py`
     then turns the ticket into the verified
    `grid_bots/upsert` payload: ATR-band channel, ATR-derived
    profit-per-grid, geometric grid lines, USD-denominated per-trade
@@ -229,7 +236,10 @@ whether the daemon actually reads it:
 | `portfolio.venues.binance.balance_usd` | Binance sleeve (`200.0`). Same restart reconciliation as the HL sleeve. | yes |
 | `portfolio.venues.*.market` | `perps` / `spot` label. | doc only |
 | `portfolio.venues.*.grids` | Allowed grid types per venue. | doc only |
-| `portfolio.slots_min` / `slots_max` | 3 / 6 — `slots_max` is the dynamic ceiling: a venue slot opens beyond `slots_default` when a token scores ≥ `screen.open_slot_min_score` and deployable capital is spare. | `slots_max` yes / `slots_min` doc only |
+| `portfolio.slots_min` / `slots_max` | 3 / 6 — `slots_max` caps slots for FIXED venues only (everything not in `dynamic_slot_venues`). | `slots_max` yes / `slots_min` doc only |
+| `portfolio.dynamic_slot_venues` | `[hyperliquid]` — DEFAULT dynamic slot mode: slots open as long as a token scores ≥ `screen.open_slot_min_score` AND spare deployable capital covers the new slot's worst case. Capital is the ceiling, not a slot count. | yes (daemon `open_slot`) |
+| `portfolio.slots_hard_max` | 16 — absolute runaway guard for dynamic venues. | yes |
+| `portfolio.min_slot_usd` | 100.0 — per-slot budget floor for dynamic opens ($10/line exchange floor × ≥5 lines at 50% worst-case). The new slot's budget is `max(sleeve/(n+1), min_slot_usd)`; existing slots are never shrunk. | yes |
 | `portfolio.slots_default` | Number of slots (`4`). | yes |
 | `portfolio.max_alloc_per_slot` | Per-slot worst-case commitment cap (`0.5`). | yes |
 | `portfolio.cash_buffer_pct` | Deployable ceiling = total × (1 − buffer) = 85%. | yes |
@@ -584,13 +594,13 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-271 tests as of 2026-09-05, all offline (network/browser calls are mocked
+277 tests as of 2026-09-05, all offline (network/browser calls are mocked
 or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
 also disables the PocketBase write-through so tests can never pollute the
 live side channel). Expected output:
 
 ```
-Ran 271 tests in …
+Ran 277 tests in …
 OK
 ```
 

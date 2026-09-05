@@ -138,8 +138,37 @@ class ManageHarness(unittest.TestCase):
             self.addCleanup(patcher.stop)
 
     def make_daemon(self):
+        """Daemon on a FIXED, deterministic portfolio.
+
+        The live config.yaml is operator-editable at any time (total,
+        sleeves, slots_max and dynamic_slot_venues have all changed
+        mid-session before) — slot/budget assertions must not depend on it.
+        Default pin = the classic fixed-mode portfolio (500 = 300 HL +
+        200 BN, slots_max 5, dynamic OFF); dynamic-mode tests opt in."""
         d = daemon.Daemon()
+        d.config["portfolio"]["total_usd"] = 500.0
+        d.config["portfolio"]["venues"]["hyperliquid"]["balance_usd"] = 300.0
+        d.config["portfolio"]["venues"]["binance"]["balance_usd"] = 200.0
+        d.config["portfolio"]["slots_max"] = 5
+        d.config["portfolio"]["slots_default"] = 4
+        d.config["portfolio"]["dynamic_slot_venues"] = []
         d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
+        return d
+
+    def make_dynamic_daemon(self):
+        """Daemon with hyperliquid in dynamic slot mode (the shipped default
+        config) — used by TestDynamicSlotOpen."""
+        d = daemon.Daemon()
+        d.config["portfolio"]["total_usd"] = 600.0
+        d.config["portfolio"]["venues"]["hyperliquid"]["balance_usd"] = 400.0
+        d.config["portfolio"]["venues"]["binance"]["balance_usd"] = 200.0
+        d.config["portfolio"]["slots_max"] = 6
+        d.config["portfolio"]["slots_default"] = 4
+        d.config["portfolio"]["slots_hard_max"] = 16
+        d.config["portfolio"]["dynamic_slot_venues"] = ["hyperliquid"]
+        d.config["portfolio"]["min_slot_usd"] = 100.0
+        d.state["slots"] = slot_plan(
+            600.0, {"hyperliquid": 400.0, "binance": 200.0}, 4)["slots"]
         return d
 
 

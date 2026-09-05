@@ -367,6 +367,14 @@ DEFAULT_CONFIG = {
         "venues": {"hyperliquid": {"balance_usd": 400.0},
                    "binance": {"balance_usd": 200.0}},
         "slots_min": 3, "slots_max": 6, "slots_default": 4,
+        # dynamic slot mode (default for hyperliquid, the premium exchange
+        # tier with upsert-init capacity 200): slots open while a profitable
+        # candidate waits (screen.open_slot_min_score) AND deployable capital
+        # is spare — capital is the ceiling, not a slot count.
+        # slots_hard_max is the absolute runaway guard for dynamic venues;
+        # slots_max caps FIXED venues (everything not in dynamic_slot_venues).
+        "slots_hard_max": 16, "dynamic_slot_venues": ["hyperliquid"],
+        "min_slot_usd": 100.0,
         "max_alloc_per_slot": 0.5, "cash_buffer_pct": 0.15,
     },
     "screen": {"rescreen_minutes": 60, "confirm_interval": "4h",
@@ -1016,19 +1024,40 @@ class Daemon:
         """Append a new slot for `venue` — the venue's slots are all occupied
         but a profitable candidate is waiting and deployable capital is spare.
 
+        Two modes (portfolio.dynamic_slot_venues, default [hyperliquid]):
+
+        dynamic  slots open as long as there is a profitable opportunity
+                 (the caller already enforced screen.open_slot_min_score)
+                 AND enough capital left. Capital is the ceiling, not a
+                 slot count: the only count bound is the absolute runaway
+                 guard portfolio.slots_hard_max. The new slot's budget is
+                 max(sleeve/(n+1), portfolio.min_slot_usd) — never below the
+                 exchange floor a viable grid needs ($10/line × ≥5 lines at
+                 50% worst-case = $100). Existing slots KEEP their budgets:
+                 shrinking a running slot below the exchange floor would
+                 veto every future re-deploy into it. Opened-but-unfilled
+                 slots RESERVE their worst-case so a burst of opens cannot
+                 over-commit the fund.
+
+        fixed     (every venue not listed) the sleeve is re-split equally
+                 across the venue's slots (existing budgets re-normalized),
+                 and the total slot count is capped by portfolio.slots_max.
+
         Gates (fail-closed — any refusal leaves the slot count unchanged):
-          1. total slots < portfolio.slots_max (config, default 6)
+          1. total slots < slots_hard_max (dynamic) / slots_max (fixed)
           2. venue is funded in the portfolio
           3. spare deployable capital ≥ the new slot's worst-case commitment
-        Returns (slot, None) on open, (None, reason) on refusal. Existing
-        same-venue slot budgets are re-normalized to the new split so every
-        future deploy into that venue sizes from one per-slot budget.
+        Returns (slot, None) on open, (None, reason) on refusal.
         """
         p = self.config["portfolio"]
-        slots_max = int(p.get("slots_max", 5))
+        dynamic = venue in (p.get("dynamic_slot_venues") or [])
+        min_slot_usd = float(p.get("min_slot_usd", 100.0))
+        cap = int(p.get("slots_hard_max", 16) if dynamic
+                  else p.get("slots_max", 5))
         cur = list(self.state["slots"])
-        if len(cur) >= slots_max:
-            return None, f"already at slots_max {slots_max}"
+        if len(cur) >= cap:
+            label = "slots_hard_max" if dynamic else "slots_max"
+            return None, f"already at {label} {cap}"
         venues = {k: v.get("balance_usd", 0) or 0
                   for k, v in p["venues"].items()}
         sleeve = venues.get(venue, 0)
@@ -1036,29 +1065,42 @@ class Daemon:
             return None, f"venue {venue} not funded"
         ceiling = self.plan_slots()["deployable_ceiling"]
         committed = sum(self.state["committed"].values())
+        # opened-but-unfilled slots already hold a claim on the ceiling —
+        # count their worst-case as reserved so a burst of dynamic opens
+        # cannot promise the same capital twice
+        used = {int(s) for s in self.state["active_bots"]}
+        reserved = sum((s.get("max_commitment") or 0)
+                       for s in cur if s["slot"] not in used)
+        spare = ceiling - committed - reserved
         venue_slots = 1 + sum(1 for s in cur if s["venue"] == venue)
-        balance = round(sleeve / venue_slots, 2)
-        max_commitment = round(balance * float(p["max_alloc_per_slot"]), 2)
-        spare = ceiling - committed
+        max_alloc = float(p.get("max_alloc_per_slot", 0.5))
+        if dynamic:
+            balance = round(max(sleeve / venue_slots, min_slot_usd), 2)
+        else:
+            balance = round(sleeve / venue_slots, 2)
+        max_commitment = round(balance * max_alloc, 2)
         if spare < max_commitment - 1e-9:
             return None, (f"spare ${spare:.2f} < new-slot worst-case "
                           f"${max_commitment:.2f}")
         new_slot = {"slot": max(s["slot"] for s in cur) + 1, "venue": venue,
                     "balance": balance, "max_commitment": max_commitment,
-                    "venue_sleeve": sleeve, "venue_slots": venue_slots}
-        # re-normalize the venue's existing slot budgets to the new split so
-        # a later deploy into a freed slot sizes like one into the new slot
-        for s in cur:
-            if s["venue"] == venue:
-                s["balance"] = balance
-                s["max_commitment"] = max_commitment
-                s["venue_slots"] = venue_slots
+                    "venue_sleeve": sleeve, "venue_slots": venue_slots,
+                    "dynamic": dynamic}
+        if not dynamic:
+            # re-normalize the venue's existing slot budgets to the new split
+            # so a later deploy into a freed slot sizes like one into the new
+            for s in cur:
+                if s["venue"] == venue:
+                    s["balance"] = balance
+                    s["max_commitment"] = max_commitment
+                    s["venue_slots"] = venue_slots
         self.state["slots"] = cur + [new_slot]
         log(self.state, {"kind": "slot-open", "slot": new_slot["slot"],
                          "msg": (f"{venue} slot {new_slot['slot']} opened "
                                  f"(${balance:.0f} budget, worst-case "
                                  f"${max_commitment:.0f}); spare ${spare:.0f} "
-                                 f"of ${ceiling:.0f} deployable")})
+                                 f"of ${ceiling:.0f} deployable"
+                                 + (" (dynamic)" if dynamic else ""))})
         return new_slot, None
 
     # ── plan + commit one candidate (shared by rescreen and rotation) ──
@@ -2166,7 +2208,10 @@ class Daemon:
         (the console-vs-backend drift a restart was supposed to close).
         Keep the persisted slot COUNT and venue assignment (that is the
         runtime truth — which slots exist), only recompute each venue's
-        per-slot budget: scaled sleeve / venue slot count. Never raises.
+        per-slot budget: scaled sleeve / venue slot count (dynamic venues
+        floor at portfolio.min_slot_usd — a dynamic slot opened beyond the
+        sleeve must not be shrunk back below the exchange floor on restart).
+        Never raises.
         """
         try:
             p = self.config["portfolio"]
@@ -2178,6 +2223,8 @@ class Daemon:
             if not slots or total <= 0 or vsum <= 0:
                 return
             scale = total / vsum
+            dynamic = set(p.get("dynamic_slot_venues") or [])
+            min_slot_usd = float(p.get("min_slot_usd", 100.0))
             counts = {}
             for s in slots:
                 counts[s["venue"]] = counts.get(s["venue"], 0) + 1
@@ -2188,7 +2235,10 @@ class Daemon:
                 if n <= 0:
                     continue
                 sleeve = round(venues.get(s["venue"], 0) * scale, 2)
-                balance = round(sleeve / n, 2)
+                if s["venue"] in dynamic:
+                    balance = round(max(sleeve / n, min_slot_usd), 2)
+                else:
+                    balance = round(sleeve / n, 2)
                 commitment = round(balance * max_alloc, 2)
                 if s.get("balance") != balance or \
                         s.get("max_commitment") != commitment:

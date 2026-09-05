@@ -20,11 +20,15 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
   "moves large & fast" bonuses, cap +6, fail-soft), 4h trend confirmation,
   dead-tape floor + expected-value grid-fill pass. When a venue's slots are
   full but a token scores ≥ `screen.open_slot_min_score` and deployable
-  capital is spare, the daemon opens another slot (up to
-  `portfolio.slots_max`). On every startup, `reconcile_slots` re-normalizes
-  the persisted slot budgets to the current `portfolio.venues`/`total_usd`
-  (journal `slots-reconciled`) so config edits actually reach the fleet on
-  restart.
+  capital is spare, the daemon opens another slot — **Hyperliquid defaults
+  to dynamic mode** (`portfolio.dynamic_slot_venues`): slots open while
+  profitable candidates wait AND capital is left (capital is the ceiling,
+  not a slot count; `slots_hard_max` is the runaway guard, `min_slot_usd`
+  the $100 viability floor — existing slots are never shrunk); other
+  venues re-split the sleeve under the fixed `slots_max`. On every startup,
+  `reconcile_slots` re-normalizes the persisted slot budgets to the
+  current `portfolio.venues`/`total_usd` (journal `slots-reconciled`) so
+  config edits actually reach the fleet on restart.
 - **Deliberate:** `agents/swarm.py` runs bull/bear debate → facilitator →
   3-stance risk team via `llm/provider.py`; rule-based fallback on LLM
   outage (`llm_degraded: true`). `agents/reflect.py` injects k=3 memories.
@@ -198,4 +202,4 @@ re-login in the browser window (or vault `wundertrading-session` →
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 271 offline tests as of 2026-09-05; trust the runner output over any count in docs.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 277 offline tests as of 2026-09-05; trust the runner output over any count in docs.

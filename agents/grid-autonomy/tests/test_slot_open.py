@@ -39,33 +39,28 @@ class TestOpenSlot(ManageHarness):
         self.assertIsNone(err)
         self.assertEqual(slot["slot"], 5)
         self.assertEqual(slot["venue"], "hyperliquid")
-        self.assertEqual(slot["balance"], round(400.0 / 3, 2))   # 400 / 3 HL slots
-        self.assertEqual(slot["max_commitment"],
-                         round(round(400.0 / 3, 2) * 0.5, 2))
+        self.assertEqual(slot["balance"], 100.0)   # 300 / 3 HL slots
+        self.assertEqual(slot["max_commitment"], 50.0)
         self.assertEqual(len(d.state["slots"]), 5)
-        # existing HL slot budgets re-normalized to the 3-way split
+        # fixed mode: existing HL slot budgets re-normalized to the 3-way split
         hl = [s for s in d.state["slots"] if s["venue"] == "hyperliquid"]
-        self.assertEqual([s["balance"] for s in hl],
-                         [round(400.0 / 3, 2)] * 3)
+        self.assertEqual([s["balance"] for s in hl], [100.0, 100.0, 100.0])
         kinds = [e["kind"] for e in d.state["journal"]]
         self.assertIn("slot-open", kinds)
 
     def test_refuses_at_slots_max(self):
         d = self.make_daemon()
-        base = slot_plan(500.0, n_slots=5)["slots"]
-        d.state["slots"] = base + [{
-            "slot": 6, "venue": "hyperliquid", "balance": 100.0,
-            "max_commitment": 50.0, "venue_sleeve": 400.0, "venue_slots": 4}]
+        d.state["slots"] = slot_plan(500.0, n_slots=5)["slots"]
         slot, err = d.open_slot("hyperliquid")
         self.assertIsNone(slot)
         self.assertIn("slots_max", err)
-        self.assertEqual(len(d.state["slots"]), 6)
+        self.assertEqual(len(d.state["slots"]), 5)
 
     def test_refuses_when_capital_tight(self):
         d = self.make_daemon()
-        # committed 510 = the whole deployable ceiling → no spare for the
-        # new slot's worst-case commitment
-        d.state["committed"] = {"1": 260.0, "2": 250.0}
+        # committed 425 = the whole deployable ceiling (500 × 0.85) → no
+        # spare for the new slot's $50 worst-case
+        d.state["committed"] = {"1": 225.0, "2": 200.0}
         slot, err = d.open_slot("hyperliquid")
         self.assertIsNone(slot)
         self.assertIn("spare", err)
@@ -78,6 +73,113 @@ class TestOpenSlot(ManageHarness):
         self.assertIn("not funded", err)
 
 
+class TestDynamicSlotOpen(ManageHarness):
+    """Dynamic slot mode (default for hyperliquid): slots open while a
+    profitable opportunity waits AND deployable capital is spare — capital
+    is the ceiling, not a slot count."""
+
+    def _occupy_all(self, d):
+        for k, s in enumerate(d.state["slots"], 1):
+            d.state["active_bots"][str(s["slot"])] = _active_bot(
+                f"SYM{k}", s["venue"], f"B{k}")
+
+    def _hl_slot(self, n, balance=100.0):
+        return {"slot": n, "venue": "hyperliquid", "balance": balance,
+                "max_commitment": round(balance * 0.5, 2),
+                "venue_sleeve": 400.0, "venue_slots": 4}
+
+    def test_opens_beyond_slots_max_while_capital_lasts(self):
+        d = self.make_dynamic_daemon()
+        # 6 slots (3 HL × 133.33 + 2 BN from the n=5 plan + 1 more HL) =
+        # already AT slots_max 6 — dynamic mode ignores the fixed cap
+        d.state["slots"] = slot_plan(
+            600.0, {"hyperliquid": 400.0, "binance": 200.0}, 5)["slots"] \
+            + [self._hl_slot(6)]
+        self.assertEqual(len(d.state["slots"]), 6)
+        self._occupy_all(d)
+        slot, err = d.open_slot("hyperliquid")
+        self.assertIsNone(err)
+        self.assertEqual(slot["slot"], 7)
+        # budget = max(sleeve/(n+1), min_slot_usd) = max(400/5, 100) = 100
+        self.assertEqual(slot["balance"], 100.0)
+        self.assertEqual(slot["max_commitment"], 50.0)
+        self.assertTrue(slot["dynamic"])
+        # existing slots KEEP their budgets (no shrink below the floor)
+        hl = sorted(s["balance"] for s in d.state["slots"]
+                    if s["venue"] == "hyperliquid")
+        self.assertEqual(hl, [100.0, 100.0, 133.33, 133.33, 133.33])
+
+    def test_capital_is_the_ceiling(self):
+        d = self.make_dynamic_daemon()
+        # seeded 4 slots (3 HL × 133.33, 1 BN × 200), ALL occupied
+        self._occupy_all(d)
+        # ceiling = 600 × 0.85 = 510; committed 200 → spare 310; every new
+        # slot is $100/50 (floor) and reserves $50 once opened:
+        # 310 → 260 → 210 → 160 → 110 → 60 → 10 → REFUSE (10 < 50)
+        d.state["committed"] = {"1": 100.0, "2": 100.0}
+        opened = 0
+        while True:
+            slot, err = d.open_slot("hyperliquid")
+            if slot is None:
+                self.assertIn("spare", err)
+                self.assertIn("$10.00", err)
+                break
+            opened += 1
+            self.assertLessEqual(opened, 10)  # runaway guard for the test
+        self.assertEqual(opened, 6)
+        self.assertLess(len(d.state["slots"]),
+                        d.config["portfolio"]["slots_hard_max"])
+
+    def test_empty_slots_reserve_their_worst_case(self):
+        d = self.make_dynamic_daemon()
+        # ceiling 510. Slot 1 occupied + committed 200; one EMPTY HL slot
+        # already reserves $50 → effective spare 260, not the raw 310
+        d.state["slots"] = [
+            {"slot": 1, "venue": "hyperliquid", "balance": 100.0,
+             "max_commitment": 50.0, "venue_sleeve": 400.0,
+             "venue_slots": 2},
+            {"slot": 2, "venue": "hyperliquid", "balance": 100.0,
+             "max_commitment": 50.0, "venue_sleeve": 400.0,
+             "venue_slots": 2},
+        ]
+        d.state["active_bots"]["1"] = _active_bot("A", "hyperliquid", "B1")
+        d.state["committed"] = {"1": 200.0}
+        # raw spare (without reservation) would be 510 − 200 = 310 — enough
+        # for six $50 worst-cases. With the $50 reservation it is 260:
+        # open1 budget max(400/3,100)=133.33 (worst 66.67) → 193.33, then
+        # four × $50 → 143.33 → 93.33 → 43.33 → REFUSE
+        opened = 0
+        while True:
+            slot, err = d.open_slot("hyperliquid")
+            if slot is None:
+                self.assertIn("spare", err)
+                self.assertIn("$43.33", err)
+                break
+            opened += 1
+            self.assertLessEqual(opened, 10)
+        self.assertEqual(opened, 4)
+
+    def test_respects_slots_hard_max(self):
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 5
+        d.state["slots"] = slot_plan(
+            600.0, {"hyperliquid": 400.0, "binance": 200.0}, 5)["slots"]
+        slot, err = d.open_slot("hyperliquid")
+        self.assertIsNone(slot)
+        self.assertIn("slots_hard_max", err)
+
+    def test_fixed_venue_still_caps_at_slots_max(self):
+        d = self.make_dynamic_daemon()
+        d.state["slots"] = slot_plan(
+            600.0, {"hyperliquid": 400.0, "binance": 200.0}, 5)["slots"] \
+            + [{"slot": 6, "venue": "binance", "balance": 100.0,
+                "max_commitment": 50.0, "venue_sleeve": 200.0,
+                "venue_slots": 3}]
+        slot, err = d.open_slot("binance")  # not in dynamic_slot_venues
+        self.assertIsNone(slot)
+        self.assertIn("slots_max", err)
+
+
 class TestReconcileSlots(ManageHarness):
     """Config edits must reach the persisted slot plan on restart.
 
@@ -85,19 +187,11 @@ class TestReconcileSlots(ManageHarness):
     portfolio.venues + restarting left the fleet sizing from the old
     sleeves while the console config editor showed the new ones
     (the console-vs-backend drift)."""
-    # pin the portfolio to the harness slot plan (500 = 300 HL + 200 BN)
-    # so the tests do not depend on the live config.yaml
-    def _pin(self, d):
-        d.config["portfolio"]["total_usd"] = 500.0
-        d.config["portfolio"]["venues"]["hyperliquid"]["balance_usd"] = 300.0
-        d.config["portfolio"]["venues"]["binance"]["balance_usd"] = 200.0
-        return d
-
     def _slots(self, d):
         return {s["slot"]: s for s in d.state["slots"]}
 
     def test_venue_sleeve_edit_applies_on_restart(self):
-        d = self._pin(self.make_daemon())
+        d = self.make_daemon()
         d.reconcile_slots()
         self.assertNotIn("slots-reconciled",
                          [e["kind"] for e in d.state["journal"]])
@@ -117,13 +211,13 @@ class TestReconcileSlots(ManageHarness):
         self.assertIn("slots-reconciled", kinds)
 
     def test_no_change_no_journal_noise(self):
-        d = self._pin(self.make_daemon())
+        d = self.make_daemon()
         d.reconcile_slots()
         self.assertNotIn("slots-reconciled",
                          [e["kind"] for e in d.state["journal"]])
 
     def test_opened_slot_count_survives_reconcile(self):
-        d = self._pin(self.make_daemon())
+        d = self.make_daemon()
         slot, _ = d.open_slot("hyperliquid")
         self.assertEqual(slot["slot"], 5)
         d.config["portfolio"]["total_usd"] = 800.0
@@ -137,8 +231,23 @@ class TestReconcileSlots(ManageHarness):
         self.assertEqual([s["balance"] for s in d.state["slots"]
                           if s["venue"] == "binance"], [100.0] * 2)
 
+    def test_dynamic_slot_not_shrunk_below_floor_on_restart(self):
+        # a dynamic HL slot opened BEYOND the sleeve (budget $100 while
+        # sleeve/n would be less) must not be re-shrunk by reconcile
+        d = self.make_dynamic_daemon()
+        # sleeve 400 → 3 seeded HL slots at 133.33; grow to 5 HL slots
+        d.open_slot("hyperliquid")   # slot 5: max(400/4, 100) = 100
+        d.open_slot("hyperliquid")   # slot 6: max(400/5, 100) = 100
+        hl = sorted(s["balance"] for s in d.state["slots"]
+                    if s["venue"] == "hyperliquid")
+        self.assertEqual(hl, [100.0, 100.0, 133.33, 133.33, 133.33])
+        d.reconcile_slots()  # sleeve/n = 80 → floor holds $100
+        hl = sorted(s["balance"] for s in d.state["slots"]
+                    if s["venue"] == "hyperliquid")
+        self.assertEqual(hl, [100.0, 100.0, 100.0, 100.0, 100.0])
+
     def test_bad_config_never_raises(self):
-        d = self._pin(self.make_daemon())
+        d = self.make_daemon()
         d.config["portfolio"]["venues"] = {}
         d.reconcile_slots()  # zero funded venues: no-op, no exception
         self.assertEqual(len(d.state["slots"]), 4)
