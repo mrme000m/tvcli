@@ -179,7 +179,12 @@ re-login in the browser window (or vault `wundertrading-session` →
   `demo-cap`/`demo-cap-veto` (WunderTrading's demo/paper grid-bot cap — 5
   on the free plan, learned from the create-400 because no API exposes it;
   at the cap, new deploys + dynamic slot opens are skipped, rotations still
-  work), `rescreen-queued` (manual rescreen feedback),
+  work), `rescreen-queued` (manual rescreen feedback), `loss-veto`
+  (hard user rule — NEVER close a position at a loss to reallocate: any
+  rotation/swap of an incumbent whose mark PnL is negative (or unknown
+  because the observe errored) is vetoed, the incumbent keeps running and
+  works its channel back toward break-even; the optimizer marks such bots
+  non-idle so no arbiter call is spent),
   `browser-restart`,
   `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
   `re-analysis` log once per state transition, not every 60 s sweep.
