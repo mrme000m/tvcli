@@ -770,6 +770,8 @@ payload = server.config_payload()["editable"]
 for path, info in payload.items():
     if not info.get("present"):
         continue
+    if info.get("t") not in ("int", "float"):
+        continue  # bool/str knobs have no numeric range to check
     v = info.get("value")
     try:
         v = float(v)

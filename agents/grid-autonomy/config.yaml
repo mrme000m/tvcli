@@ -41,6 +41,37 @@ screen:
   confluence_skills: [squeeze, choppiness, mtf-confluence, dvi]  # tvcli /hunt
   open_slot_min_score: 40.0    # new-venue-slot floor (see portfolio.slots_max)
   rescreen_minutes: 60         # daemon re-runs merge+swarm every 60m
+                               # (each run also refreshes state.screen_cache —
+                               # the optimizer's challenger board)
+
+optimizer:                     # fast loop BETWEEN rescreens (optimizer.py)
+  enabled: true
+  interval_min: 3              # hunt cadence, clamped to 2–5 by the daemon
+  idle_minutes: 5.0            # absolute no-fill floor before a slot is idle
+  idle_k: 1.0                  # threshold = max(floor, k × expected interval)
+                               # — "inactive" is relative to what the token
+                               # promised (20 fills/day needs ~72 min, not 5)
+  min_hold_min: 20             # fast churn guard (rescreen's 24h floor does
+                               # NOT apply here — that is the point)
+  upgrade_margin: 8.0          # challenger must beat incumbent Δscore ≥ 8 …
+  arbiter_margin: 5.0          # … or ≥ 5 with the LLM arbiter's backing
+  arbiter_min_confidence: 0.7
+  min_swap_interval_min: 30    # per-slot swap rate limit
+  max_swaps_per_hour: 3        # global churn cap
+  max_attempts_per_slot: 2     # challengers tried per idle slot per cycle
+                               # (a sizing/reliability veto on the top pick
+                               # falls through to the next-best challenger
+                               # in the SAME cycle — adaptation, not churn)
+  hunt_top: 8                  # challengers refreshed per cycle
+  hunt_skills: [squeeze, choppiness]   # tvcli /hunt on the FAST tape —
+  hunt_timeframe: 15m          # the hourly 1H pass never sees these bars
+  hunt_bars: 96
+  refresh_limit: 180           # 1h candles per refresh (light vs merge's 300)
+  screen_cache_fresh_min: 120  # older candidate board → wait for rescreen
+  refill_nudge_min: 10         # empty-slot rescreen-nudge rate limit
+  llm_provider: mistral        # arbiter pinned to Mistral (the debate chain
+                               # stays on CF) — falls back to the global
+                               # chain when MISTRAL_API_KEY is absent
 
 grid_defaults:                 # passed through to grid_config.py
   band_atr: 3.0

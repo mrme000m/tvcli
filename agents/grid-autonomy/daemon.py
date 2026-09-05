@@ -4,7 +4,12 @@
 Schedules (from ../config.yaml, merged over built-in defaults):
   health/positions poll   60s        (KILL check, observe_all, stagnation eval,
                                       out-of-channel re-analysis, in-place adjust)
-  rescreen                60m        (merge.py → swarm → guardrails → deploy)
+  optimizer               2–5m       (idle-slot detection → fast challenger
+                                      hunt (tvcli 15m structure) → Mistral
+                                      arbiter → swap via execute_rotation)
+  rescreen                60m        (merge.py → swarm → guardrails → deploy;
+                                      also refreshes state.screen_cache for
+                                      the optimizer's challenger board)
   reliability cron        24h        (bot_trades → archetype_stats → save
                                     → reload → sizing/kill gates)
 
@@ -150,6 +155,17 @@ except Exception:
 
     def write_run_card(cycle_report):
         return None
+
+# ── Slot optimizer (fast 2–5 min capital reallocation, defensive) ─────
+# optimizer.py runs between rescreens: idle-slot detection, fast challenger
+# hunt (tvcli 15m structure), a Mistral-pinned arbiter, and swaps through
+# execute_rotation. Fail-soft import so the daemon runs without it.
+try:
+    from optimizer import SlotOptimizer as _SlotOptimizer  # noqa: E402
+    HAS_OPTIMIZER = True
+except Exception:
+    HAS_OPTIMIZER = False
+    _SlotOptimizer = None
 
 # ── PocketBase write-through side channel (defensive) ─────────────────
 # PocketBase is an optional, best-effort projection: the file layer stays the
@@ -510,6 +526,20 @@ def run_merge(top=30, confluence_top=10, no_confluence=False,
     if p.returncode != 0:
         raise RuntimeError(f"merge failed: {p.stderr[-500:]}")
     return json.loads(p.stdout)
+
+
+# fields the fast optimizer needs from a screen candidate (challenger
+# refresh + plan_candidate compatibility); keeps state.json lean
+SCREEN_CACHE_FIELDS = (
+    "venue", "symbol", "tv_symbol", "regime", "metrics", "evidence",
+    "score", "score_final", "spread_pct", "step", "archetype", "vol_usd",
+    "preset", "flags", "confluence_notes", "confluence_bonus", "tvcli_fit",
+    "expected_fills_per_24h", "harvest_net_pct_24h", "confirm_4h",
+)
+
+
+def screen_cache_entry(cand):
+    return {k: cand.get(k) for k in SCREEN_CACHE_FIELDS}
 
 
 # ── Worker A/C safe wrappers ───────────────────────────────────────────
@@ -884,10 +914,15 @@ class Daemon:
         self.capabilities = {
             "resolve": HAS_RESOLVE, "observe": HAS_OBSERVE,
             "reliability": HAS_RELIABILITY, "reflect": HAS_REFLECT,
+            "optimizer": HAS_OPTIMIZER,
         }
         self._lock = threading.Lock()
         self._rescreen_flag = False
         self._reliability_flag = False
+        self._optimize_flag = False
+        # fast-loop engine (None when optimizer.py failed to import)
+        self.optimizer = _SlotOptimizer(self, journal_fn=log) \
+            if _SlotOptimizer else None
         self._browser_down_since = None
         self._last_browser_restart = 0.0
         self._migrate_archetype_keys()
@@ -1035,6 +1070,46 @@ class Daemon:
             v = self._reliability_flag
             self._reliability_flag = False
             return v
+
+    def queue_optimize(self):
+        """Request an immediate optimizer cycle (ctl POST /optimize)."""
+        with self._lock:
+            self._optimize_flag = True
+        # immediate feedback: a forced cycle otherwise looks like nothing
+        # happened for up to interval_min minutes
+        log(self.state, {"kind": "optimize-queued",
+                         "msg": "manual optimizer cycle requested — runs "
+                                "within ~10 s (idle check + fast hunt)"})
+        save_state(self.state)
+
+    def consume_optimize(self):
+        with self._lock:
+            v = self._optimize_flag
+            self._optimize_flag = False
+            return v
+
+    def optimizer_interval_s(self):
+        """Fast-loop cadence in seconds — optimizer.interval_min clamped to
+        the 2–5 min design band (2 = aggressive hunting, 5 = conservative)."""
+        if not getattr(self, "optimizer", None):
+            return None
+        cfg = (self.config.get("optimizer") or {})
+        if not cfg.get("enabled", True):
+            return None
+        try:
+            minutes = float(cfg.get("interval_min", 3))
+        except (TypeError, ValueError):
+            minutes = 3.0
+        return max(2.0, min(5.0, minutes)) * 60
+
+    def optimizer_status(self):
+        """Snapshot for GET /optimizer (never raises)."""
+        if not self.optimizer:
+            return {"enabled": False, "available": False}
+        try:
+            return self.optimizer.status()
+        except Exception:
+            return {"enabled": False, "available": True, "error": "status"}
 
     def plan_slots(self):
         p = self.config["portfolio"]
@@ -1586,6 +1661,14 @@ class Daemon:
                          "msg": f"{len(cands)} candidates, top=" +
                                 (f"{cands[0]['venue']}:{cands[0]['symbol']} "
                                  f"{cands[0]['score_final']}" if cands else "none")})
+        # candidate board for the fast optimizer (2–5 min cadence): the top
+        # entries with every field a challenger refresh + plan needs. The
+        # optimizer re-scores them on live candles between rescreens.
+        if cands:
+            self.state["screen_cache"] = {
+                "at": time.time(),
+                "candidates": [screen_cache_entry(c) for c in cands[:12]],
+            }
         used_slots = {int(s) for s in self.state["active_bots"]}
         active_keys = {f"{b.get('venue')}:{b.get('symbol')}"
                        for b in self.state["active_bots"].values()}
@@ -2344,9 +2427,11 @@ class Daemon:
         interval_s = float(self.config["watch"]["interval_s"])
         rescreen_s = float(self.config["screen"]["rescreen_minutes"]) * 60
         reliability_s = 24 * 3600
+        optimize_s = self.optimizer_interval_s()
         next_health = time.time() + interval_s
         next_rescreen = time.time() + rescreen_s
         next_reliability = time.time() + reliability_s
+        next_optimize = time.time() + (optimize_s or interval_s)
         while True:
             if os.path.exists(os.path.join(HERE, "KILL")):
                 log(self.state, {"kind": "kill", "msg": "KILL file — halting"})
@@ -2381,6 +2466,17 @@ class Daemon:
                     log(self.state, {"kind": "health-error", "msg": str(exc)[:200],
                              "tb": traceback.format_exc(limit=6)[-1200:]})
                 next_health = time.time() + interval_s
+            # fast loop: idle-slot swaps + challenger hunt between rescreens
+            if optimize_s and (now >= next_optimize or self.consume_optimize()):
+                try:
+                    self.optimizer.run_cycle(dry_run=dry_run)
+                except Exception as exc:
+                    log(self.state, {"kind": "optimizer-error",
+                                     "msg": str(exc)[:200],
+                                     "tb": traceback.format_exc(limit=6)[-1200:]})
+                next_optimize = time.time() + optimize_s
+            elif not optimize_s:
+                self.consume_optimize()  # drain stale requests when disabled
             if now >= next_rescreen:
                 try:
                     self.rescreen_cycle(dry_run=dry_run,
@@ -2392,7 +2488,8 @@ class Daemon:
                 next_rescreen = time.time() + rescreen_s
             self.state["last_cycle"] = utcnow()
             save_state(self.state)
-            nxt = min(next_health, next_rescreen, next_reliability)
+            nxt = min(next_health, next_rescreen, next_reliability,
+                      next_optimize if optimize_s else next_health)
             time.sleep(max(1.0, min(10.0, nxt - time.time())))
 
 

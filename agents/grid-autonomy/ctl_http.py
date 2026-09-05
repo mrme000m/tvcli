@@ -6,8 +6,10 @@ Endpoints (127.0.0.1:<port>, default 8799):
     GET  /status       slots, active bots, capabilities, journal tail
     GET  /reliability  current reliability ledger
     GET  /observe      latest observation snapshot
+    GET  /optimizer    fast-loop status: trackers, last cycle report
     POST /rescreen     queue an immediate rescreen cycle
     POST /reliability  queue an immediate reliability-ledger refresh
+    POST /optimize     queue an immediate optimizer cycle
     POST /rotate       force-rotate a slot (body {"slot": n})
     POST /kill         write the KILL file (daemon halts on next tick)
 
@@ -24,6 +26,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def _utcnow():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _cache_age(st):
+    """Age of the optimizer's candidate board in seconds (None = no cache)."""
+    import time as _time
+    at = (st.get("screen_cache") or {}).get("at")
+    if not at:
+        return None
+    try:
+        return round(_time.time() - float(at), 0)
+    except (TypeError, ValueError):
+        return None
 
 
 class Ctl(BaseHTTPRequestHandler):
@@ -60,6 +74,13 @@ class Ctl(BaseHTTPRequestHandler):
             self._json(200, {"reliability": st["reliability"]})
         elif self.path == "/observe":
             self._json(200, {"observe": st.get("last_observe", {})})
+        elif self.path == "/optimizer":
+            self._json(200, {
+                "optimizer": self.daemon.optimizer_status()
+                if hasattr(self.daemon, "optimizer_status")
+                else {"enabled": False, "available": False},
+                "screen_cache_age_s": _cache_age(st),
+            })
         else:
             self._json(404, {"error": "unknown path"})
 
@@ -72,6 +93,13 @@ class Ctl(BaseHTTPRequestHandler):
             self._json(200, {"queued": True})
         elif self.path == "/reliability":
             self.daemon.queue_reliability()
+            self._json(200, {"queued": True})
+        elif self.path == "/optimize":
+            if not getattr(self.daemon, "optimizer", None):
+                self._json(503, {"error": "optimizer unavailable "
+                                         "(import failed — see journal)"})
+                return
+            self.daemon.queue_optimize()
             self._json(200, {"queued": True})
         elif self.path == "/rotate":
             length = int(self.headers.get("Content-Length", 0))

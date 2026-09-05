@@ -1,12 +1,13 @@
 ---
 name: grid-autonomy
-description: Operate the agents/grid-autonomy daemon — the autonomous grid-trading portfolio manager that screens Hyperliquid perps + Binance spot, deliberates through a TradingAgents-style LLM swarm (CF → Nvidia → OpenRouter with rule fallback), fails closed through 8 guardrails, deploys paper grid bots on WunderTrading, watches them, rotates stagnant incumbents, and writes decisions.jsonl + run cards. Use when asked to start/stop/status/rotate/kill the daemon, read its run cards or decision journal, troubleshoot the loop, or explain its safety rails and paper→live escalation.
+description: Operate the agents/grid-autonomy daemon — the autonomous grid-trading portfolio manager that screens Hyperliquid perps + Binance spot, deliberates through a TradingAgents-style LLM swarm (CF → Nvidia → OpenRouter with rule fallback; Mistral-pinned arbiter on the fast lane), fails closed through 8 guardrails, deploys paper grid bots on WunderTrading, watches them, reallocates idle slots to better tokens every 2–5 min via the slot optimizer (optimizer.py), rotates stagnant incumbents, and writes decisions.jsonl + run cards. Use when asked to start/stop/status/rotate/kill the daemon, read its run cards or decision journal, troubleshoot the loop, or explain its safety rails and paper→live escalation.
 ---
 
 # grid-autonomy — operate the autonomous grid-trading daemon
 
 One daemon (`agents/grid-autonomy/daemon.py`) runs the whole loop:
-**screen → deliberate → guard → deploy → watch → rotate → reflect**. Full
+**screen → deliberate → guard → deploy → watch → optimize → rotate →
+reflect**. Full
 operating manual: `agents/grid-autonomy/README.md`. It executes on
 WunderTrading **paper profiles only** unless an operator lifts the live gate.
 
@@ -45,6 +46,20 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 - **Watch (60s):** `execution/observe.py` reads real status/positions/
   history → per-token stagnation policy (`policy/stagnation.py`) →
   in-place re-centre (6h rate limit) or re-analysis.
+- **Optimize (2–5m):** `optimizer.py` — the fast capital-reallocation loop
+  between rescreens. Idle detection is token-relative (`max(idle_minutes
+  [5], idle_k × expected fill interval)`; stopped/out-of-channel = idle
+  immediately; observe errors fail closed), the challenger hunt re-scores
+  the rescreen's cached board (`state.screen_cache`) on live candles +
+  grid-fill EV and enriches incumbents AND challengers with tvcli `/hunt`
+  structure on **15m**, and a Mistral-pinned arbiter (one LLM call,
+  `optimizer.llm_provider`) can approve swaps inside the relaxed Δscore
+  band — never below the hard floor. Swaps run through `execute_rotation`
+  (full guard/deliberate machinery) under churn bounds: 20-min fast
+  min-hold, 30-min per-slot swap interval, 3 swaps/hour. Free slots + a
+  deployable challenger nudge a rescreen (capital opens stay there).
+  Journal kinds: `optimizer-idle/swap/refill/error`; status via
+  `GET /optimizer`, force a cycle with `POST /optimize`.
 - **Rotate:** stagnant incumbent + challenger Δscore ≥ 5 + cooldown expired
   → stop → verify → delete → cooldown → deploy.
 - **Reflect:** `state/decisions.jsonl` + run cards
@@ -105,7 +120,9 @@ Control plane on `:8799`:
 | GET | `/status` | Slots, active bots, `live_allow`, profiles, journal tail. |
 | GET | `/reliability` | Reliability ledger. |
 | GET | `/observe` | Latest observation snapshot. |
+| GET | `/optimizer` | Fast-loop status: trackers, swap totals, last report, screen-cache age. |
 | POST | `/rescreen` | Queue a rescreen cycle. |
+| POST | `/optimize` | Queue an immediate optimizer cycle (idle check + fast hunt). |
 | POST | `/reliability` | Queue an immediate reliability-ledger refresh. |
 | POST | `/rotate` | Force-rotate: body `{"slot": n}`. |
 | POST | `/kill` | Write KILL file (daemon halts next tick). |
@@ -176,6 +193,7 @@ re-login in the browser window (or vault `wundertrading-session` →
 | Path | Role |
 |------|------|
 | `daemon.py` | Scheduler + orchestrator (Daemon class, the manage loop). |
+| `optimizer.py` | Slot optimizer — fast 2–5 min loop: idle-slot detection, challenger hunt (tvcli 15m), Mistral arbiter, swaps via `execute_rotation`. |
 | `config_lite.py` | Stdlib-only YAML-subset parser. |
 | `ctl_http.py` | HTTP ctl plane on :8799 (health/status/rotate/kill). |
 | `console/` | Mission console on :8798 — web UI (fleet/ladder cards, decision ledger, run cards, reliability, config editor, logs) + JSON API over the same state; whitelisted config.yaml edits and confirm-gated daemon lifecycle ops (`console/README.md`). |

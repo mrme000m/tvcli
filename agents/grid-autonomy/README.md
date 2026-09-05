@@ -134,7 +134,39 @@ Accuracy note: every fact below is verified against the code at
    entries log on state TRANSITION only (first sweep per bot, or when the
    reasons change) — not once per 60 s sweep — so the 200-entry journal
    keeps screen/veto/deploy history visible.
-6. **Rotate.** A stagnant incumbent — or one flagged
+6. **Optimize (2–5m).** `optimizer.py` — the fast capital-reallocation
+   loop between rescreens. Per cycle: **track** per-slot fill activity
+   from the health poll's `fills_24h` (no extra WT calls); **idle**
+   detection is token-relative — a slot is idle when no fill has landed
+   for `max(optimizer.idle_minutes [5], idle_k × the token's own expected
+   fill interval)`, so a 300-fill/day token is flagged after ~5 quiet
+   minutes while a 20-fill/day token needs ~72 (out-of-channel/stopped
+   bots are idle immediately; observe errors are never idle — fail-closed
+   against churn during blindness); **hunt** refreshes the rescreen's
+   cached candidate board (`state.screen_cache`, top 12, persisted every
+   rescreen) on live 1h candles + preset scoring + grid-fill EV, and
+   enriches incumbents AND challengers with tvcli `/hunt` structure on
+   **15m** (`optimizer.hunt_skills`: squeeze + choppiness — the fast tape
+   the hourly 1H pass never sees) using the same `tvcli_fitness` bonus;
+   the **arbiter** (one LLM call, pinned to Mistral via
+   `optimizer.llm_provider` — the debate chain stays on CF) compares
+   structure + EV + idle context and may approve swaps inside the relaxed
+   Δscore band [`arbiter_margin`, `upgrade_margin`) at confidence ≥ 0.7,
+   but never below the hard floor; **swap** executes through
+   `execute_rotation` (`force_rotate` + journaled `optimizer_swap`
+   reason), reusing the full stop → verify → delete → archive → guard →
+   deliberate → deploy machinery. Churn bounds: `min_hold_min` (20 min —
+   the rescreen's 24h floor deliberately does not apply here),
+   `min_swap_interval_min` per slot (30), `max_swaps_per_hour` (3),
+   challenger cooldowns, and a failed swap still pays the rate limit.
+   **Capital**: free slots + a deployable challenger (score ≥
+   `screen.open_slot_min_score`) nudge a rescreen (deploy/open-slot
+   capital logic stays there); every report quantifies idle committed
+   capital. Fail-soft everywhere: no cache → wait for rescreen; tvcli/LLM
+   down → numeric gate stands (`llm_degraded` caveat). Status:
+   `GET /optimizer`, `POST /optimize` on :8799; report in
+   `state.optimizer.last_report` + per-cycle run cards (`optimizer` kind).
+7. **Rotate (60m, on rescreen).** A stagnant incumbent — or one flagged
    out-of-channel/stopped — with an eligible challenger (stagnant
    incumbents additionally need Δscore ≥ 5 hysteresis; the min-hold floor
    and per-token cooldowns always apply) is stopped
@@ -147,13 +179,13 @@ Accuracy note: every fact below is verified against the code at
    ledger, and the true realized PnL sum is recorded on the decision
    outcome. `POST /rotate {"slot": n}` forces a manual rotation (bypasses
    hysteresis and the min-hold floor).
-7. **Reflect.** Every decision lands in `state/decisions.jsonl`; every cycle
+8. **Reflect.** Every decision lands in `state/decisions.jsonl`; every cycle
    writes a run card `state/reports/<UTC-ts>-<kind>.{json,md}` with
    Route/Ground/Deliberate/Guard/Deploy/Observe/Reflect/Caveats sections.
    Adopted bots get a decision record at adoption (`kind: adopted`, regime
    archetype classified) so a later rotation attaches an outcome — the
    memory/reflection loop learns from adopted bots too.
-8. **Reliability (24h).** `daemon.reliability_cycle` exports each active
+9. **Reliability (24h).** `daemon.reliability_cycle` exports each active
    bot's closed round-trips (`execution/reliability_grid.py`), aggregates
    them per archetype into `state/reliability.json` (zero-sample
    archetypes never erase existing entries), and the reloaded ledger gates
@@ -197,6 +229,7 @@ Accuracy note: every fact below is verified against the code at
 |------|------|
 | `dev` | **The single dev script** — start/stop/restart/status/reset/reset-wt/clean/logs for the whole local stack (daemon + console + PocketBase + tvcli serve check). |
 | `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
+| `optimizer.py` | **Slot optimizer** — the fast 2–5 min loop: idle-slot detection (token-relative), challenger hunt (live re-score + tvcli 15m structure), Mistral-pinned arbiter, swaps via `execute_rotation`, capital/refill nudges. |
 | `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
 | `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
 | `console/` | **Mission console** — web UI + additive API on :8798 for observing the fleet (channel-ladder slot cards, decision ledger, run cards, reliability, logs), editing config.yaml (whitelisted, comment-preserving), the LLM-providers panel (set/choose/validate NVIDIA + OpenRouter, order the fallback chain, per-agent provider routing), and dev control (rescreen/rotate/KILL/start/stop/restart). See `console/README.md`. |
@@ -204,7 +237,7 @@ Accuracy note: every fact below is verified against the code at
 | `screen/merge.py` | Parallel HL+Binance screen, confluence, 4h confirm. |
 | `agents/swarm.py` | TradingAgents deliberation swarm (rule fallback). |
 | `agents/reflect.py` | `decisions.jsonl`, memory recall, run cards. |
-| `llm/provider.py` | CF → Nvidia → OpenRouter chain, strict-JSON retries. |
+| `llm/provider.py` | CF → Nvidia → OpenRouter chain, strict-JSON retries, per-role pinning (`named_chain`, `GRID_LLM_ROLES`). |
 | `execution/guardrails.py` | 8 pure fail-closed gates (unit-testable). |
 | `execution/grid_adapter.py` | Ticket → `grid_bots/upsert` payloads + grid create/stop/delete/edit. |
 | `execution/resolve.py` | venue+symbol → `pairCode` via cached all-markets map. |
@@ -220,7 +253,7 @@ Accuracy note: every fact below is verified against the code at
 | `scripts/wt_reset.py` | `dev reset-wt` worker: stop + delete all WunderTrading paper bots (real-money bots never touched). |
 | `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
-| `tests/` | Offline unit tests — 267 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
+| `tests/` | Offline unit tests — 339 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -254,6 +287,24 @@ whether the daemon actually reads it:
 | `screen.confluence_skills` | `squeeze,choppiness,mtf-confluence,dvi` — tvcli fitness hunts. | yes (merge.py reads it) |
 | `screen.open_slot_min_score` | New-venue-slot floor (`40.0`). | yes (daemon `open_slot` gate) |
 | `screen.rescreen_minutes` | Rescreen cadence (`60`). | yes |
+| `optimizer.enabled` | Fast loop on/off (`true`). | yes |
+| `optimizer.interval_min` | Hunt cadence (`3`), clamped to the 2–5 min design band by the daemon. | yes |
+| `optimizer.idle_minutes` | Absolute no-fill floor before a slot is idle (`5.0`). | yes |
+| `optimizer.idle_k` | Threshold = max(floor, k × expected fill interval) (`1.0`) — inactivity is relative to what the token promised. | yes |
+| `optimizer.min_hold_min` | Fast churn guard (`20` min — the rescreen's 24h `policy.min_hold_h` does NOT apply to optimizer swaps). | yes |
+| `optimizer.upgrade_margin` | Challenger must beat the incumbent Δscore ≥ `8.0` numerically. | yes |
+| `optimizer.arbiter_margin` | …or ≥ `5.0` with arbiter backing (confidence ≥ `arbiter_min_confidence`). The arbiter relaxes the bar, never removes it. | yes |
+| `optimizer.arbiter_min_confidence` | `0.7`. | yes |
+| `optimizer.min_swap_interval_min` | Per-slot swap rate limit (`30`). | yes |
+| `optimizer.max_swaps_per_hour` | Global churn cap (`3`). | yes |
+| `optimizer.max_attempts_per_slot` | Challengers tried per idle slot per cycle (`2`) — a sizing/reliability veto on the top pick falls through to the next-best challenger in the same cycle. | yes |
+| `optimizer.hunt_top` | Challengers refreshed per cycle (`8`). | yes |
+| `optimizer.hunt_skills` | tvcli `/hunt` skills on the fast tape (`squeeze, choppiness`). | yes |
+| `optimizer.hunt_timeframe` / `hunt_bars` | `15m` / `96` — the fast tape the hourly 1H pass never sees. | yes |
+| `optimizer.refresh_limit` | 1h candles per refresh (`180`, light vs merge's 300). | yes |
+| `optimizer.screen_cache_fresh_min` | Candidate board older than `120` min → wait for rescreen. | yes |
+| `optimizer.refill_nudge_min` | Empty-slot rescreen-nudge rate limit (`10`). | yes |
+| `optimizer.llm_provider` | Arbiter pinned to `mistral` (falls back to the global chain without `MISTRAL_API_KEY`). | yes |
 | `grid_defaults.band_atr` | ATR-band width `3.0`. | doc only (`grid_args` default) |
 | `grid_defaults.step_factor` | ATR→step multiplier `0.5`. | doc only (`grid_args` default) |
 | `grid_defaults.step_min` / `step_max` | Profit-per-grid clamp `0.1`–`2.0`. | doc only (`grid_args` default) |
@@ -440,7 +491,9 @@ scripts/install_launchd.sh   # installs + loads three per-user LaunchAgents
 | GET | `/status` | slots, active bots, committed, `live_allow`, profiles, plan `capacity` + `account_limits`, `last_cycle`, last 10 journal entries. |
 | GET | `/reliability` | Current reliability ledger. |
 | GET | `/observe` | Latest `observe_all()` snapshot. |
+| GET | `/optimizer` | Fast-loop status: trackers, swap totals, last cycle report, screen-cache age. |
 | POST | `/rescreen` | Queue an immediate rescreen cycle. |
+| POST | `/optimize` | Queue an immediate optimizer cycle (idle check + fast hunt; runs within ~10 s). |
 | POST | `/reliability` | Queue an immediate reliability-ledger refresh (else the 24h cron). |
 | POST | `/rotate` | Force-rotate a slot: body `{"slot": n}`. |
 | POST | `/kill` | Write the KILL file (daemon halts on next tick). |
@@ -531,11 +584,20 @@ Providers are configured by **environment variables** (the `llm:` block in
 | Cloudflare Workers AI (primary) | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_KEY` (or `CLOUDFLARE_AI_TOKEN`); `CF_MODEL` | `@cf/zai-org/glm-5.3` |
 | Nvidia NIM (fallback) | `NVIDIA_API_KEY`; `NVIDIA_MODEL` | `meta/llama-3.3-70b-instruct` |
 | OpenRouter (fallback) | `OPENROUTER_API_KEY`; `OPENROUTER_MODEL` | `arcee-ai/trinity-large-preview:free` |
+| Mistral (arbiter) | `MISTRAL_API_KEY`; `MISTRAL_MODEL` | `mistral-large-latest` |
 
 `GRID_LLM_CHAIN` overrides the fallback order (comma-separated, e.g.
 `cf,nvidia,openrouter`). `start.sh` imports the CF keys from the `dsh web`
 process env; Nvidia/OpenRouter keys must be present in the daemon's own
 environment to be used.
+
+**Mistral runs the fast lane.** The slot optimizer's arbiter is pinned to
+Mistral by default (`optimizer.llm_provider: mistral` via
+`provider.named_chain()`), so the 2–5 min tactical swap verdicts run on a
+different model than the hourly debate chain; without `MISTRAL_API_KEY`
+the arbiter degrades to the numeric-margin rule fallback. Any role can be
+pinned per-agent with `GRID_LLM_ROLES` (JSON, keys include the swarm roles
+and `optimizer`).
 
 Ping the chain:
 

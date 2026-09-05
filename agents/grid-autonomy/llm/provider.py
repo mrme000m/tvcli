@@ -33,8 +33,12 @@ MISTRAL_MODEL_DEFAULT = "mistral-large-latest"
 
 # Stable role keys for per-agent routing (GRID_LLM_ROLES maps role -> provider).
 # Order mirrors the swarm pipeline; unassigned roles follow the global chain.
+# "optimizer" is the fast-cycle slot arbiter (optimizer.py) — pinned to a
+# dedicated provider (default mistral via config llm.optimizer_provider)
+# so the tactical layer runs on a different model than the debate chain.
 ROLE_KEYS = ["bull", "bear", "bull_rebuttal", "bear_rebuttal", "facilitator",
-             "risk_seeking", "risk_neutral", "risk_conservative"]
+             "risk_seeking", "risk_neutral", "risk_conservative",
+             "optimizer"]
 
 TIMEOUT_S = 60
 
@@ -121,7 +125,19 @@ def role_chain(role):
     provider = roles.get(role) if isinstance(roles, dict) else None
     if not provider:
         return None
-    return [(name, fn) for name, fn in _providers() if name == provider]
+    return named_chain(provider)
+
+
+def named_chain(name):
+    """Single-provider chain [(name, fn)] when `name` has credentials, else [].
+
+    Public pinning primitive: callers that want one specific provider (e.g.
+    the optimizer arbiter on mistral) pass the result as chat_json(_chain=…)
+    and fall back to the global chain when it comes back empty.
+    """
+    if not name:
+        return []
+    return [(n, fn) for n, fn in _providers() if n == name]
 
 
 def chat(messages, max_tokens=1024, _chain=None, role=None):
