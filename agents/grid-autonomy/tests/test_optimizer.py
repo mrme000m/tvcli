@@ -227,14 +227,14 @@ class TestSwapGate(unittest.TestCase):
         self.assertFalse(ok)
 
     def test_same_cycle_attempt_not_rate_limited_via_pre_cycle_log(self):
-        # an attempt logged THIS cycle must not block the next challenger
+        # a swap logged THIS cycle must not block the next challenger
         # when the caller passes the pre-cycle log for per-slot limiting
-        this_cycle = [{"slot": "1", "at": NOW - 30}]
+        this_cycle = [{"slot": "1", "at": NOW - 30, "ok": True}]
         pre_cycle = []
         ok, _ = swap_gate(self.INC, self.chal(90), None, CFG,
                           this_cycle, NOW, "1", slot_rate_log=pre_cycle)
         self.assertTrue(ok)
-        # default (no override): the same-cycle attempt blocks, as before
+        # default (no override): the same-cycle success blocks, as before
         ok, reasons = swap_gate(self.INC, self.chal(90), None, CFG,
                                 this_cycle, NOW, "1")
         self.assertFalse(ok)
@@ -246,23 +246,56 @@ class TestSwapGate(unittest.TestCase):
         self.assertFalse(ok)
 
     def test_per_slot_rate_limit(self):
-        log = [{"slot": "1", "at": NOW - 600}]  # swapped 10 min ago (< 30)
+        log = [{"slot": "1", "at": NOW - 600, "ok": True}]  # swapped 10 min ago
         ok, reasons = swap_gate(self.INC, self.chal(90), None, CFG, log,
                                 NOW, "1")
         self.assertFalse(ok)
         self.assertIn("rate limit", reasons[0])
+
+    def test_failed_attempt_does_not_rate_limit_slot(self):
+        # a vetoed attempt 10 min ago rotated NOTHING — the slot stays free
+        # for the next-best challenger (the failing challenger itself is
+        # cooled down by the caller, not the slot)
+        log = [{"slot": "1", "at": NOW - 600, "ok": False}]
+        ok, _ = swap_gate(self.INC, self.chal(90), None, CFG, log,
+                          NOW, "1")
+        self.assertTrue(ok)
 
     def test_other_slot_swap_does_not_block(self):
         log = [{"slot": "2", "at": NOW - 600}]
         ok, _ = swap_gate(self.INC, self.chal(90), None, CFG, log, NOW, "1")
         self.assertTrue(ok)
 
-    def test_global_hourly_cap(self):
-        log = [{"slot": str(i), "at": NOW - 300} for i in (2, 3, 4)]
+    def test_global_hourly_cap_counts_successes_only(self):
+        # 3 failed attempts + 3 ok swaps in the last hour: the swap cap
+        # (max 3 successes/hour) refuses the next attempt, while a fleet
+        # with ONLY failures burns attempts, not the swap cap
+        log = [{"slot": "s9", "at": NOW - 300, "ok": False},
+               {"slot": "s8", "at": NOW - 400, "ok": False},
+               {"slot": "s7", "at": NOW - 500, "ok": False},
+               {"slot": "s6", "at": NOW - 600, "ok": True},
+               {"slot": "s5", "at": NOW - 700, "ok": True},
+               {"slot": "s4", "at": NOW - 800, "ok": True}]
         ok, reasons = swap_gate(self.INC, self.chal(90), None, CFG, log,
                                 NOW, "1")
         self.assertFalse(ok)
         self.assertIn("global rate limit", reasons[0])
+
+    def test_attempt_hourly_cap(self):
+        # failures alone hit max_attempts_per_hour (6) and stop the loop
+        log = [{"slot": f"s{i}", "at": NOW - 300, "ok": False}
+               for i in range(6)]
+        ok, reasons = swap_gate(self.INC, self.chal(90), None, CFG, log,
+                                NOW, "1")
+        self.assertFalse(ok)
+        self.assertIn("attempt rate limit", reasons[0])
+
+    def test_failed_attempts_do_not_exhaust_swap_cap(self):
+        # 3 failures, 0 successes → swap cap untouched → approve
+        log = [{"slot": f"s{i}", "at": NOW - 300, "ok": False}
+               for i in range(3)]
+        ok, _ = swap_gate(self.INC, self.chal(90), None, CFG, log, NOW, "1")
+        self.assertTrue(ok)
 
 
 # ── LLM arbiter ────────────────────────────────────────────────────────
@@ -325,6 +358,30 @@ class TestArbiter(unittest.TestCase):
                 mock.patch.object(optimizer, "HAS_LLM", True):
             llm_arbiter(self.INC, self.CHALS, _chain=pinned)
         self.assertEqual(seen["chain"], pinned)
+
+
+# ── arbiter pick normalization ─────────────────────────────────────────
+
+class TestNormalizePick(unittest.TestCase):
+    CHALS = [{"venue": "hyperliquid", "symbol": "CASHCAT"},
+             {"venue": "hyperliquid", "symbol": "ROBO"}]
+
+    def test_exact(self):
+        self.assertEqual(optimizer.normalize_pick("ROBO", self.CHALS)
+                         ["symbol"], "ROBO")
+
+    def test_venue_decorations(self):
+        # live arbiter behavior 2026-09-05: "CASHCAT_hyperliquid"
+        self.assertEqual(
+            optimizer.normalize_pick("CASHCAT_hyperliquid",
+                                     self.CHALS)["symbol"], "CASHCAT")
+        self.assertEqual(
+            optimizer.normalize_pick("hyperliquid:CASHCAT",
+                                     self.CHALS)["symbol"], "CASHCAT")
+
+    def test_no_match(self):
+        self.assertIsNone(optimizer.normalize_pick("NOPE", self.CHALS))
+        self.assertIsNone(optimizer.normalize_pick(None, self.CHALS))
 
 
 # ── fast hunter ────────────────────────────────────────────────────────
@@ -580,7 +637,7 @@ class TestCycle(unittest.TestCase):
         self.assertTrue(any("floor" in v["reason"] or "band" in v["reason"]
                             for v in rep["vetoes"]))
 
-    def test_failed_rotation_pays_rate_limit_and_clears_marks(self):
+    def test_failed_rotation_cools_challenger_and_clears_marks(self):
         st = cycle_state()
         # a second challenger so both same-cycle attempts are exercised
         st["screen_cache"]["candidates"].append(
@@ -606,11 +663,27 @@ class TestCycle(unittest.TestCase):
         # force_rotate cleared so the hourly rescreen won't re-trigger it
         self.assertNotIn("force_rotate", st["active_bots"]["1"])
         self.assertNotIn("optimizer_swap", st["active_bots"]["1"])
-        # a second immediate cycle is rate-limited, not retried
+        # both failed challengers are cooled down (not the slot)
+        self.assertGreater(st["cooldowns_until"]["hyperliquid:SOL"],
+                           time.time())
+        self.assertGreater(st["cooldowns_until"]["hyperliquid:HYPE"],
+                           time.time())
+        # a second immediate cycle: cooled challengers are ineligible, so
+        # nothing is retried and no arbiter call is spent
         rep2 = opt.run_cycle(dry_run=False)
         self.assertEqual(len(d.swaps), 2)
-        self.assertTrue(any("rate limit" in v["reason"]
+        self.assertTrue(any("no eligible" in v["reason"]
                             for v in rep2["vetoes"]))
+        # …but the SLOT is not rate-limited: a fresh challenger is tried
+        st["screen_cache"]["candidates"].append(
+            {"venue": "hyperliquid", "symbol": "WIF",
+             "tv_symbol": "BINANCE:WIFUSDT", "regime": "neutral",
+             "preset": "grid-neutral", "score": 78.0, "score_final": 78.0,
+             "spread_pct": 0.02, "step": 1.0, "metrics": {},
+             "evidence": {}})
+        rep3 = opt.run_cycle(dry_run=False)
+        self.assertEqual(len(d.swaps), 3)
+        self.assertEqual(d.swaps[-1][-1], "WIF")
 
     def test_machinery_veto_falls_through_to_next_challenger(self):
         st = cycle_state()
@@ -651,6 +724,51 @@ class TestCycle(unittest.TestCase):
                             for v in rep["vetoes"]))
         # stale/empty cache nudges a rescreen
         self.assertGreaterEqual(d.rescreens, 1)
+
+    def test_swap_marker_carries_fresh_incumbent_score(self):
+        # the daemon's rotation guard compares challenger vs the incumbent's
+        # STORED score (potentially an hour old); the optimizer decided on
+        # fresh-vs-fresh scores, so the marker must carry the fresh one —
+        # otherwise a stale-high stored score falsely vetoes the swap
+        st = cycle_state()
+        seen = {}
+
+        class WatchDaemon(FakeDaemon):
+            def execute_rotation(self, slot_key, challenger, dry_run=True):
+                seen["marker"] = dict(
+                    (self.state["active_bots"][str(slot_key)]
+                     .get("optimizer_swap") or {}))
+                return FakeDaemon.execute_rotation(self, slot_key,
+                                                   challenger, dry_run)
+
+        d = WatchDaemon(st)
+        opt = SlotOptimizer(d, journal_fn=lambda st_, ev: None,
+                            hunter=StubHunter())
+        rep = opt.run_cycle(dry_run=False)
+        self.assertEqual(len(rep["swaps"]), 1)
+        self.assertEqual(seen["marker"].get("inc_score_fresh"), 50.0)
+        self.assertTrue(seen["marker"].get("challenger", "")
+                        .endswith(":SOL"))
+
+    def test_arbiter_skipped_when_no_challenger_in_band(self):
+        # incumbent 50, challenger 52 → Δscore 2 < arbiter band 5: the gate
+        # can never approve, so the Mistral call must not even happen
+        st = cycle_state()
+        st["screen_cache"]["candidates"][0]["score_final"] = 52.0
+        st["screen_cache"]["candidates"][0]["score"] = 52.0
+        calls = []
+
+        def spy(inc, chals, _chain=None, provider=None):
+            calls.append(1)
+            return {"approve": True, "confidence": 0.99}, False
+
+        with mock.patch.object(optimizer, "llm_arbiter", spy):
+            d, rep = self.run_cycle(st)
+        self.assertEqual(calls, [])
+        self.assertEqual(d.swaps, [])
+        self.assertTrue(any("arbiter band" in v["reason"]
+                            and "skipped" in v["reason"]
+                            for v in rep["vetoes"]))
 
     def test_stale_cache_flagged(self):
         st = cycle_state()

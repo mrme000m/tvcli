@@ -56,7 +56,10 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
   `optimizer.llm_provider`) can approve swaps inside the relaxed Δscore
   band — never below the hard floor. Swaps run through `execute_rotation`
   (full guard/deliberate machinery) under churn bounds: 20-min fast
-  min-hold, 30-min per-slot swap interval, 3 swaps/hour. Free slots + a
+  min-hold, 30-min per-slot interval between SUCCESSFUL swaps, 3
+  swaps/hour, and a `fail_cooldown_min` (60) cooldown on the specific
+  challenger when a swap attempt fails (the slot stays free; the shared
+  cooldowns_until also keeps the rescreen from retrying the token). Free slots + a
   deployable challenger nudge a rescreen (capital opens stay there).
   Journal kinds: `optimizer-idle/swap/refill/error`; status via
   `GET /optimizer`, force a cycle with `POST /optimize`.

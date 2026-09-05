@@ -157,8 +157,18 @@ Accuracy note: every fact below is verified against the code at
    reason), reusing the full stop → verify → delete → archive → guard →
    deliberate → deploy machinery. Churn bounds: `min_hold_min` (20 min —
    the rescreen's 24h floor deliberately does not apply here),
-   `min_swap_interval_min` per slot (30), `max_swaps_per_hour` (3),
-   challenger cooldowns, and a failed swap still pays the rate limit.
+    `min_swap_interval_min` per slot (30 — counts SUCCESSFUL swaps only; a
+    vetoed attempt rotated nothing, so the slot stays free for the
+    next-best challenger), `max_swaps_per_hour` (3), and challenger
+    cooldowns: a failed swap attempt cools THAT challenger for
+    `fail_cooldown_min` (60) — an undeployable token (e.g. min-notional
+    doesn't fit the slot cap) stops burning an arbiter call + rotation
+    attempt every cycle, and the shared `cooldowns_until` entry keeps the
+    rescreen deploy path from retrying it too. The arbiter is only called
+    when a challenger reaches the Δscore band (below it the gate can never
+    approve, so the Mistral call is skipped), and the swap marker carries
+    the fresh incumbent score (`inc_score_fresh`) so the rotation guard
+    compares like with like instead of the hour-old stored score.
    **Capital**: free slots + a deployable challenger (score ≥
    `screen.open_slot_min_score`) nudge a rescreen (deploy/open-slot
    capital logic stays there); every report quantifies idle committed
@@ -295,8 +305,10 @@ whether the daemon actually reads it:
 | `optimizer.upgrade_margin` | Challenger must beat the incumbent Δscore ≥ `8.0` numerically. | yes |
 | `optimizer.arbiter_margin` | …or ≥ `5.0` with arbiter backing (confidence ≥ `arbiter_min_confidence`). The arbiter relaxes the bar, never removes it. | yes |
 | `optimizer.arbiter_min_confidence` | `0.7`. | yes |
-| `optimizer.min_swap_interval_min` | Per-slot swap rate limit (`30`). | yes |
-| `optimizer.max_swaps_per_hour` | Global churn cap (`3`). | yes |
+| `optimizer.min_swap_interval_min` | Per-slot rate limit on successful swaps (`30`). | yes |
+| `optimizer.fail_cooldown_min` | Cooldown for a challenger whose swap attempt failed (`60`). | yes |
+| `optimizer.max_swaps_per_hour` | Global churn cap on **successful** swaps (`3`) — failed attempts don't consume it. | yes |
+| `optimizer.max_attempts_per_hour` | Attempt cap including guard-vetoed tries (`6`). | yes |
 | `optimizer.max_attempts_per_slot` | Challengers tried per idle slot per cycle (`2`) — a sizing/reliability veto on the top pick falls through to the next-best challenger in the same cycle. | yes |
 | `optimizer.hunt_top` | Challengers refreshed per cycle (`8`). | yes |
 | `optimizer.hunt_skills` | tvcli `/hunt` skills on the fast tape (`squeeze, choppiness`). | yes |

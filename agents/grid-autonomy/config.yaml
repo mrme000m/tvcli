@@ -57,11 +57,14 @@ optimizer:                     # fast loop BETWEEN rescreens (optimizer.py)
   arbiter_margin: 5.0          # … or ≥ 5 with the LLM arbiter's backing
   arbiter_min_confidence: 0.7
   min_swap_interval_min: 30    # per-slot swap rate limit
-  max_swaps_per_hour: 3        # global churn cap
+  max_swaps_per_hour: 3        # successful-swap churn cap (global)
+  max_attempts_per_hour: 6     # attempt cap (guard-vetoed tries included)
   max_attempts_per_slot: 2     # challengers tried per idle slot per cycle
                                # (a sizing/reliability veto on the top pick
                                # falls through to the next-best challenger
                                # in the SAME cycle — adaptation, not churn)
+  fail_cooldown_min: 60         # failed swap attempt cools THAT challenger
+                               # (the slot stays free for the next-best one)
   hunt_top: 8                  # challengers refreshed per cycle
   hunt_skills: [squeeze, choppiness]   # tvcli /hunt on the FAST tape —
   hunt_timeframe: 15m          # the hourly 1H pass never sees these bars

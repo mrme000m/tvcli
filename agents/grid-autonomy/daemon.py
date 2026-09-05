@@ -1392,7 +1392,14 @@ class Daemon:
         if is_rotation:
             ctx.update({
                 "cooldown_ok": cooldown_ok,
-                "incumbent_score": (incumbent or {}).get("score_final") or 0,
+                # the optimizer's swap gate compared FRESH scores (both sides
+                # re-scored this cycle); the stored incumbent score can be an
+                # hour old and would falsely veto the swap here — trust the
+                # fresh score the swap decision was actually made on
+                "incumbent_score":
+                    ((incumbent or {}).get("optimizer_swap") or {})
+                    .get("inc_score_fresh")
+                    or (incumbent or {}).get("score_final") or 0,
                 "candidate_score": cand.get("score_final") or 0,
                 # manual rotate (ctl /rotate) overrides the score hysteresis;
                 # every other guard (sizing, spread, venue, reliability) stays
@@ -1768,7 +1775,9 @@ class Daemon:
             manual = bool(bot.get("force_rotate"))
             reasons = []
             if manual:
-                reasons = ["manual rotate (ctl /rotate)"]
+                reasons = ["optimizer swap (fast lane)"
+                           if bot.get("optimizer_swap")
+                           else "manual rotate (ctl /rotate)"]
                 stag = True
             else:
                 # min-hold floor: never rotate a bot younger than min_hold_h
@@ -1897,12 +1906,32 @@ class Daemon:
                                         f"flagged for rotation review"})
             bot["reliability_flagged"] = flagged
 
-            # stagnation evaluation (drives rotation candidates)
-            stag, reasons = is_stagnant(
-                obs, policy, regime_now=obs.get("regime_now"),
-                score_drop=obs.get("score_drop", 0.0),
-                ladder_full=obs.get("ladder_full", False),
-                dd_vs_atr_band=obs.get("dd_vs_atr_band", 0.0))
+            # stagnation evaluation (drives rotation candidates) — with a
+            # fresh-bot grace: a bot younger than one expected fill
+            # interval has not had a fair chance to fill, so fill-count
+            # stagnation is a false positive (a freshly swapped-in DOGE was
+            # flagged "stagnant" 4 min after deploy). Rotation itself stays
+            # guarded by policy.min_hold_h in the rescreen path; this keeps
+            # the journal + transition sig honest.
+            exp_fills = float(policy.get("expected_fills_per_24h") or 0)
+            grace_h = min(12.0, max(1.0, 24.0 / exp_fills)) \
+                if exp_fills > 0 else 1.0
+            try:
+                _since = datetime.fromisoformat(bot["since"]) \
+                    if bot.get("since") else None
+                age_h = (datetime.now(timezone.utc) - _since
+                         ).total_seconds() / 3600 if _since else grace_h
+            except Exception:
+                age_h = grace_h
+            if age_h < grace_h:
+                stag, reasons = False, []
+                bot.pop("stagnant_sig", None)
+            else:
+                stag, reasons = is_stagnant(
+                    obs, policy, regime_now=obs.get("regime_now"),
+                    score_drop=obs.get("score_drop", 0.0),
+                    ladder_full=obs.get("ladder_full", False),
+                    dd_vs_atr_band=obs.get("dd_vs_atr_band", 0.0))
             if stag:
                 # log on TRANSITION only (first stagnant sweep per bot, or
                 # when the reasons change): the 200-entry journal otherwise
@@ -2029,7 +2058,10 @@ class Daemon:
         observed = incumbent.get("observed") or {}
         manual = bool(incumbent.get("force_rotate"))
         if manual:
-            ok_rot, reasons = True, ["manual rotate (ctl /rotate)"]
+            ok_rot, reasons = True, [
+                "optimizer swap (fast lane)"
+                if incumbent.get("optimizer_swap")
+                else "manual rotate (ctl /rotate)"]
         else:
             try:
                 ok_rot, reasons = should_rotate(

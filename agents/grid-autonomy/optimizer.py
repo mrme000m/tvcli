@@ -121,9 +121,11 @@ OPTIMIZER_DEFAULTS = {
     "upgrade_margin": 8.0,      # challenger must beat incumbent by this much
     "arbiter_margin": 5.0,      # …or by this much with arbiter backing
     "arbiter_min_confidence": 0.7,
-    "min_swap_interval_min": 30,   # per-slot swap rate limit
-    "max_swaps_per_hour": 3,
+    "min_swap_interval_min": 30,   # per-slot rate limit on SUCCESSFUL swaps
+    "max_swaps_per_hour": 3,       # successful swaps
+    "max_attempts_per_hour": 6,    # attempts (guard-vetoed tries included)
     "max_attempts_per_slot": 2,    # challengers tried per idle slot per cycle
+    "fail_cooldown_min": 60,       # failed swap → cool down THAT challenger
     "hunt_top": 8,              # challengers refreshed per cycle
     "hunt_skills": ["squeeze", "choppiness"],
     "hunt_timeframe": "15m",    # fast tape the hourly 1H pass never sees
@@ -272,10 +274,15 @@ def swap_gate(incumbent, challenger, arbiter, cfg, swap_log, now, slot_key,
     """(approve, [reasons]) — the full fast-swap decision. Pure.
 
     Layers (all must pass):
-      rate limits   per-slot min swap interval (over `slot_rate_log`, which
-                    defaults to swap_log — callers pass the pre-cycle log so
-                    a same-cycle retry after a failed ATTEMPT is not blocked
-                    by its own attempt) + global swaps/hour cap
+      rate limits   per-slot min interval between SUCCESSFUL swaps (over
+                    `slot_rate_log`, which defaults to swap_log — callers
+                    pass the pre-cycle log so a same-cycle retry after a
+                    failed ATTEMPT is not blocked by its own attempt) +
+                    global swaps/hour cap. Failed attempts do NOT rate-
+                    limit the slot: nothing was rotated, and the failing
+                    challenger is cooled down by the caller instead —
+                    otherwise one undeployable token would lock an idle
+                    slot out of every other challenger for 30 min.
       margin        Δscore ≥ upgrade_margin (numeric alone), or ≥
                     arbiter_margin with an arbiter approve at confidence ≥
                     arbiter_min_confidence. Below arbiter_margin nothing
@@ -284,7 +291,7 @@ def swap_gate(incumbent, challenger, arbiter, cfg, swap_log, now, slot_key,
     reasons = []
     rate_log = slot_rate_log if slot_rate_log is not None else swap_log
     for entry in (rate_log or []):
-        if entry.get("slot") == str(slot_key) and \
+        if entry.get("slot") == str(slot_key) and entry.get("ok") and \
                 now - float(entry.get("at", 0)) < \
                 float(cfg.get("min_swap_interval_min", 30)) * 60:
             age = (now - float(entry.get("at", 0))) / 60
@@ -292,9 +299,13 @@ def swap_gate(incumbent, challenger, arbiter, cfg, swap_log, now, slot_key,
                            f"(min {cfg.get('min_swap_interval_min')}m)"]
     recent = [e for e in (swap_log or [])
               if now - float(e.get("at", 0)) < 3600]
-    if len(recent) >= int(cfg.get("max_swaps_per_hour", 3)):
-        return False, [f"global rate limit: {len(recent)} swaps in the "
+    swaps_ok = [e for e in recent if e.get("ok")]
+    if len(swaps_ok) >= int(cfg.get("max_swaps_per_hour", 3)):
+        return False, [f"global rate limit: {len(swaps_ok)} swaps in the "
                        f"last hour (max {cfg.get('max_swaps_per_hour')})"]
+    if len(recent) >= int(cfg.get("max_attempts_per_hour", 6)):
+        return False, [f"attempt rate limit: {len(recent)} attempts in the "
+                       f"last hour (max {cfg.get('max_attempts_per_hour')})"]
 
     inc_score = incumbent.get("score_final") or 0
     ch_score = challenger.get("score_final") or 0
@@ -338,6 +349,24 @@ def arbiter_view(bot, tracker, now, cfg):
         "unrealized_pnl": obs.get("unrealized_pnl"),
         "needs_reanalysis": bool(bot.get("needs_reanalysis")),
     }
+
+
+def normalize_pick(name, chals):
+    """Match the arbiter's challenger name to a candidate.
+
+    Arbiters sometimes decorate the symbol ("SOL_hyperliquid",
+    "hyperliquid:SOL"). Exact match first, then ignore venue decorations.
+    Returns the matched candidate or None."""
+    if not name:
+        return None
+    for c in chals:
+        if c.get("symbol") == name:
+            return c
+    bare = str(name).split("_")[0].split(":")[-1].strip().upper()
+    for c in chals:
+        if str(c.get("symbol", "")).upper() == bare:
+            return c
+    return None
 
 
 def challenger_view(c):
@@ -772,23 +801,39 @@ class SlotOptimizer:
                 "score_final")
             if inc_fresh_score is not None:
                 inc_view["score_final"] = inc_fresh_score
+            # band pre-filter: below arbiter_margin the gate can NEVER
+            # approve (the arbiter relaxes the bar, it cannot remove it) —
+            # don't spend a Mistral call when no swap is numerically
+            # possible, and don't let sub-band challengers consume the
+            # per-slot attempt budget
+            inc_score = inc_view.get("score_final") or 0
+            band = float(cfg.get("arbiter_margin", 5.0))
+            in_band = [c for c in chals
+                       if (c.get("score_final") or 0) - inc_score >= band]
+            if not in_band:
+                top = chals[0]
+                report["vetoes"].append({
+                    "slot": slot_key,
+                    "reason": f"best challenger {top.get('symbol')} Δscore "
+                              f"{(top.get('score_final') or 0) - inc_score:.1f}"
+                              f" < arbiter band {band:.0f} — no swap "
+                              f"numerically possible (arbiter skipped)"})
+                continue
             arbiter, degraded = llm_arbiter(
                 arbiter_view({**inc_view, "slot": slot_key},
                              ost["trackers"].get(slot_key), now, cfg),
-                chals, provider=cfg.get("llm_provider"))
+                in_band, provider=cfg.get("llm_provider"))
             if degraded:
                 report["caveats"].append("arbiter llm_degraded")
             report["arbiter"] = {**arbiter, "slot": slot_key,
                                  "llm_degraded": degraded}
             # try order: the arbiter's pick first (when approved), then the
             # numeric ranking — bounded attempts per cycle
-            ordered = list(chals)
-            pick = arbiter.get("challenger")
-            if pick:
-                picked = [c for c in chals if c.get("symbol") == pick]
-                ordered = picked + [c for c in chals if c != (picked[0]
-                                                              if picked
-                                                              else None)]
+            ordered = list(in_band)
+            pick_cand = normalize_pick(arbiter.get("challenger"), chals)
+            pick = pick_cand.get("symbol") if pick_cand else None
+            if pick_cand is not None:
+                ordered = [pick_cand] + [c for c in chals if c is not pick_cand]
             swapped = False
             for best in ordered[:max_attempts]:
                 # arbiter backing applies only to its named challenger
@@ -804,7 +849,9 @@ class SlotOptimizer:
                     continue
                 self._execute_swap(slot_key, bot, best,
                                    idle_reasons + reasons, dry_run, report,
-                                   ost, now)
+                                   ost, now,
+                                   inc_score_fresh=inc_view.get(
+                                       "score_final"))
                 swapped = report["swaps"] and \
                     report["swaps"][-1].get("slot") == slot_key
                 if swapped:
@@ -819,18 +866,23 @@ class SlotOptimizer:
 
     # ── swap execution ─────────────────────────────────────────────────
     def _execute_swap(self, slot_key, bot, challenger, reasons, dry_run,
-                      report, ost, now):
+                      report, ost, now, inc_score_fresh=None):
         state = self.daemon.state
-        # record the ATTEMPT now: a failed swap must still pay the rate
-        # limit, or a persistently-failing challenger retries every cycle
+        # record the ATTEMPT now: failed attempts count toward the global
+        # attempts/hour cap (the spam guard), while the per-slot interval
+        # counts successes only and the failing challenger cools down below
         ost["swap_log"] = ([e for e in ost.get("swap_log", [])
                             if now - float(e.get("at", 0)) < 7200]
-                           + [{"slot": str(slot_key), "at": now}])
+                           + [{"slot": str(slot_key), "at": now,
+                               "ok": False}])
         bot["force_rotate"] = True
         bot["optimizer_swap"] = {
             "reasons": reasons, "challenger":
                 f"{challenger.get('venue')}:{challenger.get('symbol')}",
-            "at": report["at"]}
+            "at": report["at"],
+            # the guard's rotation hysteresis compares against THIS, not the
+            # hour-old stored score — the swap was decided fresh-vs-fresh
+            "inc_score_fresh": inc_score_fresh}
         ok = False
         try:
             ok = bool(self.daemon.execute_rotation(
@@ -840,6 +892,7 @@ class SlotOptimizer:
                            "slot": slot_key,
                            "msg": f"swap failed: {str(exc)[:160]}"})
         if ok:
+            ost["swap_log"][-1]["ok"] = True
             ost["swaps_total"] = int(ost.get("swaps_total", 0)) + 1
             report["swaps"].append({
                 "slot": slot_key,
@@ -855,10 +908,26 @@ class SlotOptimizer:
                        f"{challenger.get('symbol')} "
                        f"({'; '.join(reasons)[:140]})"})
         else:
+            # cool down THIS challenger (not the slot): the attempt failed
+            # inside the rotation machinery (sizing/reliability/capacity
+            # veto or transport error) — retrying the same token every 3
+            # min would burn an arbiter call + rotation attempt each cycle
+            # (CASHCAT at $10 min-notional never fits a $50 slot), while
+            # the slot itself stays free to try the next-best challenger.
+            # state["cooldowns_until"] is honored by the rescreen deploy
+            # path too, so an undeployable token stops failing there as well.
+            cool_min = float(self.cfg().get("fail_cooldown_min", 60))
+            ckey = f"{challenger.get('venue')}:{challenger.get('symbol')}"
+            self.daemon.state.setdefault("cooldowns_until", {})[ckey] = \
+                now + cool_min * 60
             report["vetoes"].append({
                 "slot": slot_key,
-                "reason": "swap attempt failed (rotation machinery vetoed "
-                          "or errored) — rate limit still applied"})
+                "reason": f"swap attempt failed (rotation machinery vetoed "
+                          f"or errored) — {ckey} cooled down {cool_min:.0f}m"})
+            self._journal({
+                "kind": "optimizer-cooldown", "slot": slot_key,
+                "msg": f"{ckey} cooled down {cool_min:.0f}m — swap attempt "
+                       f"failed (vetoed or errored)"})
             # clear the manual-rotate marks so the hourly rescreen does not
             # re-trigger this as a "manual" rotation an hour later
             bot.pop("force_rotate", None)
