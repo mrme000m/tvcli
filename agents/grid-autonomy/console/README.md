@@ -78,7 +78,7 @@ Everything the UI does is a plain JSON endpoint (safe to curl):
 | POST | `/api/daemon/stop` `{confirm, force}` | KILL + SIGTERM (+SIGKILL with force). |
 | POST | `/api/daemon/start` `{confirm, live_paper, clear_kill}` | `scripts/start.sh`, optionally `--live-paper`. |
 | POST | `/api/daemon/restart` `{confirm, clear_kill}` | launchd kickstart (supervised) or stop+start. |
-| POST | `/api/dev/reset` `{confirm, keep_decisions, start}` | run `dev reset` detached — wipes runtime state, stops the stack. |
+| POST | `/api/dev/reset` `{confirm, keep_decisions, wt, start}` | run `dev reset` detached — wipes runtime state, stops the stack; `wt: true` also deletes all WunderTrading paper bots (explicit, never defaulted). |
 | POST | `/api/dev/reset-wt` `{confirm}` | run `dev reset-wt` detached — deletes all WT paper bots + clears daemon bot state. |
 | POST | `/api/dev/clean` `{confirm}` | run `dev clean` detached — clears logs + runtime artifacts. |
 

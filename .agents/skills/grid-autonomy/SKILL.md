@@ -53,9 +53,12 @@ console + PocketBase + tvcli serve, all launchd-supervised after
 ./dev stop [--all]        # stop console + daemon + PB (--all + tvcli serve)
 ./dev restart             # stop + start
 ./dev logs daemon|console|pb|serve [-f]   # tail any component log
-./dev reset [--keep-decisions] [--start]  # wipe runtime state (backup kept)
+./dev reset [--wt|--no-wt] [--keep-decisions] [--start]  # wipe runtime state
+                          # (interactive runs ask about the WT reset too)
 ./dev reset-wt            # delete ALL WT paper bots + clear daemon bot state
 ./dev clean [--all]       # clear logs, run cards, market caches, specs
+./dev config check        # validate config.yaml + daemon-vs-file drift
+./dev config set <path> <value> [--restart]  # whitelisted edit, like the console
 ```
 
 Everything the system writes stays inside `agents/grid-autonomy/`

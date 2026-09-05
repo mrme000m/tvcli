@@ -45,6 +45,67 @@ def _import_safe(mod_name):
         return None
 
 
+def _daemon_bot_map():
+    """bot_code -> {decision_id, venue, symbol, archetype, since} from the
+    daemon's live state (best-effort; {} when absent). Used to attach a
+    closing outcome to each decision whose bot we delete, so the console's
+    decision ledger never shows permanently-OPEN cards after a reset."""
+    path = os.path.join(GRID_HOME, "state", "state.json")
+    try:
+        with open(path) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    out = {}
+    for bot in (st.get("active_bots") or {}).values():
+        code = bot.get("bot_code")
+        if code:
+            out[code] = {
+                "decision_id": bot.get("decision_id"),
+                "venue": bot.get("venue"), "symbol": bot.get("symbol"),
+                "archetype": bot.get("archetype"),
+                "since": bot.get("since"),
+            }
+    return out
+
+
+def _attach_outcome(bot_code, info, trades):
+    """Record a closing outcome on the decision that deployed this bot.
+
+    Keeps the decision ledger truthful across a reset (the card would
+    otherwise stay OPEN forever) and archives the trades under the bot's
+    archetype so the reliability ledger keeps learning from them.
+    """
+    if not info.get("decision_id"):
+        return
+    realized = round(sum(t.get("pnl_usd", 0.0) for t in trades), 4)
+    holding_h = None
+    try:
+        from datetime import datetime, timezone
+        since = datetime.fromisoformat(info["since"])
+        holding_h = round((datetime.now(timezone.utc) - since)
+                          .total_seconds() / 3600, 1)
+    except Exception:  # noqa: BLE001
+        pass
+    agents_dir = os.path.join(GRID_HOME, "agents")
+    if agents_dir not in sys.path:
+        sys.path.insert(0, agents_dir)
+    try:
+        import reflect
+        reflect.record_outcome(info["decision_id"], {
+            "reason": "reset-wt (paper bots deleted)",
+            "realized_pnl": realized,
+            "fills": len(trades),
+            "holding_h": holding_h,
+            "observed": {},
+        })
+        print(f"  outcome recorded on {info['decision_id']}: "
+              f"realized {realized:+.4f} USD over {len(trades)} trips")
+    except Exception as exc:  # noqa: BLE001
+        print(f"  WARN: could not record outcome on "
+              f"{info['decision_id']}: {exc}")
+
+
 def list_paper_bots():
     observe = _import_safe("observe")
     if observe is None:
@@ -96,6 +157,16 @@ def main(argv=None):
     if grid_adapter is None:
         return 1
 
+    # daemon-side knowledge (decision ids, archetypes) — read BEFORE the
+    # caller (dev reset-wt) clears state.json
+    bot_map = _daemon_bot_map()
+    try:
+        from reliability_grid import archive_trades, bot_trades
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARN: reliability archive unavailable ({exc}) — trades of "
+              f"deleted bots will not feed the ledger")
+        archive_trades = bot_trades = None
+
     deleted, skipped = [], []
     for bot in paper:
         code = bot.get("code")
@@ -141,6 +212,24 @@ def main(argv=None):
                     time.sleep(15)
             if deleted_ok:
                 deleted.append(code)
+                # keep the decision ledger and the reliability ledger
+                # truthful for the bot we just removed
+                info = bot_map.get(code) or {}
+                trades = []
+                if bot_trades is not None:
+                    try:
+                        trades = bot_trades(code) or []
+                    except Exception:  # noqa: BLE001
+                        trades = []
+                if archive_trades is not None and trades:
+                    try:
+                        archive_trades(trades, info.get("archetype"))
+                        print(f"  archived {len(trades)} closed round-trips "
+                              f"under {info.get('archetype') or 'unknown'}")
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"  WARN: archive failed: {exc}")
+                if info.get("decision_id"):
+                    _attach_outcome(code, info, trades)
             else:
                 print(f"  delete FAILED after retries: {json.dumps(res)[:160]}")
                 skipped.append(code)

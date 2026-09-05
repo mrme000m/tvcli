@@ -254,12 +254,23 @@ the tvcli serve confluence backend (repo-level, shared):
 ./dev stop [--all]            # console + daemon + PB (--all also tvcli serve)
 ./dev restart                 # stop + start
 ./dev logs [daemon|console|pb|serve|dev] [-f] [-n N]
-./dev reset [--keep-decisions] [--no-backup] [--start]
-                              # wipe runtime state (backup under state/backups)
+./dev reset [--wt|--no-wt] [--keep-decisions] [--no-backup] [--start]
+                              # wipe runtime state (backup under state/backups);
+                              # interactive runs also ask whether to reset the
+                              # WT paper accounts — --wt/--no-wt decide
+                              # non-interactively
 ./dev reset-wt                # delete ALL WunderTrading paper bots + clear
                               # daemon bot state (profiles/journals kept)
 ./dev clean [--all]           # clear logs, run cards, market caches, specs
                               # (--all also wipes the PocketBase data dir)
+./dev config [show|check|set <path> <value>|restart]
+                              # inspect/validate/edit config.yaml (the daemon
+                              # reads it at startup; set --restart applies)
+./dev config                  # parsed config + current value of every editable knob
+./dev config get <path>       # one value (e.g. watch.interval_s)
+./dev config set <path> <v>   # whitelisted edit (type+range checked, comments
+                              # preserved, .bak backup) — restart to apply
+./dev config validate         # config.yaml parses + every editable path resolves
 ```
 
 Everything `dev` and the system write lives **inside `agents/grid-autonomy/`**

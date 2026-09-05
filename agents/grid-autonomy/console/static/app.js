@@ -75,24 +75,29 @@ function toast(msg, bad = false, ms = 4200) {
 
 /* ── confirm modal ────────────────────────────────────────────────── */
 
-function confirmDialog({ title, body, label = "Confirm", danger = false, checkbox = null }) {
+function confirmDialog({ title, body, label = "Confirm", danger = false, checkbox = null, checkbox2 = null }) {
   return new Promise((resolve) => {
     const root = $("#modal-root");
     const box = el("div", { class: "modal-backdrop" });
     const checkRef = { input: null };
+    const checkRef2 = { input: null };
     const modal = el("div", { class: "modal", role: "dialog", "aria-modal": "true" },
       el("h3", {}, title),
       el("div", { class: "modal-body" }, ...body),
       checkbox ? el("label", { class: "check-line" },
         (checkRef.input = el("input", { type: "checkbox" })),
         el("span", {}, checkbox)) : null,
+      checkbox2 ? el("label", { class: "check-line" },
+        (checkRef2.input = el("input", { type: "checkbox" })),
+        el("span", {}, checkbox2)) : null,
       el("div", { class: "modal-actions" },
         el("button", { class: "btn", onclick: () => done(false) }, "Cancel"),
         el("button", { class: `btn ${danger ? "btn--danger" : "btn--primary"}`, onclick: () => done(true) }, label)));
     function done(ok) {
       root.innerHTML = "";
       document.removeEventListener("keydown", onKey);
-      resolve({ ok, checked: checkRef.input ? checkRef.input.checked : false });
+      resolve({ ok, checked: checkRef.input ? checkRef.input.checked : false,
+                checked2: checkRef2.input ? checkRef2.input.checked : false });
     }
     function onKey(e) { if (e.key === "Escape") done(false); }
     document.addEventListener("keydown", onKey);
@@ -828,17 +833,18 @@ async function devResetDialog() {
     body: [
       el("div", {}, "Stops the whole stack and wipes daemon runtime state:"),
       el("div", {}, "state.json, decisions journal, reliability ledger + archive, run cards, market caches, watch specs, logs, PocketBase data."),
-      el("div", {}, "config.yaml and WunderTrading bots are NOT touched (use “Reset WT paper bots” for those). A backup is kept under state/backups/."),
+      el("div", {}, "config.yaml is NOT touched. A backup is kept under state/backups/."),
     ],
     label: "Reset system",
     danger: true,
     checkbox: "Keep the learning journal (decisions + reliability)",
+    checkbox2: "Also reset WunderTrading (delete all paper bots)",
   });
   if (!ok) return;
   try {
     await api("/api/dev/reset", {
       method: "POST",
-      body: { confirm: true, keep_decisions: !!checked, start: false },
+      body: { confirm: true, keep_decisions: !!checked, wt: !!checked2, start: false },
     });
     toast("reset started — the console and daemon are stopping; run `dev start` (or wait) and reload.", true, 8000);
     setTimeout(() => location.reload(), 6000);

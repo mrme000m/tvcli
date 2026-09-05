@@ -20,14 +20,18 @@
 #   restart [--dry-run]        stop + start
 #   logs [what] [-f] [-n N]   what: daemon | console | pb | serve | dev
 #                              (default daemon); -f follow, -n lines
-#   reset [--yes] [--keep-decisions] [--no-backup] [--start]
+#   reset [--yes] [--wt|--no-wt] [--keep-decisions] [--no-backup] [--start]
 #                              stop everything, wipe daemon runtime state
 #                              (state.json, decisions, reliability,
 #                              reports, market caches, watch specs, logs,
 #                              PocketBase data); backup under state/backups
 #                              unless --no-backup; --keep-decisions
 #                              preserves decisions.jsonl + reliability*;
-#                              --start brings the system back up
+#                              --start brings the system back up.
+#                              Interactive runs also ask whether to reset
+#                              the WunderTrading paper accounts (delete all
+#                              paper grid bots) — pass --wt / --no-wt to
+#                              decide non-interactively instead.
 #   reset-wt [--yes]           stop the daemon, then stop+delete ALL paper
 #                              grid bots on WunderTrading (clears plan
 #                              capacity/positions) and clear the daemon's
@@ -39,6 +43,16 @@
 #                              --all additionally wipes PocketBase data
 #                              and run-card index (NOT state.json/
 #                              decisions — use `reset` for that)
+#   config [show]              dump the effective config (config.yaml merged
+#                              over daemon defaults) + editable knobs
+#   config check                validate config.yaml (parse, sections,
+#                              ranges), detect daemon-vs-file drift
+#                              (restart needed?), list env overrides
+#   config set <path> <value> [--restart]
+#                              whitelisted edit (same path as the console
+#                              editor: comment-preserving, round-trip
+#                              checked, .bak kept); --restart applies it
+#   config restart             restart the daemon to apply config.yaml
 #   config                     print parsed config.yaml (grouped) + the
 #                              current value of every editable knob
 #   config get <path>          print one value (e.g. watch.interval_s)
@@ -331,12 +345,14 @@ cmd_logs() {
 
 # ── reset ─────────────────────────────────────────────────────────────
 cmd_reset() {
-  local keep_decisions=0 do_backup=1 do_start=0
+  local keep_decisions=0 do_backup=1 do_start=0 do_wt=0 wt_explicit=0
   for a in "$@"; do
     case "$a" in
       --keep-decisions) keep_decisions=1 ;;
       --no-backup) do_backup=0 ;;
       --start) do_start=1 ;;
+      --wt) do_wt=1; wt_explicit=1 ;;  # non-interactive: reset WT too
+      --no-wt) do_wt=0; wt_explicit=1 ;;
     esac
   done
   if [ "${ASSUME_YES:-0}" != "1" ]; then
@@ -344,11 +360,23 @@ cmd_reset() {
     say "reliability ledger + archive, run cards, market caches, watch specs,"
     say "logs, and the PocketBase data dir (all inside agents/grid-autonomy/)."
     say "config.yaml and the WunderTrading paper profiles are NOT touched."
-    say "WunderTrading bots are NOT deleted (use: dev reset-wt)."
+    # interactive: offer the WT reset too — a local-only reset leaves the
+    # paper bots running untracked (they then block redeploys until adopted)
+    if [ "$wt_explicit" != "1" ]; then
+      confirm "ALSO reset the WunderTrading paper accounts (stop + delete all paper grid bots)?" && do_wt=1
+    fi
     confirm "Proceed?" || { say "aborted"; exit 1; }
   fi
   cmd_stop >/dev/null 2>&1 || true
   sleep 1
+  if [ "$do_wt" = "1" ]; then
+    hr "resetting WunderTrading paper accounts"
+    if python3 scripts/wt_reset.py --yes; then
+      say "WT paper accounts clean."
+    else
+      err "WT reset incomplete — continuing with the local reset; re-run 'dev reset-wt' after"
+    fi
+  fi
   if [ "$do_backup" = "1" ]; then
     local ts; ts="$(date -u +%Y%m%dT%H%M%SZ)"
     local bk="$BACKUP_DIR/$ts"
@@ -639,6 +667,155 @@ if __name__ == "__main__":
 PY
 }
 
+# ── config ───────────────────────────────────────────────────────────
+cmd_config() {
+  local sub="${1:-show}"; shift 2>/dev/null || true
+  case "$sub" in
+    show|"")
+      python3 - <<'PY'
+import json, os, sys
+sys.path.insert(0, os.path.join(os.getcwd(), "console"))
+import server  # stdlib-only module; imports yaml_edit + config_lite
+cfg = server.config_payload()["config"]
+editable = server.config_payload()["editable"]
+print("== effective config (config.yaml merged over daemon defaults) ==")
+for section in ("portfolio", "screen", "grid_defaults", "llm", "policy",
+                "reliability", "watch", "autonomy", "memory", "guardrails", "server"):
+    if section in cfg:
+        print(json.dumps({section: cfg[section]}, indent=1, sort_keys=False))
+print("== whitelisted knobs (console/dev editable) ==")
+for path, info in editable.items():
+    print(f"  {path:44s} = {info.get('value')!r}   "
+          f"[{info.get('t')}, {info.get('min')}–{info.get('max')}]"
+          + ("" if info.get("present") else "   MISSING"))
+PY
+      ;;
+    check)
+      python3 - <<'PY'
+import os, sys, time, json
+sys.path.insert(0, os.path.join(os.getcwd(), "console"))
+import server
+from config_lite import load_yaml
+
+CONFIG = server.CONFIG_PATH
+problems, notes = [], []
+
+# 1. parses?
+try:
+    with open(CONFIG) as f:
+        parsed = load_yaml(f.read())
+    if not isinstance(parsed, dict) or not parsed:
+        problems.append("config.yaml parses to nothing — daemon would run on defaults")
+    else:
+        notes.append(f"parses OK ({len(parsed)} top-level sections)")
+except FileNotFoundError:
+    problems.append(f"config.yaml NOT FOUND at {CONFIG}")
+except Exception as exc:
+    problems.append(f"config.yaml does not parse: {exc}")
+
+# 2. required sections
+if isinstance(parsed, dict):
+    for req in ("portfolio", "screen", "watch", "autonomy", "policy"):
+        if req not in parsed:
+            problems.append(f"missing section: {req} (daemon default will be used)")
+    pf = parsed.get("portfolio") or {}
+    for k in ("total_usd", "slots_default", "max_alloc_per_slot", "cash_buffer_pct"):
+        if k not in pf:
+            notes.append(f"portfolio.{k} not set — daemon default applies")
+    au = parsed.get("autonomy") or {}
+    if au.get("live_profiles"):
+        problems.append(f"autonomy.live_profiles is NON-EMPTY: {au['live_profiles']} "
+                        f"— real-money profiles are allowlisted!")
+    else:
+        notes.append("live_profiles empty — real money refused (safe)")
+
+# 3. whitelisted values in range
+payload = server.config_payload()["editable"]
+for path, info in payload.items():
+    if not info.get("present"):
+        continue
+    v = info.get("value")
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        problems.append(f"{path}: non-numeric value {v!r}")
+        continue
+    if not (info["min"] <= v <= info["max"]):
+        problems.append(f"{path} = {v} outside allowed range [{info['min']}, {info['max']}]")
+
+# 4. drift: daemon older than the config file?
+pid = server._pid()
+if pid:
+    try:
+        daemon_start = os.path.getmtime(f"/proc/{pid}") if os.path.isdir("/proc") else None
+        if daemon_start is None:
+            import subprocess
+            out = subprocess.run(["ps", "-o", "lstart=", "-p", str(pid)],
+                                 capture_output=True, text=True, timeout=5).stdout.strip()
+            from datetime import datetime
+            daemon_start = datetime.strptime(
+                out, "%a %b %d %H:%M:%S %Y").timestamp() if out else None
+    except Exception:
+        daemon_start = None
+    cfg_mtime = os.path.getmtime(CONFIG) if os.path.isfile(CONFIG) else 0
+    if daemon_start and cfg_mtime > daemon_start + 1:
+        problems.append("CONFIG DRIFT: config.yaml was modified AFTER the daemon "
+                        "started — restart to apply (dev config restart)")
+    elif pid:
+        notes.append(f"daemon (pid {pid}) is running the current config.yaml")
+
+# 5. env overrides
+env = {}
+for k in ("GRID_LLM_CHAIN", "CF_MODEL", "NVIDIA_MODEL", "OPENROUTER_MODEL",
+          "TVCLI_SERVER", "GRID_DAEMON_PORT", "CONSOLE_PORT", "PB_URL",
+          "GRID_NO_PIDGUARD", "CLOUDFLARE_ACCOUNT_ID"):
+    if os.environ.get(k):
+        env[k] = "set"
+if env:
+    notes.append("env overrides in this shell: " + ", ".join(sorted(env)))
+print(json.dumps({"ok": not problems, "problems": problems, "notes": notes}, indent=1))
+sys.exit(0 if not problems else 1)
+PY
+      ;;
+    set)
+      local path="${1:-}" value="${2:-}"
+      if [ -z "$path" ] || [ -z "$value" ]; then
+        err "usage: dev config set <path> <value> [--restart]   (e.g. dev config set portfolio.total_usd 750)"
+        exit 1
+      fi
+      local do_restart=0
+      for a in "$@"; do [ "$a" = "--restart" ] && do_restart=1; done
+      python3 - "$path" "$value" <<'PY'
+import json, os, sys
+sys.path.insert(0, os.path.join(os.getcwd(), "console"))
+import server
+path, value = sys.argv[1], sys.argv[2]
+code, body = server.apply_config_edits({path: value})
+print(json.dumps(body, indent=1))
+sys.exit(0 if code == 200 else 1)
+PY
+      if [ "$do_restart" = "1" ]; then
+        say "restarting the daemon to apply…"
+        stop_daemon; stop_pb
+        start_pb >/dev/null
+        start_daemon live >/dev/null
+        ctl_up >/dev/null && say "daemon restarted with the new config" || err "daemon did not come back up"
+      else
+        say "restart required to apply: dev config restart  (or the console restart button)"
+      fi
+      ;;
+    restart)
+      say "restarting the daemon to apply config.yaml…"
+      stop_daemon; stop_pb
+      start_pb >/dev/null
+      start_daemon live >/dev/null
+      ctl_up >/dev/null && say "daemon restarted (config.yaml in effect)" || err "daemon did not come back up"
+      ;;
+    *)
+      err "unknown config subcommand: $sub (use: show | check | set | restart)"; exit 1 ;;
+  esac
+}
+
 # ── main dispatch ────────────────────────────────────────────────────
 cmd="${1:-help}"; shift 2>/dev/null || true
 for a in "$@"; do
@@ -653,6 +830,7 @@ case "$cmd" in
   reset)     cmd_reset "$@" ;;
   reset-wt)  cmd_reset_wt "$@" ;;
   clean)     cmd_clean "$@" ;;
+  config)    cmd_config "$@" ;;
   config)    cmd_config "$@" ;;
   help|-h|--help|"")
     sed -n '2,46p' "$0" | sed 's/^# \{0,1\}//' ;;

@@ -42,9 +42,9 @@ API (all JSON):
     POST /api/daemon/restart  launchd kickstart or stop+start   {confirm,
                               clear_kill}
     POST /api/dev/reset       run `dev reset` (detached; wipes runtime
-                              state, stops the stack, optionally
-                              --keep-decisions / --start)   {confirm,
-                              keep_decisions, start}
+                              state, stops the stack; --keep-decisions /
+                              --wt / --start)   {confirm, keep_decisions,
+                              wt, start}
     POST /api/dev/reset-wt    run `dev reset-wt` (detached; deletes all
                               WunderTrading PAPER grid bots) {confirm}
     POST /api/dev/clean       run `dev clean` (detached; clears logs +
@@ -946,6 +946,10 @@ def dev_action(action: str, body: dict) -> tuple[int, dict]:
             args.append("--keep-decisions")
         if body.get("start"):
             args.append("--start")
+        # the WT reset is explicit, never defaulted: a local-only reset
+        # leaves the paper bots running (they get re-adopted or block
+        # redeploys), a --wt reset deletes them outright
+        args.append("--wt" if body.get("wt") else "--no-wt")
     os.makedirs(os.path.dirname(DEV_LOG), exist_ok=True)
     try:
         with open(DEV_LOG, "ab") as log:

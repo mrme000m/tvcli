@@ -164,3 +164,60 @@ reset-wt | clean` — verified live, command by command:
 
 Tests: 201 offline, all passing (new: dev-action console endpoints, archive
 merge, observe-outage rotation skip, pidguard, stopped_with_unrealized).
+
+
+---
+
+# Session 3 — reset-flow UX, data-lineage fixes, `dev config` (2026-09-05, evening)
+
+## Where the console cards come from (traced + fixed)
+
+- **Reliability view** ← `GET /api/reliability` → `reliability_payload()` →
+  `state/reliability.json` (recomputed by the 24h cron / `POST /reliability`
+  from ACTIVE bots + `state/reliability_archive.json`).
+- **Decision ledger** ← `GET /api/decisions` → `state/decisions.jsonl`
+  (one line per decision; outcomes attached on rotation/adoption-close).
+- Fixes: `reset-wt` now attaches a closing outcome to every deleted bot's
+  decision (cards could stay OPEN forever) and archives its round-trips;
+  the PUMP decision's mis-scaled outcome was backfilled from verified
+  exports; HYPE/PUMP round-trips backfilled into the archive (11 trades,
+  +$15.01) so the ledger reflects the real paper history after the resets.
+- Verified live post-reset: decisions view shows OPEN (fresh deploys) +
+  CLOSED-with-outcome cards; reliability view shows the archive-backed
+  ledger (unknown 10 samples → PROBE tier, Neutral Grid 3 → BASE).
+
+## Reset flow (user-directed rework)
+
+- `dev reset` now offers the WunderTrading reset **interactively**
+  ("ALSO reset the WT paper accounts?") or non-interactively via
+  `--wt` / `--no-wt`. The console's Reset dialog gained an explicit
+  "Also reset WunderTrading (delete all paper bots)" checkbox (never
+  defaulted) and passes it through. Rationale observed live: a local-only
+  reset leaves orphaned WT bots that block redeploys.
+
+## `dev config` (new)
+
+- `dev config [show]` — effective config (config.yaml deep-merged over
+  daemon defaults at Daemon startup) + whitelisted knobs with ranges.
+- `dev config check` — parse/section/range validation, live_profiles
+  safety assertion, daemon-vs-file drift (restart needed?), env overrides.
+- `dev config set <path> <value> [--restart]` — whitelisted,
+  comment-preserving edit via the exact same code path as the console
+  editor (yaml_edit + round-trip check + .bak), optional daemon restart.
+- `dev config restart` — apply config.yaml by restarting the daemon.
+
+Config lifecycle (traced): `Daemon.__init__` → `load_config()` reads
+`config.yaml` once per process; runtime overrides are env-only
+(GRID_LLM_CHAIN / *_MODEL / TVCLI_SERVER / GRID_DAEMON_PORT / CONSOLE_PORT
+/ PB_* / GRID_NO_PIDGUARD); every change requires a daemon restart
+(`dev config restart`, `dev restart`, console restart button).
+
+## E2E verification after the full reset (`dev reset --wt --keep-decisions --start`)
+
+WT paper accounts wiped (2 bots stopped+deleted, outcomes attached, trades
+archived); local state wiped with backup; stack restarted; fresh daemon
+screened 55 candidates, deployed CHIP (slot 1) + ARB (slot 2); watch loop
+live; reliability refresh repopulated the ledger from the archive;
+console fleet/decisions/reliability views all verified rendering correct
+data; PocketBase write-through active on all 5 collections; `dev config
+check` green; 201 tests passing.
