@@ -270,6 +270,41 @@ def _number(value, default=0.0):
         return default
 
 
+def _line_pnl(row):
+    """Net USD PnL one OPEN grid line would realize if closed now. None
+    when the row lacks the fields to compute it honestly.
+
+    Buy-side lines (type falsy): buy qty_in for entry_cost, sell qty_out
+    back for exit_cost; remaining mark value = (qty_in − qty_out) × last.
+    Sell-side lines (type truthy): sell qty_in for entry_cost, buy qty_out
+    back for exit_cost; remaining cover cost = (qty_in − qty_out) × last.
+    Entry + exit commissions are included so the number is what the line
+    truly nets, not a mark-only approximation. (Verified live 2026-09-06
+    on DOGE open rows: qty × last − cost matches the resource's
+    unrealizedPnl.pnlFiat aggregate to the cent, while the row's own
+    totalProfitLoss mis-scales ~700x and must never be used for this.)
+    """
+    try:
+        last = row.get("lastPrice")
+        if last is None:
+            return None
+        remaining = _number(row.get("totalEntryAmount")) - \
+            _number(row.get("totalExitAmount"))
+        if remaining <= 0:
+            return None  # fully exited leg — nothing left to realize
+        entry_cost = _number(row.get("totalEntryCost"))
+        exit_cost = _number(row.get("totalExitCost"))
+        if row.get("type"):  # sell/short side: entered by selling
+            pnl = entry_cost - exit_cost - remaining * last
+        else:                # buy/long side
+            pnl = remaining * last + exit_cost - entry_cost
+        pnl -= _number(row.get("totalEntryCommissionCost"))
+        pnl -= _number(row.get("totalExitCommissionCost"))
+        return round(pnl, 6)
+    except Exception:
+        return None
+
+
 def _ladder_full(bot, res, open_positions):
     """True when open positions >= 80% of grid levels on one side.
 
@@ -299,7 +334,14 @@ def _ladder_full(bot, res, open_positions):
 
 def observe_all(active_bots):
     """`{slot: {status, price, fills_24h, realized_ratio, unrealized_pnl,
-                 ladder_full, dd_vs_atr_band, error?}}` for active bots.
+                 ladder_full, dd_vs_atr_band, open_lines, open_losing,
+                 error?}}` for active bots.
+
+    `open_lines` / `open_losing`: count of open grid lines and how many of
+    them would realize a NET loss if closed at the current mark (per-line
+    entry/exit cost + commissions — see `_line_pnl`). None when a line's
+    data can't be computed honestly; the aggregate `unrealized_pnl`
+    remains the backstop signal then.
 
     `active_bots` maps slot keys to bot dicts carrying at least `bot_code`;
     `channel` and `stagnation_policy` are optional and improve the derived
@@ -320,12 +362,14 @@ def observe_all(active_bots):
 
 
 def _observe_one(bot, by_code, list_ok=True):
+    """One bot's observation. See observe_all() for the field contract."""
     bot = bot if isinstance(bot, dict) else {}
     bot_code = bot.get("bot_code") or bot.get("code")
     if not bot_code:
         return {"error": "no bot_code", "status": "unknown", "price": None,
                 "fills_24h": 0, "realized_ratio": 0.0, "unrealized_pnl": None,
-                "ladder_full": False, "dd_vs_atr_band": 0.0}
+                "ladder_full": False, "dd_vs_atr_band": 0.0,
+                "open_lines": 0, "open_losing": 0}
     res = by_code.get(bot_code) or {}
     status = res.get("status") or "unknown"
 
@@ -364,10 +408,16 @@ def _observe_one(bot, by_code, list_ok=True):
 
     fills_24h = 0
     now = time.time()
+    realized_pnl = 0.0
     for trip in _closed_round_trips(history):
         age = now - trip["close"]
         if 0 <= age <= FILLS_WINDOW_S:
             fills_24h += 1
+        # realized USD over the bot's WHOLE life (positions-history
+        # profitLoss is PNL-scaled by 10000 — verified live); with the mark
+        # PnL this is the cumulative Total PnL the profit-exit targets
+        realized_pnl += _number(trip["res"].get("profitLoss")) / 10000.0
+    realized_pnl = round(realized_pnl, 4)
 
     policy = bot.get("stagnation_policy") or {}
     expected = _number(policy.get("expected_fills_per_24h"), 0.0)
@@ -377,6 +427,20 @@ def _observe_one(bot, by_code, list_ok=True):
 
     dd_vs_atr_band = _dd_vs_atr_band(bot, price)
 
+    # per-line loss state for the optimizer's never-close-at-a-loss gate:
+    # open_losing = count of open lines that would realize a NET loss if
+    # closed at the current mark. Both go None when any line can't be
+    # computed honestly (the aggregate unrealized_pnl is the backstop).
+    open_lines, open_losing = 0, 0
+    for r in open_positions:
+        pnl = _line_pnl(r)
+        if pnl is None:
+            open_lines, open_losing = None, None
+            break
+        open_lines += 1
+        if pnl < 0:
+            open_losing += 1
+
     obs = {
         "status": status,
         "price": price,
@@ -385,6 +449,9 @@ def _observe_one(bot, by_code, list_ok=True):
         "unrealized_pnl": unrealized,
         "ladder_full": ladder_full,
         "dd_vs_atr_band": dd_vs_atr_band,
+        "open_lines": open_lines,
+        "open_losing": open_losing,
+        "realized_pnl": realized_pnl,
     }
     if not res:
         obs["error"] = ("grid status list unavailable (browser/session down)"

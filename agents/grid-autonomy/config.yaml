@@ -86,6 +86,13 @@ grid_defaults:                 # passed through to grid_config.py
   dca_factor: 1.5
   stop_trigger: "stop_and_close_all"
   pump_protection: true
+  # daemon-side profit exit: when a bot's cumulative total PnL (realized
+  # round-trips + mark PnL of open lines) reaches this fraction of its slot
+  # budget AND every open line is at >= 0, the bot is stopped at profit and
+  # the slot recycled. WT's native takeProfit field is accepted but NOT
+  # enforced server-side for grid bots yet — the daemon owns the exit.
+  # 0 disables. Never closes a losing line (see the loss-veto rule).
+  take_profit_pct: 0.10
 
 llm:
   chain: [cf, nvidia, openrouter]   # GRID_LLM_CHAIN env overrides order

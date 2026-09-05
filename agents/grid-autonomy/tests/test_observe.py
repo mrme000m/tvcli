@@ -103,6 +103,9 @@ class TestObserveAll(unittest.TestCase):
         self.assertFalse(obs["ladder_full"])
         expected_dd = round((86.935 - 86.8475) / 86.935 * 100.0 / 2.0, 4)
         self.assertAlmostEqual(obs["dd_vs_atr_band"], expected_dd, places=4)
+        # per-line loss state: both fixture open lines are under water
+        self.assertEqual(obs["open_lines"], 2)
+        self.assertEqual(obs["open_losing"], 2)
         self.assertNotIn("error", obs)
 
     def test_no_bot_code(self):
@@ -117,6 +120,61 @@ class TestObserveAll(unittest.TestCase):
              mock.patch.object(observe.time, "time", return_value=NOW):
             out = observe.observe_all({"0": full})
         self.assertTrue(out["0"]["ladder_full"])
+
+    def test_open_losing_none_when_a_line_is_uncomputable(self):
+        rows = [dict(POSITIONS_LIVE["rows"][0]),  # computable
+                {"_id": "x", "status": "entered"}]  # no fields at all
+        with mock.patch.object(observe, "_api_json", side_effect=_router), \
+             mock.patch.object(observe, "_positions_open", return_value=rows), \
+             mock.patch.object(observe.time, "time", return_value=NOW):
+            out = observe.observe_all({"0": BOT})
+        self.assertIsNone(out["0"]["open_lines"])
+        self.assertIsNone(out["0"]["open_losing"])
+
+    def test_no_open_positions_counts_zero(self):
+        with mock.patch.object(observe, "_api_json", side_effect=_router), \
+             mock.patch.object(observe, "_positions_open", return_value=[]), \
+             mock.patch.object(observe.time, "time", return_value=NOW):
+            out = observe.observe_all({"0": BOT})
+        self.assertEqual(out["0"]["open_lines"], 0)
+        self.assertEqual(out["0"]["open_losing"], 0)
+
+
+class TestLinePnl(unittest.TestCase):
+    """_line_pnl — the per-line PnL the never-close-at-a-loss gate uses."""
+
+    def test_buy_line_mark_and_commission(self):
+        # buy 4.8 @ 86.867 (cost 416.964), mark 86.8475, entry commission
+        # 0.2919: 4.8*86.8475 - 416.964 - 0.2919 = -0.3879
+        row = POSITIONS_LIVE["rows"][0]
+        self.assertAlmostEqual(observe._line_pnl(row), -0.387876, places=6)
+
+    def test_buy_line_profit(self):
+        row = dict(POSITIONS_LIVE["rows"][0], lastPrice=90.0)
+        self.assertGreater(observe._line_pnl(row), 0)
+
+    def test_sell_line(self):
+        # sell-side: entered by SELLING — proceeds 100, bought back 2 for
+        # 40, remaining 3 at mark 18 → 100 - 40 - 3*18 = 6
+        row = {"type": True, "lastPrice": 18.0,
+               "totalEntryAmount": 5, "totalExitAmount": 2,
+               "totalEntryCost": 100.0, "totalExitCost": 40.0}
+        self.assertAlmostEqual(observe._line_pnl(row), 6.0, places=6)
+
+    def test_partial_exit_reduces_remaining(self):
+        # buy 5 cost 500, sold 2 for 210, mark 100: 3*100 + 210 - 500 = 10
+        row = {"type": False, "lastPrice": 100.0,
+               "totalEntryAmount": 5, "totalExitAmount": 2,
+               "totalEntryCost": 500.0, "totalExitCost": 210.0}
+        self.assertAlmostEqual(observe._line_pnl(row), 10.0, places=6)
+
+    def test_fully_exited_is_none(self):
+        row = dict(POSITIONS_LIVE["rows"][0], totalExitAmount=4.8)
+        self.assertIsNone(observe._line_pnl(row))
+
+    def test_missing_fields_is_none(self):
+        self.assertIsNone(observe._line_pnl({}))
+        self.assertIsNone(observe._line_pnl({"lastPrice": 1.0}))
 
 
 class TestTimestamps(unittest.TestCase):

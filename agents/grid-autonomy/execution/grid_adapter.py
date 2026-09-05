@@ -108,7 +108,12 @@ def compute_upsert(symbol, venue, price, atr_pct, step_pct, grids,
         "closestLowLevelPrice": round(closest_low, 6),
         "amountPerTrade": amount_per_trade,
         "amountPerTradeType": "base",
-        "stopOnOutOfGrid": True,
+        # False: when price leaves the channel WT would otherwise STOP the
+        # bot and — with stopCondition stop_and_close_all — close its open
+        # lines at market, possibly at a loss. The daemon owns exits: held
+        # bots are re-centered (adjust, verified live to leave open
+        # positions untouched) or profit-exited; never loss-closed.
+        "stopOnOutOfGrid": False,
         "startCondition": "immediate",
         "signalCode": None,
         "maxRequiredAmount": None,

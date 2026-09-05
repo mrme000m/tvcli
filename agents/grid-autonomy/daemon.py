@@ -1487,6 +1487,9 @@ class Daemon:
                 "upsert": payloads["upsert"],
                 "decision_id": action.get("decision_id"),
                 "size_multiplier": action.get("size_multiplier"),
+                # cumulative-total-PnL target for the daemon-side profit
+                # exit (WT's native takeProfit is not enforced server-side)
+                "take_profit_usd": self._default_take_profit(slot["slot"]),
             }
             self.state["committed"][str(slot["slot"])] =                 payloads["guard_ctx"]["total_commitment"]
             spec = build_spec(cand["symbol"], cand["tv_symbol"],
@@ -1946,10 +1949,85 @@ class Daemon:
             else:
                 bot.pop("stagnant_sig", None)
 
+            # ── profit-side exit (the counterpart of the never-close-at-a-
+            # loss rule): WunderTrading accepts takeProfit/stopLoss/trailing
+            # fields on grid bots but does NOT enforce them server-side yet,
+            # so the daemon owns the exit. When the bot's cumulative total
+            # PnL (realized round-trips + mark PnL of open lines) reaches its
+            # per-slot target AND every open line is at ≥ 0 (the stop below
+            # closes all lines at market — no single line may realize a
+            # loss), stop it at profit and free the slot for the next best
+            # candidate. Fail-closed: unknown per-line state with open
+            # positions means no exit.
+            tp = bot.get("take_profit_usd")
+            if tp is None:
+                tp = self._default_take_profit(slot_key)
+                if tp is not None:
+                    bot["take_profit_usd"] = tp
+            if tp and status not in STOPPED_STATES:
+                try:
+                    total_pnl = float(obs.get("realized_pnl") or 0.0)                         + float(obs.get("unrealized_pnl") or 0.0)
+                except (TypeError, ValueError):
+                    total_pnl = None
+                open_lines = obs.get("open_lines")
+                open_losing = obs.get("open_losing")
+                if open_lines is None:
+                    # per-line state unavailable with an open book → fail
+                    # closed: a net-positive aggregate can hide one losing
+                    # line whose close would realize a loss
+                    safe_close = False
+                elif open_lines == 0:  # flat book — nothing can lose
+                    safe_close = True
+                else:  # per-line state known → strict all-≥0 rule
+                    safe_close = (open_losing or 0) == 0
+                if total_pnl is not None and total_pnl >= float(tp) and safe_close:
+                    stop_res = retry_grid_call(
+                        grid_adapter.grid_stop, dry_run, bot["bot_code"],
+                        "stop_and_close_all", dry_run=dry_run)
+                    log(self.state, {
+                        "kind": "profit-exit", "slot": slot_key,
+                        "dry_run": dry_run,
+                        "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
+                               f"cumulative PnL ${total_pnl:.2f} ≥ target "
+                               f"${float(tp):.2f} — stopped at profit (all "
+                               f"lines ≥ 0), slot recycled",
+                        "result": stop_res})
+                    record_outcome_safe(bot.get("decision_id"), {
+                        "reason": "profit-exit",
+                        "realized_pnl": round(total_pnl, 4),
+                        "fills": obs.get("fills_24h") or 0,
+                        "observed": {"total_pnl": round(total_pnl, 4)}})
+                    bot["needs_reanalysis"] = True
+                    continue
+
             out_of_channel = False
             if price is not None and channel.get("high") and channel.get("low"):
                 out_of_channel = price > channel["high"] or price < channel["low"]
             if out_of_channel or status in STOPPED_STATES:
+                # held under water: an out-of-channel bot with losing open
+                # lines must keep TRADING instead of sitting dead outside
+                # its grid — re-center the channel on the current price
+                # (verified live 2026-09-06 on GRAM: the grid edit leaves
+                # open positions and their entry prices untouched) so the
+                # lines keep filling around the market and the position
+                # can work its way back. 1 edit/6h rate limit inside
+                # adjust_bot; this pre-check keeps the journal quiet.
+                if out_of_channel and status not in STOPPED_STATES:
+                    pnl = obs.get("unrealized_pnl")
+                    losing = obs.get("open_losing")
+                    if ((pnl is not None and float(pnl) < 0)
+                            or (losing is not None and losing)):
+                        last_adj = (self.state.get("last_adjust") or {}) \
+                            .get(slot_key) or 0
+                        if time.time() - float(last_adj) >= 6 * 3600:
+                            log(self.state, {
+                                "kind": "recenter", "slot": slot_key,
+                                "msg": f"{bot.get('venue')}:"
+                                       f"{bot.get('symbol')} out-of-channel "
+                                       f"with losing lines — re-centering "
+                                       f"grid to keep trading (never close "
+                                       f"at a loss)"})
+                            self.adjust_bot(slot_key, dry_run)
                 if not bot.get("needs_reanalysis"):
                     # transition only — same 60 s spam guard as `stagnant`
                     log(self.state, {"kind": "re-analysis", "slot": slot_key,
@@ -2049,6 +2127,21 @@ class Daemon:
                                 f"(step {step_pct}%, grids {grids})",
                          "result": res})
 
+    def _default_take_profit(self, slot_key):
+        """Take-profit target in USD for a bot record without one (adopted
+        or pre-feature deploys): grid_defaults.take_profit_pct × the slot's
+        budget. None when the slot or the budget is unknown — no target, no
+        exit (fail-closed)."""
+        slot = next((s for s in self.state["slots"]
+                     if str(s["slot"]) == str(slot_key)), None)
+        if not slot or not slot.get("balance"):
+            return None
+        pct = float((self.config.get("grid_defaults") or {})
+                    .get("take_profit_pct") or 0.0)
+        if pct <= 0:
+            return None
+        return round(float(slot["balance"]) * pct, 2)
+
     # ── rotation ───────────────────────────────────────────────────────
     def execute_rotation(self, slot_key, challenger, dry_run=True):
         incumbent = self.state["active_bots"].get(slot_key)
@@ -2075,17 +2168,31 @@ class Daemon:
             return False
         # NEVER realize a loss to reallocate capital: every rotation stops
         # the incumbent with stop_and_close_all, which closes its open grid
-        # lines at market. An incumbent whose mark PnL is negative keeps
+        # lines at market. An incumbent holding ANY under-water line keeps
         # running — its grid keeps working the position back toward
-        # break-even. This is the hard rule for optimizer swaps AND
-        # rescreen rotations AND manual /rotate alike.
+        # break-even. Per-LINE check first (observed.open_losing, from
+        # observe._line_pnl): a net-positive aggregate can still hide one
+        # losing line that the close would realize. Aggregate unrealized_pnl
+        # is the backstop when per-line data is unavailable. This is the
+        # hard rule for optimizer swaps AND rescreen rotations AND manual
+        # /rotate alike.
+        losing = observed.get("open_losing")
         pnl = observed.get("unrealized_pnl")
         if observed.get("error"):
             log(self.state, {"kind": "loss-veto", "slot": slot_key,
                              "msg": "observe error — position PnL unknown, "
                                     "not closing blind; incumbent kept"})
             return False
-        if pnl is not None and float(pnl) < 0:
+        if losing is not None and losing:
+            log(self.state, {"kind": "loss-veto", "slot": slot_key,
+                             "msg": f"{incumbent.get('venue')}:"
+                                    f"{incumbent.get('symbol')}: {losing} open "
+                                    f"line(s) under water "
+                                    f"(${float(pnl or 0):.2f} unrealized) — "
+                                    f"never close at a loss; incumbent kept, "
+                                    f"challenger not deployed"})
+            return False
+        if losing is None and pnl is not None and float(pnl) < 0:
             log(self.state, {"kind": "loss-veto", "slot": slot_key,
                              "msg": f"{incumbent.get('venue')}:"
                                     f"{incumbent.get('symbol')}: open "

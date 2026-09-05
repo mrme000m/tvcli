@@ -184,7 +184,16 @@ re-login in the browser window (or vault `wundertrading-session` →
   rotation/swap of an incumbent whose mark PnL is negative (or unknown
   because the observe errored) is vetoed, the incumbent keeps running and
   works its channel back toward break-even; the optimizer marks such bots
-  non-idle so no arbiter call is spent),
+  non-idle so no arbiter call is spent), `profit-exit` (daemon-side
+  take-profit — WT's native takeProfit/stopLoss/trailing fields are
+  accepted but NOT enforced server-side for grid bots yet: when cumulative
+  total PnL, realized + mark, reaches `grid_defaults.take_profit_pct` ×
+  slot budget AND every open line is ≥ 0, the bot is stopped at profit
+  and the slot recycled; a per-line-blind book fails closed),
+  `recenter` (out-of-channel bot with losing lines is re-centered on the
+  current price — verified live to leave open positions untouched — so it
+  keeps trading back; `stopOnOutOfGrid` is now false everywhere, WT no
+  longer force-stops/closes on channel exit),
   `browser-restart`,
   `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
   `re-analysis` log once per state transition, not every 60 s sweep.

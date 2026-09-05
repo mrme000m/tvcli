@@ -157,6 +157,50 @@ class TestIsIdle(unittest.TestCase):
         idle, reasons = is_idle(bot, None, NOW, CFG)
         self.assertFalse(idle)
 
+    # ── never close a position at a loss (operator directive) ──────────
+
+    def test_held_while_any_line_under_water(self):
+        # the scenario the directive is about: aggregate nets POSITIVE but
+        # one line is under water — stop_and_close_all would still realize
+        # that line's loss, so the slot is held for recovery
+        bot = make_bot(expected=300, needs_reanalysis=True,
+                       observed={"fills_24h": 3, "status": "active",
+                                 "unrealized_pnl": 0.5,
+                                 "open_lines": 5, "open_losing": 1})
+        tr = {"last_fills": 3, "last_increase_at": NOW - 600}
+        idle, reasons = is_idle(bot, tr, NOW, CFG)
+        self.assertFalse(idle)
+        self.assertIn("never closed at a loss", reasons[0])
+
+    def test_held_on_aggregate_loss_without_line_data(self):
+        # per-line data unavailable (open_losing None) → aggregate backstop
+        bot = make_bot(expected=300, needs_reanalysis=True,
+                       observed={"fills_24h": 3, "status": "active",
+                                 "unrealized_pnl": -0.94,
+                                 "open_losing": None, "open_lines": None})
+        tr = {"last_fills": 3, "last_increase_at": NOW - 600}
+        idle, reasons = is_idle(bot, tr, NOW, CFG)
+        self.assertFalse(idle)
+        self.assertIn("never closed at a loss", reasons[0])
+
+    def test_all_lines_clear_is_idle_again(self):
+        # lines computed, none under water → normal idle detection resumes
+        bot = make_bot(expected=300,
+                       observed={"fills_24h": 3, "status": "active",
+                                 "unrealized_pnl": 0.5,
+                                 "open_lines": 5, "open_losing": 0})
+        tr = {"last_fills": 3, "last_increase_at": NOW - 600}
+        idle, _ = is_idle(bot, tr, NOW, CFG)
+        self.assertTrue(idle)
+
+    def test_no_positions_swappable(self):
+        bot = make_bot(expected=300, needs_reanalysis=True,
+                       observed={"fills_24h": 3, "status": "stopped",
+                                 "unrealized_pnl": None,
+                                 "open_lines": 0, "open_losing": 0})
+        idle, reasons = is_idle(bot, {}, NOW, CFG)
+        self.assertTrue(idle)
+
 
 # ── challenger eligibility ─────────────────────────────────────────────
 
@@ -627,6 +671,23 @@ class TestCycle(unittest.TestCase):
         d, rep = self.run_cycle(st)
         self.assertEqual(d.swaps, [])
         self.assertEqual(rep["swaps"], [])
+
+    def test_idle_slot_with_underwater_line_is_held(self):
+        # NEVER close at a loss: the idle slot's incumbent holds an open
+        # line under water — the swap (stop_and_close_all would realize the
+        # loss) must not even be attempted, and no arbiter call is needed
+        st = cycle_state()
+        bot1 = st["active_bots"]["1"]
+        bot1["needs_reanalysis"] = True  # hard-idle trigger
+        bot1["observed"] = {**bot1["observed"],
+                            "unrealized_pnl": 0.5,   # aggregate nets +
+                            "open_lines": 5, "open_losing": 1}
+        d, rep = self.run_cycle(st)
+        self.assertEqual(d.swaps, [])
+        self.assertEqual(rep["swaps"], [])
+        # held, not idle: the slot never reaches the challenger stage
+        self.assertEqual(rep["idle"], [])
+        self.assertIsNone(rep["arbiter"])
 
     def test_weak_challenger_vetoed(self):
         st = cycle_state()

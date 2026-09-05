@@ -245,6 +245,76 @@ class ManageTestCase(ManageHarness):
         self.assertEqual(d.state["active_bots"]["1"]["bot_code"], "NEWBOT")
         self.assertEqual(d.state["committed"]["1"], 50.0)
 
+    def test_rotation_vetoed_by_underwater_line(self):
+        # NEVER close a position at a loss: the aggregate nets POSITIVE but
+        # one open line is under water — stop_and_close_all would realize
+        # that line's loss, so the rotation is vetoed at the choke point
+        # and nothing is stopped, deleted, or created
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0, "force_rotate": True,
+            "stagnation_policy": {
+                "regime": "neutral",
+                "stagnant_if": {"min_fills_24h": 1.0, "min_realized_ratio": 0.4},
+                "score_drop_rotate": 12.0, "hysteresis_score": 5.0,
+                "cooldown_h": 12.0},
+            "observed": {"fills_24h": 0.0, "realized_ratio": 0.0,
+                         "unrealized_pnl": 0.5,
+                         "open_lines": 5, "open_losing": 1},
+            "decision_id": "OLD1",
+        }
+        challenger = {"venue": "hyperliquid", "symbol": "SOL",
+                      "tv_symbol": "HYPE:SOL", "regime": "neutral",
+                      "score_final": 90.0,
+                      "archetype": "Neutral Grid (mean-reversion)"}
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "active"}]
+        ok = d.execute_rotation("1", challenger, dry_run=False)
+        self.assertFalse(ok)
+        self.assertEqual(self.ops, [])  # no stop, no delete, no create
+        # incumbent untouched
+        self.assertEqual(d.state["active_bots"]["1"]["symbol"], "PUMP")
+        kinds = [e.get("kind") for e in d.state["journal"]]
+        self.assertIn("loss-veto", kinds)
+
+    def test_rotation_vetoed_by_aggregate_loss_without_line_data(self):
+        # per-line data unavailable → aggregate backstop still holds
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0, "force_rotate": True,
+            "stagnation_policy": {"hysteresis_score": 5.0, "cooldown_h": 12.0},
+            "observed": {"fills_24h": 0.0, "realized_ratio": 0.0,
+                         "unrealized_pnl": -0.94,
+                         "open_losing": None, "open_lines": None},
+            "decision_id": "OLD1",
+        }
+        challenger = {"venue": "hyperliquid", "symbol": "SOL",
+                      "tv_symbol": "HYPE:SOL", "regime": "neutral",
+                      "score_final": 90.0,
+                      "archetype": "Neutral Grid (mean-reversion)"}
+        ok = d.execute_rotation("1", challenger, dry_run=False)
+        self.assertFalse(ok)
+        self.assertEqual(self.ops, [])
+
+    def test_rotation_vetoed_blind_observe(self):
+        # PnL unknown because observe errored — never close blind
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0, "force_rotate": True,
+            "stagnation_policy": {"hysteresis_score": 5.0, "cooldown_h": 12.0},
+            "observed": {"error": "grid status list unavailable"},
+            "decision_id": "OLD1",
+        }
+        challenger = {"venue": "hyperliquid", "symbol": "SOL",
+                      "tv_symbol": "HYPE:SOL", "regime": "neutral",
+                      "score_final": 90.0,
+                      "archetype": "Neutral Grid (mean-reversion)"}
+        ok = d.execute_rotation("1", challenger, dry_run=False)
+        self.assertFalse(ok)
+        self.assertEqual(self.ops, [])
+
     def test_rotation_veto_when_challenger_not_better_enough(self):
         d = self.make_daemon()
         d.state["active_bots"]["1"] = {

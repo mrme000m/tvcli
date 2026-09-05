@@ -140,6 +140,12 @@ EDITABLE = {
         label="Binance sleeve", unit="USD"),
     "screen.rescreen_minutes": dict(t="float", min=5, max=1440, group="Cadence",
                                     label="Rescreen cadence", unit="min"),
+    "grid_defaults.take_profit_pct": dict(
+        t="float", min=0, max=2, group="Exits",
+        label="Profit-exit target", unit="× slot budget",
+        help="Cumulative total PnL (realized + mark) at which a bot is "
+             "stopped at profit and its slot recycled. 0 disables. "
+             "Never closes a losing line."),
     "screen.min_volume_usd": dict(t="int", min=100_000, max=100_000_000,
                                   group="Screening",
                                   label="Min 24h quote volume", unit="USD"),

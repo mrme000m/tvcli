@@ -230,9 +230,17 @@ def is_idle(bot, tracker, now, cfg):
     # incumbent keeps running — its grid keeps working the position back
     # toward break-even (and health_cycle may re-center the channel).
     # This check precedes needs_reanalysis: even an out-of-channel bot
-    # is held while its positions are under water.
+    # is held while its positions are under water. Per-LINE first (a
+    # net-positive aggregate can still hide one losing line that the
+    # close would realize), aggregate as the backstop when per-line data
+    # is unavailable (open_losing is None).
+    losing = obs.get("open_losing")
+    if losing is not None and losing:
+        return False, [f"{losing} open line(s) at a loss "
+                       f"(unrealized ${obs.get('unrealized_pnl')}) — "
+                       f"held for recovery, never closed at a loss"]
     pnl = obs.get("unrealized_pnl")
-    if pnl is not None and float(pnl) < 0:
+    if losing is None and pnl is not None and float(pnl) < 0:
         return False, [f"open position at loss (${float(pnl):.2f} "
                        f"unrealized) — held for recovery, never closed "
                        f"at a loss"]
