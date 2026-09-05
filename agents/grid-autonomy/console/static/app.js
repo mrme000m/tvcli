@@ -696,7 +696,7 @@ $("#cfg-save").addEventListener("click", async () => {
 
 /* ── llm providers ────────────────────────────────────────────────── */
 
-const LLM_PROVIDER_LABELS = { cf: "Cloudflare", nvidia: "NVIDIA", openrouter: "OpenRouter" };
+const LLM_PROVIDER_LABELS = { cf: "Cloudflare", nvidia: "NVIDIA", openrouter: "OpenRouter", mistral: "Mistral" };
 const LLM_MASK = "•"; // never a real key; empty/sentinel means "keep existing"
 
 let llmState = null; // last GET /api/llm payload (providers, chain, roles)
@@ -744,7 +744,7 @@ function moveChain(i, delta) {
 function renderLlmProviders(p) {
   const wrap = $("#llm-providers");
   wrap.innerHTML = "";
-  for (const name of ["cf", "nvidia", "openrouter"]) {
+  for (const name of ["cf", "nvidia", "openrouter", "mistral"]) {
     const prov = p.providers[name] || {};
     const enabled = (p.chain || []).includes(name);
     const modelInput = el("input", { type: "text", class: "llm-model",
@@ -799,7 +799,7 @@ function renderLlmMatrix(p) {
   const roles = p.roles || {};
   const matrix = $("#llm-matrix");
   matrix.innerHTML = "";
-  const opts = ["", "cf", "nvidia", "openrouter"]; // "" = follow chain
+  const opts = ["", "cf", "nvidia", "openrouter", "mistral"]; // "" = follow chain
   for (const role of (p.role_keys || [])) {
     const select = el("select", { class: "llm-role-select", "data-role": role });
     for (const o of opts) {
@@ -852,7 +852,7 @@ function setStatus(name, ok, latency, err) {
 $("#llm-validate-all").addEventListener("click", async () => {
   const note = $("#llm-validate-note");
   note.textContent = "pinging…";
-  for (const name of ["cf", "nvidia", "openrouter"]) {
+  for (const name of ["cf", "nvidia", "openrouter", "mistral"]) {
     await validateProvider(name);
   }
 });
@@ -860,7 +860,7 @@ $("#llm-validate-all").addEventListener("click", async () => {
 $("#llm-save").addEventListener("click", async () => {
   if (!llmState) { toast("load LLM config first"); return; }
   const providers = {};
-  for (const name of ["cf", "nvidia", "openrouter"]) {
+  for (const name of ["cf", "nvidia", "openrouter", "mistral"]) {
     const prov = llmState.providers[name] || {};
     const entry = { model: prov.model };
     const keyInput = document.querySelector(`.llm-key[data-prov="${name}"]`);
