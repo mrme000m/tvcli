@@ -133,8 +133,11 @@ re-login in the browser window (or vault `wundertrading-session` →
   `GET /status → journal_tail`. Kinds: `screen`, `veto`, `guard-veto`,
   `reliability-veto`, `deploy-paper`, `deploy-failed`, `adopted`, `stagnant`,
   `adjust`, `rotation-stop/delete/rotate`, `capacity-veto` (plan bot cap),
-  `subscription` (plan limits observed/changed), `browser-restart`,
-  `env-heal`, `observe-outage`, `kill`, and more.
+  `subscription` (plan limits observed/changed), `tier-cap` (tier grid
+  density cap applied), `reliability-migrate` (ledger key normalization),
+  `browser-restart`,
+  `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
+  `re-analysis` log once per state transition, not every 60 s sweep.
 - **Decision journal:** `state/decisions.jsonl` — one line per decision;
   `record_outcome` attaches `"outcome"` on close. Ids are
   `dYYYYMMDD-NNN`. `payload_digest` is an md5 — full payloads are never
@@ -169,10 +172,13 @@ re-login in the browser window (or vault `wundertrading-session` →
   `c629f5ba3a643a82137e7864` hard-denylisted.
 - 8 fail-closed gates; no WunderTrading mutation before they all pass.
 - Allocation ladder: base 25% (<10 samples) → probe 40% (≥10) → full 50%
-  (≥30, PF ≥ 1.3); `recent_pf < 1.0` kills the archetype.
+  (≥30, PF ≥ 1.3); tiers also cap grid density
+  (`autonomy.tier_max_grids` 12/20/30 lines). `recent_pf < 1.0` kills the
+  archetype, but only with ≥ `reliability.kill_min_samples` (default 10)
+  closed trips — one losing round-trip must not ban a regime forever.
 - Worst-case commitment ≤ slot cap and portfolio ≤ 85% ceiling; step ≥ 2×
   spread; per-pair `limits.cost.min` as the floor.
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 201 offline tests as of 2026-09-05; trust the runner output over any count in docs.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 232 offline tests as of 2026-09-05; trust the runner output over any count in docs.

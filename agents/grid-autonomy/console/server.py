@@ -147,6 +147,18 @@ EDITABLE = {
                                label="Probe tier", unit="fraction"),
     "autonomy.full_pct": dict(t="float", min=0.01, max=1.0, group="Sizing ladder",
                               label="Full tier", unit="fraction"),
+    "autonomy.tier_max_grids.base": dict(
+        t="int", min=3, max=100, group="Sizing ladder",
+        label="Base-tier grid cap", unit="lines"),
+    "autonomy.tier_max_grids.probe": dict(
+        t="int", min=3, max=100, group="Sizing ladder",
+        label="Probe-tier grid cap", unit="lines"),
+    "autonomy.tier_max_grids.full": dict(
+        t="int", min=3, max=100, group="Sizing ladder",
+        label="Full-tier grid cap", unit="lines"),
+    "reliability.kill_min_samples": dict(
+        t="int", min=1, max=100, group="Sizing ladder",
+        label="Kill-flag min samples", unit="trips"),
     "memory.k": dict(t="int", min=1, max=10, group="Deliberation",
                      label="Memories per candidate"),
 }
@@ -629,7 +641,8 @@ def llm_payload() -> dict:
         "roles": roles,
         "role_keys": LLM_ROLE_KEYS,
         "llm_env": {"cf": _present("cf"), "nvidia": _present("nvidia"),
-                    "openrouter": _present("openrouter")},
+                    "openrouter": _present("openrouter"),
+                    "mistral": _present("mistral")},
         "sidecar": os.path.isfile(LLM_ENV_PATH),
         "note": "Keys are stored in state/llm.env (0600) and never returned. "
                 "Models/chain/roles are read by the daemon at the next LLM "
@@ -658,7 +671,7 @@ def apply_llm(updates: dict) -> tuple[int, dict]:
         if name not in LLM_PROVIDERS or not isinstance(spec, dict):
             continue
         model_var = {"cf": "CF_MODEL", "nvidia": "NVIDIA_MODEL",
-                     "openrouter": "OPENROUTER_MODEL"}[name]
+                     "openrouter": "OPENROUTER_MODEL", "mistral": "MISTRAL_MODEL"}[name]
         if "model" in spec:
             model = str(spec["model"]).strip()
             if model:
@@ -666,7 +679,8 @@ def apply_llm(updates: dict) -> tuple[int, dict]:
         if "key" in spec:
             key_val = str(spec["key"])
             key_var = {"cf": "CLOUDFLARE_API_KEY", "nvidia": "NVIDIA_API_KEY",
-                       "openrouter": "OPENROUTER_API_KEY"}[name]
+                       "openrouter": "OPENROUTER_API_KEY",
+                       "mistral": "MISTRAL_API_KEY"}[name]
             if key_val and key_val != "__KEEP__":
                 side[key_var] = key_val
             # "" / "__KEEP__" → leave existing key (or none) untouched.

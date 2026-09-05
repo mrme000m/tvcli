@@ -186,11 +186,17 @@ def record_decision(ticket, brief, action, payloads=None):
     slot = brief.get("slot")
     if isinstance(slot, dict):
         slot = slot.get("slot")
-    step_pct = brief.get("step")
-    if step_pct is None and isinstance(payloads, dict):
+    # DEPLOYED step wins (post size-fit widening / risk multipliers);
+    # the screen's derived step is kept alongside for lineage — they can
+    # differ after the tier density cap or the min-cost floor rebuild
+    step_pct = None
+    if isinstance(payloads, dict):
         gb = payloads.get("grid_bot")
         if isinstance(gb, dict):
             step_pct = gb.get("profit_per_grid_pct")
+    screen_step = brief.get("step")
+    if step_pct is None:
+        step_pct = screen_step
     stagnation = _get(brief, "stagnation_policy")
     if stagnation is None and isinstance(payloads, dict):
         stagnation = payloads.get("stagnation_policy")
@@ -204,6 +210,7 @@ def record_decision(ticket, brief, action, payloads=None):
         "decision": ticket.get("decision"),
         "score_final": brief.get("score_final"),
         "step_pct": step_pct,
+        "step_pct_screen": screen_step,
         "slot": slot,
         "action": action,
         "rationale": ticket.get("rationale"),
@@ -330,6 +337,11 @@ def memories_for(brief, k=3):
             except Exception:
                 continue
             if not isinstance(obj, dict) or not obj.get("outcome"):
+                continue
+            oc = obj.get("outcome")
+            # deploy-failed outcomes close the ledger line but carry no
+            # market information — keep them out of the swarm's memory
+            if not isinstance(oc, dict) or                     str(oc.get("reason") or "") == "deploy-failed":
                 continue
             tier = 2
             if symbol and _norm(obj.get("symbol")) == symbol and \

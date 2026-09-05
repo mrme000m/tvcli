@@ -98,6 +98,7 @@ except Exception:
 try:
     from reliability_grid import (archetype_stats, bot_trades,  # noqa: F401
                                   archive_trades, archived_by_archetype,
+                                  ledger_key, normalize_archive,
                                   load as load_reliability,
                                   save as save_reliability)
     HAS_RELIABILITY = True
@@ -115,6 +116,13 @@ except Exception:
 
     def archived_by_archetype():
         return {}
+
+    def ledger_key(archetype):
+        # fallback stub: reliability_grid absent — pass through unchanged
+        return str(archetype) if archetype else "unknown"
+
+    def normalize_archive():
+        return False
 
     def load_reliability():
         return {}
@@ -248,13 +256,13 @@ def self_heal_env(state=None):
             pass
         if os.environ.get("PB_TOKEN") or os.environ.get("PB_ADMIN_EMAIL"):
             healed.append("pb")
-    if not (os.environ.get("NVIDIA_API_KEY")
-            or os.environ.get("OPENROUTER_API_KEY")) and _load_llm_env:
+    _llm_keys = ("NVIDIA_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY")
+    if not any(os.environ.get(k) for k in _llm_keys) and _load_llm_env:
         try:
             _load_llm_env()
         except Exception:
             pass
-        if os.environ.get("NVIDIA_API_KEY") or os.environ.get("OPENROUTER_API_KEY"):
+        if any(os.environ.get(k) for k in _llm_keys):
             healed.append("llm")
     if healed and state is not None:
         log(state, {"kind": "env-heal",
@@ -364,12 +372,19 @@ DEFAULT_CONFIG = {
               "browser_cdp": "http://127.0.0.1:9222",
               "browser_restart_cooldown_s": 600},
     "autonomy": {"mode": "auto", "base_pct": 0.25, "probe_pct": 0.40, "full_pct": 0.50,
-                 "live_profiles": [], "paper_profiles": ["demo-hype"]},
+                 "live_profiles": [], "paper_profiles": ["demo-hype"],
+                 # tier caps grid DENSITY too, not just the worst-case
+                 # target — at min-notional-dominated sizes the exchange
+                 # floor otherwise raised every tier to the hard cap
+                 "tier_max_grids": {"base": 12, "probe": 20, "full": 30}},
     "memory": {"k": 3},
     "adopt_existing": True,
     "policy": {"hysteresis_score": 5.0, "cooldown_min_h": 12.0,
                "cooldown_max_h": 72.0, "min_hold_h": 24},
-    "reliability": {"min_samples": 30, "profit_factor_pass": 1.3},
+    "reliability": {"min_samples": 30, "profit_factor_pass": 1.3,
+                    # recent_pf kill-flag binds only with this many closed
+                    # samples (1 losing trip must not ban a regime forever)
+                    "kill_min_samples": 10},
     "server": {"daemon_port": 8799},
 }
 
@@ -788,8 +803,26 @@ def size_multiplier(reliability, archetype, cfg):
     return base, "base", stats
 
 
-def refuse_new_archetype(reliability, archetype):
+# The kill-flag only binds with this many closed samples: grid bots
+# routinely close their first round-trip in drawdown, so a single losing
+# trip on a fresh archetype (recent_pf=0.0 over 1 sample) must NOT
+# permanently ban the regime — with no active bot of that archetype left,
+# no new trades would ever enter the ledger and the refusal could never
+# lift by itself (the paper-sampling loop would stall itself).
+KILL_MIN_SAMPLES = 10
+
+
+def refuse_new_archetype(reliability, archetype, min_samples=None):
+    """True only when the archetype is measured AND recently unprofitable.
+
+    recent_pf covers the last RECENT_WINDOW (20) closed round-trips; below
+    `min_samples` total closed trips the signal is noise — treat it as
+    no-signal instead of a kill.
+    """
     stats = _reliability_stats_for(reliability, archetype)
+    samples = stats.get("samples", 0) or 0
+    if samples < (KILL_MIN_SAMPLES if min_samples is None else min_samples):
+        return False
     recent_pf = stats.get("recent_pf")
     return recent_pf is not None and recent_pf < 1.0
 
@@ -815,6 +848,62 @@ class Daemon:
         self._reliability_flag = False
         self._browser_down_since = None
         self._last_browser_restart = 0.0
+        self._migrate_archetype_keys()
+
+    def _migrate_archetype_keys(self):
+        """Idempotent ledger-key normalization (split-key bug fix).
+
+        Adopted bots used to key the reliability ledger by the raw regime
+        name ("chop_high_volatility") while fresh deploys keyed it by the
+        archetype label ("Neutral Grid (mean-reversion)") — the same market
+        regime wrote its stats under two keys, halving the sample base that
+        gates sizing escalation and kill-flags. This re-keys state, the
+        ledger, and the trade archive to the canonical archetype label.
+        """
+        try:
+            changed = False
+            rekeyed = 0
+            for bot in (self.state.get("active_bots") or {}).values():
+                old = bot.get("archetype")
+                if isinstance(old, str) and old and ledger_key(old) != old:
+                    bot["archetype"] = ledger_key(old)
+                    changed = True
+                    rekeyed += 1
+            if rekeyed:
+                log(self.state, {"kind": "reliability-migrate",
+                                 "msg": f"re-keyed {rekeyed} active bot(s) to "
+                                        f"canonical archetype labels"})
+            rel = self.reliability or {}
+            for old in list(rel.keys()):
+                new = ledger_key(old)
+                if new == old:
+                    continue
+                # canonical key wins when both spellings held stats; the
+                # 24h recompute rebuilds from the re-keyed trade archive
+                # + active bots, so nothing measured is lost from source
+                if new in rel:
+                    log(self.state, {"kind": "reliability-migrate",
+                                     "msg": f"ledger key {old!r} dropped — "
+                                            f"canonical {new!r} wins"})
+                else:
+                    rel[new] = rel[old]
+                    log(self.state, {"kind": "reliability-migrate",
+                                     "msg": f"ledger key {old!r} → {new!r}"})
+                del rel[old]
+                changed = True
+            self.reliability = rel
+            self.state["reliability"] = rel
+            if changed and HAS_RELIABILITY:
+                save_reliability(rel)
+            if HAS_RELIABILITY and normalize_archive():
+                log(self.state, {"kind": "reliability-migrate",
+                                 "msg": "re-keyed reliability_archive.json "
+                                        "to canonical archetype labels"})
+                changed = True
+            if changed:
+                save_state(self.state)
+        except Exception as exc:  # migration must never block startup
+            print(f"archetype-key migration failed: {exc}", flush=True)
 
     # ── browser watchdog (WT session-API dependency) ────────────────────
     def browser_watchdog(self):
@@ -869,6 +958,7 @@ class Daemon:
                             os.environ.get("CLOUDFLARE_AI_TOKEN"))),
                 "nvidia": bool(os.environ.get("NVIDIA_API_KEY")),
                 "openrouter": bool(os.environ.get("OPENROUTER_API_KEY")),
+                "mistral": bool(os.environ.get("MISTRAL_API_KEY")),
             },
             "pb_env": bool(os.environ.get("PB_TOKEN") or
                            os.environ.get("PB_ADMIN_EMAIL")),
@@ -968,11 +1058,16 @@ class Daemon:
         min_cost = max(meta.get("min_cost") or 0, MIN_USD_PER_GRID)
         amount_precision = meta.get("amount_precision")
 
-        # escalation ladder
-        archetype = cand.get("archetype") or cand.get("regime", "neutral")
-        if refuse_new_archetype(self.reliability, archetype):
+        # escalation ladder (canonical ledger key: adopted bots used to
+        # key the ledger by raw regime name while fresh deploys keyed by
+        # archetype label — same regime, two sample bases)
+        archetype = ledger_key(cand.get("archetype")
+                               or cand.get("regime", "neutral"))
+        if refuse_new_archetype(self.reliability, archetype,
+                                min_samples=self._kill_min_samples()):
             log(self.state, {"kind": "reliability-veto",
-                             "msg": f"{key}: recent_pf < 1.0 for archetype "
+                             "msg": f"{key}: recent_pf < 1.0 over enough "
+                                    f"samples for archetype "
                                     f"{archetype} — refuse new deployment"})
             return None, ticket, None, brief
         mult, tier, stats = size_multiplier(self.reliability, archetype, self.config)
@@ -983,6 +1078,28 @@ class Daemon:
             ticket, brief, slot["balance"], max_alloc_eff, profile["code"],
             pair_code, exchange_code=exch, amount_precision=amount_precision,
             min_cost=min_cost)
+
+        # ── tier density cap ─────────────────────────────────────────
+        # The escalation ladder must bind on more than the worst-case
+        # TARGET: at min-notional-dominated sizes the exchange floor raised
+        # every tier to the hard cap, making base/probe/full symbolic.
+        # Each tier also caps the grid COUNT, so a base-tier deployment is
+        # genuinely a small probe (fewer lines → wider step → less capital
+        # at risk) until reliability samples accrue.
+        tier_grids = int((self.config.get("autonomy", {}) or {}).get(
+            "tier_max_grids", {}).get(tier, 0) or 0)
+        if tier_grids and int(payloads["grid_bot"].get("grids") or 0) > tier_grids:
+            payloads = grid_adapter.build_ticket_payloads(
+                ticket, brief, slot["balance"], max_alloc_eff,
+                profile["code"], pair_code, exchange_code=exch,
+                amount_precision=amount_precision, min_cost=min_cost,
+                max_affordable_grids=tier_grids,
+                min_grids=int(self.config.get("grid_defaults", {})
+                              .get("min_grids", 5)))
+            log(self.state, {"kind": "tier-cap",
+                             "msg": f"{key}: tier {tier} caps density at "
+                                    f"{tier_grids} grids — step widened to "
+                                    f"{payloads['grid_bot']['profit_per_grid_pct']}%"})
 
         # ── density-first sizing (user directive) ──────────────────────
         # Grid DENSITY (line count) drives profit (fills/day × profit/fill).
@@ -1094,7 +1211,8 @@ class Daemon:
 
     def commit_deploy(self, action, ticket, payloads, brief, cand, slot, dry_run):
         """Create the bot (or journal the plan) and record active state."""
-        archetype = cand.get("archetype") or cand.get("regime", "neutral")
+        archetype = ledger_key(cand.get("archetype")
+                               or cand.get("regime", "neutral"))
         if dry_run:
             action["upsert"] = payloads["upsert"]
             log(self.state, action)
@@ -1113,6 +1231,13 @@ class Daemon:
             action["kind"] = "deploy-failed"
             action["error"] = (msg or (res.get("stderr") or "")[:200]
                                 or "grid_create ok=false")
+            # close the decision record: outcomes only attach on rotation,
+            # so a failed create used to leave an open decision line in the
+            # journal/console ledger forever
+            record_outcome_safe(action.get("decision_id"), {
+                "reason": "deploy-failed",
+                "error": action["error"],
+                "realized_pnl": None, "fills": 0, "observed": {}})
         log(self.state, action)
         bot_code = extract_bot_code(res)
         if res.get("ok") and bot_code:
@@ -1151,6 +1276,46 @@ class Daemon:
             except Exception as exc:
                 log(self.state, {"kind": "warn", "msg": f"spec write failed: {exc}"})
         return action
+
+    def _capacity_note_deploy(self, capacity, cand, payloads):
+        """Locally adjust the tier-cap snapshot after THIS daemon created a
+        bot in the current rescreen cycle.
+
+        The snapshot is fetched once per cycle; without this adjustment the
+        pre-check for candidate N ignores the bot the daemon itself created
+        for candidate N−1 and retries the create into the server-side 400
+        ("Maximum number of Grid Bots reached") instead of skipping with a
+        clean capacity-veto. Best-effort: never raises.
+        """
+        if not capacity:
+            return
+        try:
+            profiles = self.profiles or self.state.get("profiles") or []
+            prof, _violation = select_profile(cand["venue"], profiles,
+                                              self.config, paper=True)
+            if not prof:
+                return
+            exch = (prof.get("exchange") or "").upper()
+            active = capacity.setdefault("active", {})
+            premium = active.get("premium")
+            if isinstance(premium, dict) and exch in premium:
+                premium[exch] = (premium.get(exch) or 0) + 1
+            else:
+                active["other"] = (active.get("other") or 0) + 1
+            pair = (payloads.get("upsert") or {}).get("pairCode")
+            if pair:
+                used = (capacity.get("used_pairs") or {}).get(exch)
+                if isinstance(used, dict):
+                    used.setdefault(prof.get("code") or "?", []).append(pair)
+        except Exception:
+            pass
+
+    def _kill_min_samples(self):
+        try:
+            return int(self.config.get("reliability", {}).get(
+                "kill_min_samples", KILL_MIN_SAMPLES) or KILL_MIN_SAMPLES)
+        except (TypeError, ValueError):
+            return KILL_MIN_SAMPLES
 
     def venue_capacity_block(self, cand, capacity):
         """(blocked_reason | None) — plan-level grid-bot capacity for a venue.
@@ -1298,6 +1463,10 @@ class Daemon:
             })
             self.commit_deploy(action, ticket, payloads, brief, cand, slot, dry_run)
             actions.append(action)
+            if not dry_run and str(slot["slot"]) in self.state["active_bots"]:
+                # keep the tier-cap snapshot honest for the NEXT candidate
+                # in this same cycle (the snapshot predates this deploy)
+                self._capacity_note_deploy(capacity, cand, payloads)
             deployments.append({
                 "slot": slot["slot"], "symbol": cand["symbol"],
                 "venue": cand["venue"], "grid_type": ticket.get("grid_type"),
@@ -1308,6 +1477,7 @@ class Daemon:
             })
             free.remove(slot)
             deployed += 1
+            active_keys.add(key)  # a later duplicate candidate must not re-deploy
 
         # ── rotation pass: stagnant incumbents vs better challengers ──
         rotations = []
@@ -1390,6 +1560,13 @@ class Daemon:
                     "to": f"{challenger.get('venue')}:{challenger.get('symbol')}",
                     "reasons": reasons,
                 })
+                # refresh: a second stagnant slot in the SAME cycle must not
+                # pick this just-committed challenger again (the stale set
+                # pre-dates the rotation and would allow the duplicate
+                # create → pair-exclusivity 400 with the incumbent already
+                # stopped and deleted, leaving the slot empty)
+                active_keys = {f"{b.get('venue')}:{b.get('symbol')}"
+                               for b in self.state["active_bots"].values()}
         save_state(self.state)
         cycle_report = {
             "at": utcnow(), "cycle_kind": "rescreen",
@@ -1439,12 +1616,16 @@ class Daemon:
             channel = bot.get("channel") or {}
 
             # reliability kill-flag review for existing bots
-            archetype = bot.get("archetype") or bot.get("ticket", {}).get("regime")
-            if refuse_new_archetype(self.reliability, archetype):
+            archetype = ledger_key(bot.get("archetype")
+                                   or bot.get("ticket", {}).get("regime"))
+            flagged = refuse_new_archetype(
+                self.reliability, archetype, min_samples=self._kill_min_samples())
+            if flagged and not bot.get("reliability_flagged"):
                 log(self.state, {"kind": "reliability-flag", "slot": slot_key,
                                  "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
                                         f"archetype {archetype} recent_pf<1.0 — "
                                         f"flagged for rotation review"})
+            bot["reliability_flagged"] = flagged
 
             # stagnation evaluation (drives rotation candidates)
             stag, reasons = is_stagnant(
@@ -1453,18 +1634,29 @@ class Daemon:
                 ladder_full=obs.get("ladder_full", False),
                 dd_vs_atr_band=obs.get("dd_vs_atr_band", 0.0))
             if stag:
-                log(self.state, {"kind": "stagnant", "slot": slot_key,
-                                 "msg": f"{bot.get('venue')}:{bot.get('symbol')}: "
-                                        f"{'; '.join(reasons)[:160]}"})
+                # log on TRANSITION only (first stagnant sweep per bot, or
+                # when the reasons change): the 200-entry journal otherwise
+                # fills with one line per stagnant bot every 60 s and all
+                # screen/veto/deploy history ages out within the hour
+                sig = "; ".join(reasons)[:160]
+                if bot.get("stagnant_sig") != sig:
+                    log(self.state, {"kind": "stagnant", "slot": slot_key,
+                                     "msg": f"{bot.get('venue')}:{bot.get('symbol')}: "
+                                            f"{sig}"})
+                bot["stagnant_sig"] = sig
+            else:
+                bot.pop("stagnant_sig", None)
 
             out_of_channel = False
             if price is not None and channel.get("high") and channel.get("low"):
                 out_of_channel = price > channel["high"] or price < channel["low"]
             if out_of_channel or status in STOPPED_STATES:
+                if not bot.get("needs_reanalysis"):
+                    # transition only — same 60 s spam guard as `stagnant`
+                    log(self.state, {"kind": "re-analysis", "slot": slot_key,
+                                     "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
+                                            f"out-of-channel/stopped — mark for re-analysis"})
                 bot["needs_reanalysis"] = True
-                log(self.state, {"kind": "re-analysis", "slot": slot_key,
-                                 "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
-                                        f"out-of-channel/stopped — mark for re-analysis"})
                 continue
             # back in channel and running: an earlier re-analysis mark is stale
             bot.pop("needs_reanalysis", None)
@@ -1662,7 +1854,8 @@ class Daemon:
                 final_trades = bot_trades(bot_code) or []
                 realized_pnl = round(sum(t.get("pnl_usd", 0.0)
                                          for t in final_trades), 4)
-                if archive_trades(final_trades, incumbent.get("archetype")):
+                if archive_trades(final_trades,
+                                  ledger_key(incumbent.get("archetype"))):
                     log(self.state, {"kind": "reliability-archive", "slot": slot_key,
                                      "msg": f"archived {len(final_trades)} closed "
                                             f"round-trips for "
@@ -1765,19 +1958,30 @@ class Daemon:
                                         f"no free {venue} slot"})
                 continue
             free.remove(slot)
+            # derive the stagnation policy from LIVE metrics: step from the
+            # current ATR (grid_defaults factors, like every fresh deploy)
+            # and the regime from the same candles — adopted bots used to
+            # carry hardcoded step 0.5% / regime "neutral" thresholds until
+            # their first re-analysis
+            regime, step = "neutral", 0.5
             try:
-                from market_regime import fetch_candles
+                from market_regime import (fetch_candles, compute_metrics,
+                                            classify)
                 cl = fetch_candles(venue, fetch_symbol(venue, symbol), "1h", 300,
                                    "futures" if venue == "hyperliquid" else "spot")
-                policy = derive_policy([c[3] for c in cl], "1h", 0.5, "neutral")
+                m = compute_metrics(cl)
+                regime, _ev = classify(m)
+                gd = self.config.get("grid_defaults", {}) or {}
+                step = round(min(gd.get("step_max", 2.0),
+                                max(gd.get("step_min", 0.1),
+                                    (m.get("atr_pct") or 1.0)
+                                    * gd.get("step_factor", 0.5))), 3)
+            except Exception:
+                cl = []
+            try:
+                policy = derive_policy([c[3] for c in cl], "1h", step, regime)
             except Exception as exc:
                 policy = {"error": str(exc)[:120]}
-            # classify the regime so the adopted bot joins the reliability
-            # ledger under a real archetype instead of "unknown"
-            try:
-                regime = reclassify_regime(venue, symbol) or "neutral"
-            except Exception:
-                regime = "neutral"
             ticket = {"symbol": symbol, "venue": venue,
                       "decision": "GO", "grid_type": "neutral",
                       "regime": regime}
@@ -1797,7 +2001,7 @@ class Daemon:
                 "bot_code": b.get("code"),
                 "ticket": ticket,
                 "score_final": None,
-                "archetype": regime,
+                "archetype": ledger_key(regime),
                 "stagnation_policy": policy,
                 "channel": None,
                 "profile_code": None, "pair_code": b.get("pairCode"),
@@ -1822,14 +2026,16 @@ class Daemon:
         try:
             # seed with archived (rotated-out) bots' trades so deleted bots
             # keep feeding the ledger, then extend with the active bots
-            by_archetype = {arch: list(rows)
-                            for arch, rows in archived_by_archetype().items()}
+            by_archetype = {}
+            for arch, rows in archived_by_archetype().items():
+                by_archetype.setdefault(ledger_key(arch), []).extend(rows)
             for bot in (self.state.get("active_bots") or {}).values():
                 code = bot.get("bot_code")
                 if not code:
                     continue
-                by_archetype.setdefault(bot.get("archetype") or "unknown",
-                                        []).extend(bot_trades(code))
+                by_archetype.setdefault(
+                    ledger_key(bot.get("archetype") or "unknown"),
+                    []).extend(bot_trades(code))
             stats = archetype_stats(by_archetype) if by_archetype else {}
             merged = dict(self.reliability or {})
             fresh = 0

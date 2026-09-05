@@ -56,6 +56,9 @@ reliability:                   # Phase G gates before any live scale-up
   min_samples: 30
   profit_factor_pass: 1.3
   profit_factor_kill: 1.0
+  kill_min_samples: 10         # recent_pf<1.0 kill-flag binds only with ≥ this
+                               # many closed trips — one losing round-trip on a
+                               # fresh archetype must not ban the regime forever
 
 watch:                         # daemon health-poll loop (Phase 4)
   interval_s: 60               # observe_all poll cadence
@@ -72,6 +75,13 @@ autonomy:                      # escalation ladder + profile allowlists
   base_pct: 0.25               # unproven archetype: target 25% of slot worst-case
   probe_pct: 0.40              # ≥10 reliability samples → probe at 40%
   full_pct: 0.50               # ≥30 samples & PF≥1.3 → full 50%
+  tier_max_grids:              # tiers ALSO cap grid density (line count), not
+    base: 12                   # just the worst-case target — otherwise the
+    probe: 20                  # $-per-line exchange floor pushed every tier to
+    full: 30                   # the hard cap and base/probe/full were symbolic.
+                               # Base deployments are genuinely small probes:
+                               # fewer lines → wider step → less capital at
+                               # risk until reliability samples accrue.
                                # NOTE (density-first sizing): tiers are TARGETS.
                                # The exchange minimum per line (limits.cost.min,
                                # e.g. 10 USDC on Hyperliquid) raises per-line

@@ -45,7 +45,11 @@ def make_payloads(pair="PAIR1", price=100.0, step_pct=0.5, grids=10):
     }
 
 
-class ManageTestCase(unittest.TestCase):
+class ManageHarness(unittest.TestCase):
+    """Mock environment (setUp/make_daemon) with NO test methods, so
+    subclasses in other modules reuse the harness without silently
+    re-running this whole suite."""
+
     def setUp(self):
         self.ops = []
         self.grid_status_ret = []
@@ -138,6 +142,8 @@ class ManageTestCase(unittest.TestCase):
         d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
         return d
 
+
+class ManageTestCase(ManageHarness):
     # ── rotation ────────────────────────────────────────────────────────
     def test_rotation_order_stop_verify_delete_then_deploy(self):
         d = self.make_daemon()
@@ -378,8 +384,17 @@ class ManageTestCase(unittest.TestCase):
             {arch: {"samples": 30, "profit_factor": 1.4}}, arch, cfg)[0], 0.50)
         self.assertFalse(daemon.refuse_new_archetype({arch: {"samples": 30}},
                                                      arch))
-        self.assertTrue(daemon.refuse_new_archetype(
+        # kill-flag needs EVIDENCE: recent_pf<1 over too few closed trips is
+        # noise (a fresh archetype's first round-trip often closes red) and
+        # must not permanently ban the regime
+        self.assertFalse(daemon.refuse_new_archetype(
+            {arch: {"samples": 3, "recent_pf": 0.0}}, arch))
+        self.assertFalse(daemon.refuse_new_archetype(
             {arch: {"recent_pf": 0.9}}, arch))
+        self.assertTrue(daemon.refuse_new_archetype(
+            {arch: {"samples": 10, "recent_pf": 0.9}}, arch))
+        self.assertTrue(daemon.refuse_new_archetype(
+            {arch: {"samples": 40, "recent_pf": 0.0}}, arch))
 
     # ── reliability ledger wiring ───────────────────────────────────────
     def _seed_reliability_bot(self, d,
@@ -771,4 +786,5 @@ class SupervisionTestCase(unittest.TestCase):
         self.assertEqual(rec[0][2]["kind"], "adopted")
         bot = self.d.state["active_bots"]["1"]
         self.assertEqual(bot["decision_id"], "dADOPT1")
-        self.assertEqual(bot["archetype"], "trend_up")
+        # canonical ledger key: the archetype LABEL, not the raw regime name
+        self.assertEqual(bot["archetype"], "Long Grid / classic LONG")

@@ -29,6 +29,28 @@ PROFIT_FACTOR_CAP = 99.0
 RECENT_WINDOW = 20
 PNL_SCALE = 10000.0  # positions-history profitLoss is USD × 1e4
 
+# Canonical reliability-ledger keys. Fresh deploys key the ledger by the
+# archetype LABEL the screen emits (universe_screen.ARCHETYPE), but adopted
+# bots used to key it by the raw regime NAME — the same market regime wrote
+# its stats under two different keys, splitting the sample base that gates
+# sizing escalation and kill-flags. `ledger_key()` normalizes any regime
+# name or archetype label to the one canonical key. Keep in sync with
+# universe_screen.ARCHETYPE.
+ARCHETYPE_LABELS = {
+    "chop_high_volatility": "Neutral Grid (mean-reversion)",
+    "squeeze": "Neutral Grid tight + Stop Trigger",
+    "neutral": "probe Neutral/Infinite grid",
+    "trend_up": "Long Grid / classic LONG",
+    "trend_down": "Short Grid (futures) / flat (spot)",
+}
+
+
+def ledger_key(archetype):
+    """Canonical ledger key: regime names map to their archetype label."""
+    if not archetype:
+        return "unknown"
+    return ARCHETYPE_LABELS.get(str(archetype), str(archetype))
+
 # ── PocketBase write-through (optional, non-fatal) ────────────────────
 # reliability.json is the system of record; this mirrors the ledger into the
 # PocketBase side channel when it is configured and up. pbclient.py lives in
@@ -222,10 +244,12 @@ ARCHIVE_MAX_PER_ARCHETYPE = 500
 def archive_trades(trades, archetype):
     """Append closed round-trips of a rotated-out bot under its archetype.
 
-    Bounded per archetype (oldest dropped). Never raises; returns True when
-    the archive was updated.
+    The key is canonicalized through `ledger_key()` so regime-name and
+    archetype-label callers write the same bucket. Bounded per archetype
+    (oldest dropped). Never raises; returns True when the archive was
+    updated.
     """
-    archetype = archetype or "unknown"
+    archetype = ledger_key(archetype)
     trades = [t for t in (trades or []) if isinstance(t, dict)]
     if not trades:
         return False
@@ -259,6 +283,52 @@ def archived_by_archetype():
                 for arch, rows in (archive or {}).items()} if isinstance(archive, dict) else {}
     except (OSError, ValueError):
         return {}
+
+
+def normalize_archive():
+    """Re-key reliability_archive.json entries through `ledger_key()`.
+
+    One-time (idempotent) migration for the split-key bug: archive rows
+    written under raw regime names move under the canonical archetype
+    label, merging with any rows already there. Returns True when the
+    file changed. Never raises.
+    """
+    try:
+        try:
+            with open(ARCHIVE_PATH, encoding="utf-8") as fh:
+                archive = json.load(fh)
+        except (OSError, ValueError):
+            return False
+        if not isinstance(archive, dict) or not archive:
+            return False
+        out = {}
+        changed = False
+        for arch, rows in archive.items():
+            key = ledger_key(arch)
+            if key != arch:
+                changed = True
+            merged = [t for t in out.get(key, []) if isinstance(t, dict)]
+            merged.extend(t for t in (rows or []) if isinstance(t, dict))
+            # de-dup by (strategy_id, close_ts): the same bot's trades must
+            # not be double-counted when both key spellings existed
+            seen, dedup = set(), []
+            for t in merged:
+                marker = (t.get("strategy_id"), t.get("close_ts"))
+                if marker in seen and marker != (None, None):
+                    continue
+                seen.add(marker)
+                dedup.append(t)
+            out[key] = dedup[-ARCHIVE_MAX_PER_ARCHETYPE:]
+        if not changed:
+            return False
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = ARCHIVE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(out, fh, indent=1)
+        os.replace(tmp, ARCHIVE_PATH)
+        return True
+    except Exception:
+        return False
 
 
 def save(data):

@@ -108,7 +108,10 @@ Accuracy note: every fact below is verified against the code at
    policy (`policy/stagnation.py`), re-centres the channel in place (grid
    edit, 6h rate limit) when the regime is intact, or flags
    out-of-channel/stopped bots (`needs_reanalysis`) for rotation on the
-   next rescreen.
+   next rescreen. `stagnant` / `re-analysis` / `reliability-flag` journal
+   entries log on state TRANSITION only (first sweep per bot, or when the
+   reasons change) — not once per 60 s sweep — so the 200-entry journal
+   keeps screen/veto/deploy history visible.
 6. **Rotate.** A stagnant incumbent — or one flagged
    out-of-channel/stopped — with an eligible challenger (stagnant
    incumbents additionally need Δscore ≥ 5 hysteresis; the min-hold floor
@@ -132,7 +135,11 @@ Accuracy note: every fact below is verified against the code at
    bot's closed round-trips (`execution/reliability_grid.py`), aggregates
    them per archetype into `state/reliability.json` (zero-sample
    archetypes never erase existing entries), and the reloaded ledger gates
-   the sizing ladder and archetype kill-flags.
+   the sizing ladder and archetype kill-flags. Every ledger key is the
+   canonical archetype label (`reliability_grid.ledger_key()` — adopted
+   bots and fresh deploys of the same regime write one bucket; a startup
+   migration re-keys legacy regime-name entries and journals
+   `reliability-migrate`).
 
 ## Safety rails (what protects you)
 
@@ -150,8 +157,15 @@ Accuracy note: every fact below is verified against the code at
   ≤ 85% ceiling, step ≥ 2× spread, venue/side rules, reliability gates,
   rotation cooldown + hysteresis).
 - **Sizing ladder.** Base 25% (<10 closed samples) → probe 40% (≥10) →
-  full 50% (≥30 and PF ≥ 1.3); `recent_pf < 1.0` kills the archetype. Minimum
-  viable minimum notional per grid (per-pair `limits.cost.min`).
+  full 50% (≥30 and PF ≥ 1.3). Each tier ALSO caps grid density
+  (`autonomy.tier_max_grids` 12/20/30 lines) so "probe small while
+  unproven" is real even when the exchange per-line minimum dominates
+  funding. Minimum viable minimum notional per grid (per-pair
+  `limits.cost.min`).
+- **Archetype kill-flag.** `recent_pf < 1.0` (last 20 closed round-trips)
+  refuses new deployments of that archetype — but only with
+  `reliability.kill_min_samples` (default 10) closed samples: one losing
+  round-trip on a fresh archetype must not ban the regime forever.
 - **Reliability gate for live.** `guardrails.check_reliability` refuses
   non-paper deployments below 30 samples / PF 1.3 / recent PF 1.0.
 
@@ -184,7 +198,7 @@ Accuracy note: every fact below is verified against the code at
 | `scripts/wt_reset.py` | `dev reset-wt` worker: stop + delete all WunderTrading paper bots (real-money bots never touched). |
 | `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
-| `tests/` | Offline unit tests — 201 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
+| `tests/` | Offline unit tests — 232 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -234,6 +248,8 @@ whether the daemon actually reads it:
 | `policy.min_hold_h` | `24`. | yes (rotation churn guard) |
 | `reliability.paper_profile` | `demo-hype`. | doc only |
 | `reliability.min_samples` / `profit_factor_pass` / `profit_factor_kill` | 30 / 1.3 / 1.0. | doc only (hardcoded) |
+| `reliability.kill_min_samples` | 10. | kill-flag binds only with ≥ this many closed trips |
+| `autonomy.tier_max_grids` | `{base: 12, probe: 20, full: 30}`. | tier also caps grid density, not just the worst-case target |
 | `watch.interval_s` | Health-poll cadence (`60`). | yes |
 | `watch.adjust_steps_threshold` | In-place re-centre when price drifts > `2.0` grid steps from mid. | yes |
 | `watch.browser_cdp` | CloakBrowser CDP probe URL (`http://127.0.0.1:9222`) for the browser watchdog. | yes |
@@ -430,9 +446,13 @@ is the only call site. Escalation is deliberate and gated:
 1. **Paper forever until proven.** Paper deployments bypass the reliability
    gate by design (they exist to gather samples). Within paper, allocation
    still escalates: **base 25%** (<10 closed samples) → **probe 40%** (≥10) →
-   **full 50%** (≥30 and PF ≥ 1.3).
+   **full 50%** (≥30 and PF ≥ 1.3); each tier also caps grid density
+   (`autonomy.tier_max_grids`, default 12/20/30 lines).
 2. **Reliability kill.** `recent_pf < 1.0` (last 20 closed round-trips)
-   refuses new deployments of that archetype and flags existing bots.
+   refuses new deployments of that archetype and flags existing bots —
+   binding only once the archetype has ≥ `reliability.kill_min_samples`
+   (default 10) closed trips, so a single early loss cannot permanently
+   stall the paper-sampling loop.
 3. **To go real-money** you must, explicitly and together:
    - add the profile name to `autonomy.live_profiles`;
    - ensure the profile is **not** in `daemon.PROFILE_DENYLIST` (enforced in
@@ -542,13 +562,13 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-201 tests as of 2026-09-05, all offline (network/browser calls are mocked
+232 tests as of 2026-09-05, all offline (network/browser calls are mocked
 or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
 also disables the PocketBase write-through so tests can never pollute the
 live side channel). Expected output:
 
 ```
-Ran 201 tests in …
+Ran 232 tests in …
 OK
 ```
 
