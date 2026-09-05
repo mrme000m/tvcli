@@ -82,5 +82,42 @@ class TestLedgerIo(unittest.TestCase):
         self.assertEqual(rg.load(), {})
 
 
+class TestRotationArchive(unittest.TestCase):
+    """archive_trades/archived_by_archetype — rotated-out bots must keep
+    feeding the reliability ledger after WunderTrading deletes them."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp(prefix="grid-archive-test-")
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.dir, True))
+        rg.ARCHIVE_PATH = os.path.join(self.dir, "reliability_archive.json")
+
+    def test_roundtrip_and_grouping(self):
+        t1, t2 = trade(1.0, 1), trade(-0.5, 2)
+        self.assertTrue(rg.archive_trades([t1], "trend"))
+        self.assertTrue(rg.archive_trades([t2], "trend"))
+        self.assertTrue(rg.archive_trades([trade(3.0, 3)], "chop"))
+        self.assertEqual(rg.archived_by_archetype(),
+                         {"trend": [t1, t2], "chop": [trade(3.0, 3)]})
+
+    def test_empty_trades_no_write(self):
+        self.assertFalse(rg.archive_trades([], "trend"))
+        self.assertEqual(rg.archived_by_archetype(), {})
+
+    def test_missing_file_empty(self):
+        self.assertEqual(rg.archived_by_archetype(), {})
+
+    def test_bounded_per_archetype(self):
+        rows = [trade(float(i), i) for i in range(rg.ARCHIVE_MAX_PER_ARCHETYPE + 10)]
+        rg.archive_trades(rows, "trend")
+        got = rg.archived_by_archetype()["trend"]
+        self.assertEqual(len(got), rg.ARCHIVE_MAX_PER_ARCHETYPE)
+        self.assertEqual(got[-1]["pnl_usd"],
+                         float(rg.ARCHIVE_MAX_PER_ARCHETYPE + 9))
+
+    def test_unknown_archetype_bucket(self):
+        rg.archive_trades([trade(1.0, 1)], None)
+        self.assertIn("unknown", rg.archived_by_archetype())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -845,6 +845,65 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
 .banner .banner-title { font-weight: 700; margin-bottom: 2px; }
 .banner .btn { margin-left: auto; flex: none; }
 
+/* ── readiness strip (instrument cells) ──────────────────────────── */
+
+.readiness {
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.readiness-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px 8px;
+  border-bottom: 1px dashed var(--rule);
+}
+
+.readiness-head .card-title { border: none; padding: 0; }
+
+.readiness-at { margin-left: auto; font-size: 10.5px; color: var(--ink-faint); }
+
+.readiness-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px 12px;
+}
+
+.ready-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 5px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel-deep);
+  color: var(--ink-soft);
+}
+
+.ready-cell .ready-dot { font-size: 10px; line-height: 1; flex: none; }
+.ready-cell .ready-key { letter-spacing: 0.04em; }
+.ready-cell .ready-val { font-weight: 600; color: var(--ink); }
+
+.ready-cell--on { border-color: #BCDCD3; background: var(--teal-wash); }
+.ready-cell--on .ready-dot { color: var(--teal); }
+.ready-cell--on .ready-val { color: var(--teal-deep); }
+
+.ready-cell--off { color: var(--ink-faint); }
+.ready-cell--off .ready-dot { color: var(--ink-faint); }
+.ready-cell--off .ready-val { color: var(--ink-faint); }
+
+.ready-cell--warn { border-color: #E4D2AC; background: var(--amber-wash); }
+.ready-cell--warn .ready-dot { color: var(--amber); }
+.ready-cell--warn .ready-val { color: var(--amber); }
+
+.ready-cell--bad { border-color: var(--crimson); background: var(--crimson-wash); }
+.ready-cell--bad .ready-dot { color: var(--crimson); }
+.ready-cell--bad .ready-val { color: var(--crimson); }
+
 .modal-backdrop {
   position: fixed;
   inset: 0;

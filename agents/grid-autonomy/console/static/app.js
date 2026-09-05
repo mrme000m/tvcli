@@ -140,6 +140,7 @@ async function loadOverview() {
   lastOverview = ov;
   renderStatusbar(ov);
   if (activeView === "fleet") {
+    renderReadiness(ov);
     renderFleet(ov);
     renderFeed(ov.journal_tail || []);
     renderScreen(ov.screen);
@@ -170,7 +171,8 @@ function renderStatusbar(ov) {
   chips.push(ov.pocketbase && ov.pocketbase.up
     ? `<span class="chip"><span class="dot"></span>PB mirror up</span>`
     : `<span class="chip"><span class="dot" style="background:var(--ink-faint)"></span>PB mirror down</span>`);
-  if (ov.live_allow) {
+  const liveAllow = (ov.ctl && ov.ctl.status && ov.ctl.status.live_allow) ?? ov.live_allow;
+  if (liveAllow) {
     chips.push(`<span class="chip chip--warn"><span class="dot"></span><b>live_allow=true</b></span>`);
   }
   bar.innerHTML = chips.join("");
@@ -269,6 +271,84 @@ function emptySlotCard(slot) {
   return c;
 }
 
+/* the readiness strip: the daemon's own dependency + capacity diagnostics,
+   surfaced as a row of glanceable instrument cells. Answers the three
+   questions an operator asks before trusting the loop — is the LLM chain
+   up, is the browser alive, is the venue capacity actually available. */
+function renderReadiness(ov) {
+  const el0 = $("#readiness");
+  if (!el0) return;
+  const r = ov.readiness;
+  if (!r || !r.reachable) {
+    el0.innerHTML = `<div class="readiness-head"><span class="card-title">Readiness</span></div>
+      <div class="readiness-cells"><span class="ready-cell ready-cell--off">ctl plane unreachable — diagnostics offline</span></div>`;
+    el0.hidden = false;
+    return;
+  }
+
+  const cells = [];
+  const env = r.llm_env || {};
+  const on = (v) => v ? "ready-cell--on" : "ready-cell--off";
+  const dot = (v) => v ? "●" : "○";
+
+  // LLM providers — each is a distinct fallback in the resolve chain.
+  for (const [k, present] of Object.entries(env)) {
+    cells.push(`<div class="ready-cell ${on(present)}" title="${esc(k)} present in env">
+      <span class="ready-dot">${dot(present)}</span><span class="ready-key">${esc(k)}</span><span class="ready-val">${present ? "up" : "down"}</span>
+    </div>`);
+  }
+  if (!Object.keys(env).length) {
+    cells.push(`<div class="ready-cell ready-cell--off"><span class="ready-dot">○</span><span class="ready-key">llm</span><span class="ready-val">none</span></div>`);
+  }
+
+  // browser CDP — the only path to live WunderTrading state.
+  cells.push(`<div class="ready-cell ${on(r.browser_cdp)}" title="browser CDP for WunderTrading">
+    <span class="ready-dot">${dot(r.browser_cdp)}</span><span class="ready-key">browser</span><span class="ready-val">${r.browser_cdp ? "up" : "down"}</span>
+  </div>`);
+
+  // PocketBase side channel.
+  cells.push(`<div class="ready-cell ${on(r.pb_env)}" title="PocketBase side-channel env">
+    <span class="ready-dot">${dot(r.pb_env)}</span><span class="ready-key">pocketbase</span><span class="ready-val">${r.pb_env ? "up" : "down"}</span>
+  </div>`);
+
+  // venue capacity — the real enforced caps.
+  const c = r.capacity || {};
+  const oth = c.other || {}, pre = c.premium || {};
+  const otherFull = oth.max > 0 && oth.active >= oth.max;
+  const prePct = pre.max > 0 ? Math.round((pre.active / pre.max) * 100) : 0;
+  cells.push(`<div class="ready-cell ${otherFull ? "ready-cell--warn" : "ready-cell--on"}"
+      title="grid-bot capacity — non-premium ${oth.active}/${oth.max} · premium ${pre.active}/${pre.max}">
+    <span class="ready-dot">${otherFull ? "▲" : "●"}</span>
+    <span class="ready-key">capacity</span>
+    <span class="ready-val">${oth.active}/${oth.max} · ${pre.active}/${pre.max}prem</span>
+  </div>`);
+
+  // connected profiles — flag any real-money account.
+  const real = r.real_profiles || [];
+  const profCount = (r.profiles || []).length;
+  const prof = real.length
+    ? `<div class="ready-cell ready-cell--bad" title="${esc(real.map((p) => `${p.name || p.code} · ${fmtUsd(p.balance)}`).join(" · "))}">
+         <span class="ready-dot">●</span><span class="ready-key">profile</span><span class="ready-val">${profCount} (${real.length} live)</span>
+       </div>`
+    : `<div class="ready-cell ready-cell--on" title="${profCount} paper profile(s)">
+         <span class="ready-dot">●</span><span class="ready-key">profile</span><span class="ready-val">${profCount} paper</span>
+       </div>`;
+  cells.push(prof);
+
+  // capabilities — the daemon's own self-report of worker modules.
+  const caps = r.capabilities || {};
+  const capKeys = Object.keys(caps).filter((k) => caps[k]);
+  cells.push(`<div class="ready-cell ${capKeys.length ? "ready-cell--on" : "ready-cell--off"}" title="daemon worker capabilities">
+    <span class="ready-dot">${capKeys.length ? "●" : "○"}</span>
+    <span class="ready-key">caps</span><span class="ready-val">${esc(capKeys.join("·") || "none")}</span>
+  </div>`);
+
+  el0.innerHTML = `<div class="readiness-head"><span class="card-title">Readiness</span>
+      <span class="mono readiness-at">${esc(relTime(ov.at))}</span></div>
+    <div class="readiness-cells">${cells.join("")}</div>`;
+  el0.hidden = false;
+}
+
 function renderFleet(ov) {
   const board = $("#slot-board");
   board.innerHTML = "";
@@ -344,13 +424,23 @@ function renderScreen(screen) {
 function renderSummary(ov) {
   const d = ov.daemon || {};
   const cd = ov.config_digest || {};
+  const r = ov.readiness || {};
+  const c = r.capacity || {};
+  const oth = c.other || {}, pre = c.premium || {};
+  const lim = r.account_limits || {};
+  const dashGrid = lim.gridBots || {};
+  const capRow = r.reachable
+    ? `<div class="row"><span class="k">Capacity</span><span class="v" title="enforced by grid_bots/upsert per exchange tier">${oth.active}/${oth.max} non-prem · ${pre.active}/${pre.max} prem</span></div>
+       <div class="row"><span class="k">Dashboard gridBots</span><span class="v" title="dashboard view — does not reflect the per-tier cap">${esc(dashGrid.active ?? "—")}/${esc(dashGrid.max ?? "—")}</span></div>`
+    : `<div class="row"><span class="k">Capacity</span><span class="v">ctl offline</span></div>`;
   $("#fleet-summary").innerHTML = `
     <div class="row"><span class="k">Mode</span><span class="v">${esc(d.mode || "—")}${d.supervisor === "launchd" ? " · launchd" : ""}</span></div>
     <div class="row"><span class="k">Fund size</span><span class="v">${fmtUsd(cd.total_usd)}</span></div>
     <div class="row"><span class="k">Committed</span><span class="v">${fmtUsd(ov.committed_usd)}</span></div>
     <div class="row"><span class="k">Rescreen cadence</span><span class="v">${esc(cd.rescreen_minutes ?? "—")} min</span></div>
     <div class="row"><span class="k">Health poll</span><span class="v">${esc(cd.watch_interval_s ?? "—")} s</span></div>
-    <div class="row"><span class="k">Archetypes tracked</span><span class="v">${Object.keys((ov.reliability || {}).archetypes || {}).length}</span></div>`;
+    <div class="row"><span class="k">Archetypes tracked</span><span class="v">${Object.keys((ov.reliability || {}).archetypes || {}).length}</span></div>
+    ${capRow}`;
 }
 
 /* ── decisions ────────────────────────────────────────────────────── */

@@ -336,14 +336,19 @@ def _observe_one(bot, by_code, list_ok=True):
     open_positions = [r for r in open_rows
                       if (r.get("status") or "").lower() not in
                       ("completed", "closed", "cancelled", "canceled", "deleted")]
+    # Authoritative mark PnL is the grid resource's unrealizedPnl.pnlFiat
+    # (verified live 2026-09-05): the open-position rows' totalProfitLoss
+    # tracks entry commission, not mark PnL, and mis-scales ~10x when divided
+    # by PNL_SCALE (that scaling IS correct for positions-history profitLoss).
+    # Keep the positions sum only as a fallback for resource payloads without
+    # an unrealizedPnl block.
     unrealized = None
-    if open_positions:
+    up = res.get("unrealizedPnl") or {}
+    if isinstance(up, dict) and up.get("pnlFiat") is not None:
+        unrealized = round(_number(up.get("pnlFiat")), 4)
+    if unrealized is None and open_positions:
         pnl_sum = sum(_number(r.get("totalProfitLoss")) for r in open_positions)
         unrealized = round(pnl_sum / 10000.0, 4)
-    if unrealized is None:
-        up = res.get("unrealizedPnl") or {}
-        if isinstance(up, dict) and up.get("pnlFiat") is not None:
-            unrealized = round(_number(up.get("pnlFiat")), 4)
 
     price = None
     newest = sorted(open_positions,

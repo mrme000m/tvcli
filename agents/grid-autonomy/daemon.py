@@ -97,6 +97,7 @@ except Exception:
 
 try:
     from reliability_grid import (archetype_stats, bot_trades,  # noqa: F401
+                                  archive_trades, archived_by_archetype,
                                   load as load_reliability,
                                   save as save_reliability)
     HAS_RELIABILITY = True
@@ -108,6 +109,12 @@ except Exception:
 
     def bot_trades(bot_code):
         return []
+
+    def archive_trades(trades, archetype):
+        return False
+
+    def archived_by_archetype():
+        return {}
 
     def load_reliability():
         return {}
@@ -151,8 +158,15 @@ _pb_cache = None
 
 
 def _pb():
-    """Lazy, non-fatal PocketBase client. None => write-through disabled."""
+    """Lazy, non-fatal PocketBase client. None => write-through disabled.
+
+    GRID_STATE_DIR set (test isolation) disables the mirror as well: tests
+    redirect state into a temp dir, and a stray PB_URL/PB_TOKEN in the ambient
+    env would otherwise write test fixtures into the live side channel.
+    """
     global _pb_cache
+    if os.environ.get("GRID_STATE_DIR"):
+        return None
     if not HAS_PB or _PB is None:
         return None
     if _pb_cache is None:
@@ -267,9 +281,48 @@ MIN_USD_PER_GRID = 10.0
 
 # Bot statuses accepted as "verified stopped" before a rotation may delete
 # the incumbent. Anything else (active, stopping, …) keeps it alive.
-STOPPED_STATES = {"stopped", "stopped_and_close_all", "closed"}
+# "stopped_with_unrealized" is the transient terminal state right after a
+# stop_and_close_all while WT is still closing the open legs — the bot is
+# definitively not running (verified live 2026-09-05: it settles to plain
+# "stopped" within minutes; rejecting it vetoed an already-stopped bot).
+STOPPED_STATES = {"stopped", "stopped_and_close_all",
+                 "stopped_with_unrealized", "closed"}
 
 STATE_PATH = os.path.join(HERE, "state", "state.json")
+
+
+def _pidguard_ok():
+    """Single-writer guard: refuse to run alongside a live daemon that holds
+    state/daemon.pid. start.sh and run_launchd.py write that file with the
+    daemon's OWN pid, so the normal launch paths always pass; a direct
+    `daemon.py --once` (smoke) started while the launchd daemon is live
+    would otherwise clobber state.json (observed 2026-09-05: a second
+    dry-run process wrote a full cycle while the supervised daemon ran).
+    Override with GRID_NO_PIDGUARD=1.
+    """
+    if os.environ.get("GRID_NO_PIDGUARD"):
+        return True
+    try:
+        with open(os.path.join(os.path.dirname(STATE_PATH),
+                               "daemon.pid")) as f:
+            other = int(f.read().strip())
+    except (OSError, ValueError):
+        return True
+    if other is None or other == os.getpid():
+        return True
+    try:
+        os.kill(other, 0)
+        alive = True
+    except OSError:
+        alive = False
+    if alive:
+        print(f"refusing to start: daemon pid {other} is live "
+              f"(state/daemon.pid) — stop it first, or set "
+              f"GRID_NO_PIDGUARD=1 to override", flush=True)
+        return False
+    return True
+
+
 SPECS_DIR = os.path.join(HERE, "watch", "specs")  # patchable in tests
 DEFAULT_STATE = {
     "live_allow": False,
@@ -1249,6 +1302,12 @@ class Daemon:
         for slot_key, bot in list(self.state["active_bots"].items()):
             obs = bot.get("observed") or {}
             policy = bot.get("stagnation_policy") or {}
+            if obs.get("error"):
+                # observation outage (browser/session down): never rotate on
+                # blindness — missing fills default to 0 and would fake
+                # stagnation, churning the fleet during the outage instead
+                # of waiting it out (fail-closed)
+                continue
             fresh = next(
                 (c for c in cands if c.get("venue") == bot.get("venue")
                  and c.get("symbol") == bot.get("symbol")), None)
@@ -1382,8 +1441,7 @@ class Daemon:
             out_of_channel = False
             if price is not None and channel.get("high") and channel.get("low"):
                 out_of_channel = price > channel["high"] or price < channel["low"]
-            if out_of_channel or status in ("stopped", "closed",
-                                            "stopped_and_close_all"):
+            if out_of_channel or status in STOPPED_STATES:
                 bot["needs_reanalysis"] = True
                 log(self.state, {"kind": "re-analysis", "slot": slot_key,
                                  "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
@@ -1571,6 +1629,28 @@ class Daemon:
             log(self.state, {"kind": "rotation-warn", "slot": slot_key,
                              "msg": f"could not verify stop for {bot_code} "
                                     f"(not listed) — proceeding"})
+        # BEFORE deleting: export the incumbent's closed round-trips. Once
+        # the bot is gone on WunderTrading its positions-history is
+        # unreachable, so the reliability recompute (active bots only) would
+        # drop every trip closed since the last 24h cron. Archive them under
+        # the incumbent's archetype so the ledger keeps learning, and use the
+        # realized sum as the decision outcome's true PnL (the old fallback
+        # recorded a mis-scaled unrealized value — realized_pnl_24h never
+        # existed in observed).
+        realized_pnl = None
+        if not dry_run:
+            try:
+                final_trades = bot_trades(bot_code) or []
+                realized_pnl = round(sum(t.get("pnl_usd", 0.0)
+                                         for t in final_trades), 4)
+                if archive_trades(final_trades, incumbent.get("archetype")):
+                    log(self.state, {"kind": "reliability-archive", "slot": slot_key,
+                                     "msg": f"archived {len(final_trades)} closed "
+                                            f"round-trips for "
+                                            f"{incumbent.get('archetype') or 'unknown'}"})
+            except Exception as exc:
+                log(self.state, {"kind": "reliability-archive-error",
+                                 "slot": slot_key, "msg": str(exc)[:160]})
         del_res = retry_grid_call(grid_adapter.grid_delete, dry_run, bot_code,
                                   dry_run=dry_run)
         log(self.state, {"kind": "rotation-delete", "slot": slot_key,
@@ -1591,8 +1671,8 @@ class Daemon:
         record_outcome_safe(incumbent.get("decision_id"), {
             "reason": "stagnant" if reasons and "fills" in reasons[0]
             else (reasons[0][:60] if reasons else "rotated"),
-            "realized_pnl": obs_out.get("realized_pnl_24h",
-                                        obs_out.get("unrealized_pnl")),
+            "realized_pnl": realized_pnl if realized_pnl is not None
+            else obs_out.get("unrealized_pnl"),
             "fills": obs_out.get("fills_24h"),
             "holding_h": holding_h,
             "observed": obs_out,
@@ -1721,7 +1801,10 @@ class Daemon:
         (base → probe → full) and archetype kill-flags. Never raises.
         """
         try:
-            by_archetype = {}
+            # seed with archived (rotated-out) bots' trades so deleted bots
+            # keep feeding the ledger, then extend with the active bots
+            by_archetype = {arch: list(rows)
+                            for arch, rows in archived_by_archetype().items()}
             for bot in (self.state.get("active_bots") or {}).values():
                 code = bot.get("bot_code")
                 if not code:
@@ -1752,6 +1835,8 @@ class Daemon:
     # ── manage loop ────────────────────────────────────────────────────
     def run(self, once=False, dry_run=True, no_confluence=False, top=None):
         self.top = top
+        if not _pidguard_ok():
+            return []
         t = threading.Thread(target=serve_ctl, args=(self, self.port), daemon=True)
         t.start()
         print(f"ctl on 127.0.0.1:{self.port} (dry_run={dry_run})", flush=True)
@@ -1848,6 +1933,10 @@ def main():
         signal.signal(signal.SIGTERM, _term)
     except (ValueError, OSError):
         pass  # non-main thread (tests) — fine
+    # refuse a second daemon BEFORE any state write (the Daemon constructor
+    # heals env + logs into the shared state file)
+    if not _pidguard_ok():
+        return 1
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--once", action="store_true")
@@ -1871,4 +1960,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

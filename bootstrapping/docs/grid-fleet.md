@@ -72,7 +72,8 @@ The whole loop now runs unattended under
 
 Operate it with `scripts/start.sh` (dry-run default) / `scripts/stop.sh` and
 the HTTP ctl plane on `:8799` (`/health`, `/status`, `/reliability`,
-`/observe`, `POST /rescreen`, `POST /rotate`, `POST /kill`). Full operating
+`/observe`, `POST /rescreen`, `POST /reliability`, `POST /rotate`,
+`POST /kill`). Full operating
 manual, config reference, escalation policy, and troubleshooting:
 [`agents/grid-autonomy/README.md`](../../agents/grid-autonomy/README.md).
 

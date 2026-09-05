@@ -46,6 +46,10 @@ _pb = None
 
 def _pb_mirror():
     global _pb
+    # GRID_STATE_DIR set (test isolation) => never touch the live side
+    # channel, even when ambient PB_URL/PB_TOKEN env is present.
+    if os.environ.get("GRID_STATE_DIR"):
+        return None
     if not _HAS_PB or _PB is None:
         return None
     if _pb is None:
@@ -206,6 +210,55 @@ def archetype_stats(bots_by_archetype):
             flat = list(trades or [])
         out[archetype] = _stats(flat)
     return out
+
+
+# Trades from bots that were rotated out (deleted on WunderTrading) are
+# archived here so the 24h reliability recompute — which can only reach
+# ACTIVE bots — does not silently drop them. Keyed by archetype, bounded.
+ARCHIVE_PATH = os.path.join(STATE_DIR, "reliability_archive.json")
+ARCHIVE_MAX_PER_ARCHETYPE = 500
+
+
+def archive_trades(trades, archetype):
+    """Append closed round-trips of a rotated-out bot under its archetype.
+
+    Bounded per archetype (oldest dropped). Never raises; returns True when
+    the archive was updated.
+    """
+    archetype = archetype or "unknown"
+    trades = [t for t in (trades or []) if isinstance(t, dict)]
+    if not trades:
+        return False
+    try:
+        archive = {}
+        try:
+            with open(ARCHIVE_PATH, encoding="utf-8") as fh:
+                archive = json.load(fh)
+        except (OSError, ValueError):
+            archive = {}
+        rows = [r for r in archive.get(archetype, [])
+                if isinstance(r, dict)]
+        rows.extend(trades)
+        archive[archetype] = rows[-ARCHIVE_MAX_PER_ARCHETYPE:]
+        os.makedirs(STATE_DIR, exist_ok=True)
+        tmp = ARCHIVE_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(archive, fh, indent=1)
+        os.replace(tmp, ARCHIVE_PATH)
+        return True
+    except Exception:
+        return False
+
+
+def archived_by_archetype():
+    """Archived (rotated-out) trades grouped per archetype; {} when absent."""
+    try:
+        with open(ARCHIVE_PATH, encoding="utf-8") as fh:
+            archive = json.load(fh)
+        return {arch: [t for t in rows if isinstance(t, dict)]
+                for arch, rows in (archive or {}).items()} if isinstance(archive, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def save(data):

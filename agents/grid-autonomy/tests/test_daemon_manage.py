@@ -98,6 +98,8 @@ class ManageTestCase(unittest.TestCase):
 
         patches = {
             "daemon.STATE_PATH": state_path,
+            # never mirror test state into the live PocketBase side channel
+            "daemon._pb": lambda *a, **k: None,
             "daemon.SPECS_DIR": os.path.join(self.tmp.name, "watch", "specs"),
             "daemon.deliberate": fake_deliberate,
             "daemon.memories_for_safe": lambda brief, k=3: [],
@@ -268,6 +270,71 @@ class ManageTestCase(unittest.TestCase):
         self.assertNotIn(("delete", "OLDBOT", False), self.ops)
         self.assertEqual(d.state["active_bots"]["1"]["symbol"], "PUMP")
 
+    def test_run_refuses_when_foreign_daemon_live(self):
+        # single-writer guard: a live foreign pid in state/daemon.pid must
+        # block run() (smoke --once against the supervised daemon)
+        import signal as _signal
+        d = self.make_daemon()
+        pid_file = os.path.join(os.path.dirname(daemon.STATE_PATH),
+                                "daemon.pid")
+        # pid 1 (launchd) is always alive and is not us
+        os.makedirs(os.path.dirname(pid_file), exist_ok=True)
+        with open(pid_file, "w") as f:
+            f.write("1")
+        self.addCleanup(lambda: os.remove(pid_file)
+                        if os.path.exists(pid_file) else None)
+        try:
+            got = d.run(once=True, dry_run=True)
+        except SystemExit:
+            got = []
+        self.assertEqual(got, [])
+        # and the guard must not have started an adopt/rescreen cycle
+        self.assertNotIn("screen", [e.get("kind")
+                                    for e in d.state.get("journal", [])])
+
+    def test_rotation_exports_trades_and_realized_outcome(self):
+        # before deleting the incumbent, the rotation must export its closed
+        # round-trips (archived into the reliability ledger) and record the
+        # realized sum as the outcome's realized_pnl — not the mis-scaled
+        # unrealized fallback
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        d.state["active_bots"]["1"]["archetype"] = "Neutral Grid (mean-reversion)"
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
+        trades = [{"pnl_usd": 1.25, "close_ts": 1, "entered_at": None,
+                   "strategy_id": "a"},
+                  {"pnl_usd": -0.25, "close_ts": 2, "entered_at": None,
+                   "strategy_id": "b"}]
+        outcomes = []
+        with mock.patch("daemon.bot_trades", return_value=trades), \
+             mock.patch("daemon.archive_trades",
+                        side_effect=lambda tr, arch:
+                        self.assertEqual(arch,
+                                         "Neutral Grid (mean-reversion)")
+                        or True), \
+             mock.patch("daemon.record_outcome_safe",
+                        side_effect=lambda did, final:
+                        outcomes.append((did, final)) or None):
+            ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertTrue(ok)
+        self.assertEqual(outcomes[0][0], "OLD1")
+        self.assertAlmostEqual(outcomes[0][1]["realized_pnl"], 1.0, places=4)
+        self.assertIn(("delete", "OLDBOT", False), self.ops)
+
+    def test_rotation_accepts_stopped_with_unrealized(self):
+        # regression (live 2026-09-05): right after stop_and_close_all WT
+        # reports "stopped_with_unrealized" while the legs are still closing
+        # — the bot IS stopped, so verification must accept it and the
+        # rotation must proceed (it used to veto and strand the slot)
+        d = self.make_daemon()
+        self._seed_rotating_bot(d)
+        self.grid_status_ret = [{"code": "OLDBOT",
+                                 "status": "stopped_with_unrealized"}]
+        ok = d.execute_rotation("1", self._challenger(), dry_run=False)
+        self.assertTrue(ok)
+        self.assertIn(("delete", "OLDBOT", False), self.ops)
+        self.assertIn(("create", "hyperliquid", False), self.ops)
+
     def test_rotation_proceeds_when_stopped_bot_unlisted(self):
         # stop ok and the bot no longer appears in the status list →
         # deleting an already-gone bot is harmless; rotation proceeds
@@ -420,6 +487,32 @@ class ManageTestCase(unittest.TestCase):
             d.rescreen_cycle(dry_run=True, max_new=2, top=5)
         built = [op for op in self.ops if op[0] == "build"]
         self.assertEqual([op[1] for op in built], ["SOL", "BTC"])
+        self.assertEqual(d.state["active_bots"]["1"]["symbol"], "HYPE")
+
+    def test_rotation_pass_skips_observe_error_bots(self):
+        # observation outage: an error-only observed dict must NOT drive a
+        # rotation (missing fills default to 0 → fake stagnation → churn)
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "HYPE", "venue": "hyperliquid", "bot_code": "ADOPT1",
+            "since": "2026-09-01T00:00:00+00:00",  # older than min_hold
+            "ticket": {"grid_type": "neutral", "decision": "GO"},
+            "stagnation_policy": {
+                "regime": "neutral",
+                "stagnant_if": {"min_fills_24h": 1.0,
+                                "min_realized_ratio": 0.4}},
+            "observed": {"error": "grid status list unavailable "
+                                  "(browser/session down)",
+                         "status": "unknown", "fills_24h": 0},
+        }
+        cands = [{"venue": "hyperliquid", "symbol": "SOL",
+                  "tv_symbol": "BINANCE:SOLUSDT", "regime": "neutral",
+                  "score_final": 90.0, "step": 0.5,
+                  "archetype": "Neutral Grid (mean-reversion)"}]
+        with mock.patch("daemon.run_merge", return_value={"results": cands}),                 mock.patch("daemon.resolve_pair_safe",
+                           side_effect=lambda v, s, market=None: (s, "")):
+            d.rescreen_cycle(dry_run=True, max_new=2, top=5)
+        self.assertNotIn(("stop", "ADOPT1", True), self.ops)
         self.assertEqual(d.state["active_bots"]["1"]["symbol"], "HYPE")
 
     def test_rescreen_builds_reflect_report_shape(self):

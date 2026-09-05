@@ -53,6 +53,10 @@ _pb = None
 
 def _pb_mirror():
     global _pb
+    # GRID_STATE_DIR set (test isolation) => never touch the live side
+    # channel, even when ambient PB_URL/PB_TOKEN env is present.
+    if os.environ.get("GRID_STATE_DIR"):
+        return None
     if not _HAS_PB or _PB is None:
         return None
     if _pb is None:

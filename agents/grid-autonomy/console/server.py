@@ -499,6 +499,7 @@ def overview_payload() -> dict:
         "reliability": reliability_payload(),
         "screen": screen_payload(),
         "pocketbase": {"up": pb_ok},
+        "readiness": _readiness(ctl_status),
         "config_digest": {
             "total_usd": (portfolio.get("total_usd")),
             "slots_default": portfolio.get("slots_default"),
@@ -506,6 +507,62 @@ def overview_payload() -> dict:
             "watch_interval_s": (cfg.get("watch") or {}).get("interval_s"),
         },
     }
+
+
+def _readiness(ctl_status: dict | None) -> dict:
+    """Derived dependency-readiness + capacity facts for the console.
+
+    Surfaces the daemon's own `/status` diagnostics — LLM-provider env,
+    browser CDP, PocketBase, venue capacity, connected profiles, bot-type
+    limits — in one flat, safety-conscious shape the frontend can render
+    without re-deriving. Returns an empty dict when the ctl plane is down.
+    """
+    if not isinstance(ctl_status, dict):
+        return {}
+    env = ctl_status.get("env") or {}
+    llm_env = env.get("llm_env") or {}
+    capacity = ctl_status.get("capacity") or {}
+    max_active = capacity.get("max_active") or {}
+    active = capacity.get("active") or {}
+
+    # Actual enforced caps (per exchange tier) vs the dashboard's own
+    # `account_limits.gridBots`. `active.other` is the non-premium count;
+    # premium exchanges are keyed by name under `active.premium`.
+    other_max = _num(max_active.get("other"))
+    other_active = _num(active.get("other"))
+    premium_max = _num(max_active.get("premium"))
+    premium_active = 0
+    if isinstance(active.get("premium"), dict):
+        premium_active = sum(_num(v) for v in active["premium"].values())
+
+    # One real-money (paperTrading=False) profile in the mix is the single
+    # safety fact worth surfacing in red — the daemon must never route a
+    # paper decision to a live account.
+    profiles = ctl_status.get("profiles") or []
+    real_profiles = [p for p in profiles if isinstance(p, dict)
+                     and p.get("paperTrading") is False]
+
+    return {
+        "reachable": True,
+        "llm_env": {k: bool(v) for k, v in llm_env.items()} if isinstance(llm_env, dict) else {},
+        "browser_cdp": bool(env.get("browser_cdp")),
+        "pb_env": bool(env.get("pb_env")),
+        "capabilities": ctl_status.get("capabilities") or {},
+        "capacity": {
+            "other": {"active": other_active, "max": other_max},
+            "premium": {"active": premium_active, "max": premium_max},
+        },
+        "profiles": profiles,
+        "real_profiles": real_profiles,
+        "account_limits": ctl_status.get("account_limits") or {},
+    }
+
+
+def _num(v) -> int:
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return 0
 
 
 # ── daemon ops ─────────────────────────────────────────────────────────

@@ -66,8 +66,11 @@ Control plane on `:8799`:
 | POST | `/kill` | Write KILL file (daemon halts next tick). |
 
 Hard stop: `touch agents/grid-autonomy/KILL` (clear with `rm -f` before
-restart). `start.sh` imports `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_API_KEY`
-from the `dsh web` process env and refuses to start without them.
+restart). `start.sh` imports `CLOUDFLARE_ACCOUNT_ID` plus
+`CLOUDFLARE_API_KEY` (or `CLOUDFLARE_AI_TOKEN`) from the `dsh web` process
+env and refuses to start without them. `stop.sh` also stops the PocketBase
+side channel. The daemon refuses to start while another live process holds
+`state/daemon.pid` (override: `GRID_NO_PIDGUARD=1`).
 
 **Supervision (crash + reboot survival):** `scripts/install_launchd.sh`
 installs two per-user LaunchAgents — `com.tvcli.grid-autonomy`
@@ -146,4 +149,4 @@ re-login in the browser window (or vault `wundertrading-session` →
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` → 129 offline tests.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 197 offline tests as of 2026-09-05; trust the runner output over any count in docs.

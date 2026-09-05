@@ -97,7 +97,9 @@ class TestObserveAll(unittest.TestCase):
         self.assertAlmostEqual(obs["price"], 86.8475, places=4)
         self.assertEqual(obs["fills_24h"], 3)
         self.assertAlmostEqual(obs["realized_ratio"], 0.5, places=4)
-        self.assertAlmostEqual(obs["unrealized_pnl"], -0.5837, places=4)
+        # authoritative mark PnL from the grid resource (fixture pnlFiat -6.12);
+        # the open-position totalProfitLoss sum mis-scales ~10x (-0.5837)
+        self.assertAlmostEqual(obs["unrealized_pnl"], -6.12, places=4)
         self.assertFalse(obs["ladder_full"])
         expected_dd = round((86.935 - 86.8475) / 86.935 * 100.0 / 2.0, 4)
         self.assertAlmostEqual(obs["dd_vs_atr_band"], expected_dd, places=4)

@@ -58,7 +58,7 @@ Accuracy note: every fact below is verified against the code at
 ## The loop
 
 1. **Screen (60m).** `screen/merge.py` screens Hyperliquid perps and Binance
-   spot in parallel: public OHLCV → regime classification (`market_regime`),
+   spot (venue fetches are serial, not threaded): public OHLCV → regime classification (`market_regime`),
    preset scoring (`universe_screen`, presets `grid-neutral` +
    `grid-directional`), real Binance book-ticker spreads
    (`execution/spreads.py`), optional tvcli `/hunt` confluence (squeeze +
@@ -84,8 +84,9 @@ Accuracy note: every fact below is verified against the code at
    profit-per-grid, geometric grid lines, USD-denominated per-trade
    sizing (WT `amountPerTrade` is in the market's USD-stable base
    currency), and a per-pair minimum-viable floor from `:2087` market
-   metadata (`limits.cost.min`: 10 USDC on Hyperliquid, 5–50 USDT on
-   Binance markets; falls back to $10 when metadata is unavailable).
+   metadata — the effective floor is `max(limits.cost.min, $10)`, i.e. the
+   5–50 USDT per-pair minimums on Binance never drop below the hardcoded
+   `MIN_USD_PER_GRID = $10` fallback (`daemon.py`).
    `execution/resolve.py` resolves `pairCode` from the live market map.
 5. **Watch (60s).** `daemon.health_cycle` polls real bot status/positions/
    history (`execution/observe.py`), evaluates the per-token stagnation
@@ -97,8 +98,15 @@ Accuracy note: every fact below is verified against the code at
    out-of-channel/stopped — with an eligible challenger (stagnant
    incumbents additionally need Δscore ≥ 5 hysteresis; the min-hold floor
    and per-token cooldowns always apply) is stopped
-   (`stop_and_close_all`), verified, deleted, cooldown-set per token, and
-   replaced. `POST /rotate {"slot": n}` forces a manual rotation.
+   (`stop_and_close_all`), verified (`stopped`,
+   `stopped_and_close_all`, `stopped_with_unrealized`, `closed` all count —
+   the transient post-stop state while WT closes the legs), deleted,
+   cooldown-set per token, and replaced. Before the delete, the incumbent's
+   closed round-trips are exported and archived
+   (`state/reliability_archive.json`) so they keep feeding the reliability
+   ledger, and the true realized PnL sum is recorded on the decision
+   outcome. `POST /rotate {"slot": n}` forces a manual rotation (bypasses
+   hysteresis and the min-hold floor).
 7. **Reflect.** Every decision lands in `state/decisions.jsonl`; every cycle
    writes a run card `state/reports/<UTC-ts>-<kind>.{json,md}` with
    Route/Ground/Deliberate/Guard/Deploy/Observe/Reflect/Caveats sections.
@@ -158,7 +166,7 @@ Accuracy note: every fact below is verified against the code at
 | `scripts/run_launchd.py` | launchd entrypoint (foreground, CF env import, PID file). |
 | `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
-| `tests/` | 129 offline unit tests (`python3 -m unittest`). |
+| `tests/` | Offline unit tests — 197 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -209,6 +217,10 @@ whether the daemon actually reads it:
 | `reliability.min_samples` / `profit_factor_pass` / `profit_factor_kill` | 30 / 1.3 / 1.0. | doc only (hardcoded) |
 | `watch.interval_s` | Health-poll cadence (`60`). | yes |
 | `watch.adjust_steps_threshold` | In-place re-centre when price drifts > `2.0` grid steps from mid. | yes |
+| `watch.browser_cdp` | CloakBrowser CDP probe URL (`http://127.0.0.1:9222`) for the browser watchdog. | yes |
+| `watch.browser_restart_cooldown_s` | Watchdog relaunch cooldown (`600`). | yes |
+| `watch.browser_launch_cmd` | Headful browser relaunch command (launch from the minimal-mjs profile). | yes |
+| `watch.wt_restore_cmd` | WT session/cookie re-assert command after relaunch. | yes |
 | `autonomy.mode` | `auto`. | doc only (daemon always loops) |
 | `autonomy.base_pct` | Base allocation `0.25`. | yes |
 | `autonomy.probe_pct` | Probe allocation `0.40`. | yes |
@@ -218,7 +230,7 @@ whether the daemon actually reads it:
 | `autonomy.paper_profiles.binance` | `[demo-bn]` (futures paper stand-in). | yes |
 | `memory.k` | Top-k memories injected per candidate (`3`). | yes |
 | `adopt_existing` | Adopt matching active paper bots on first run. | yes |
-| `guardrails.checks` | The 8 gate names. | doc only (guardrails.py tuple) |
+| `guardrails.checks` | The 7 config-visible gate names (the KILL gate is code-only). | doc only (guardrails.py tuple) |
 | `guardrails.kill_file` | `agents/grid-autonomy/KILL`. | doc only (daemon hardcodes) |
 | `server.tvcli` | `http://127.0.0.1:8765`. | doc only (env `TVCLI_SERVER`) |
 | `server.daemon_port` | Control-plane port `8799`. | yes |
@@ -228,6 +240,16 @@ whether the daemon actually reads it:
 All commands run from `agents/grid-autonomy/` (the scripts `cd` there
 themselves).
 
+**Single writer.** The daemon refuses to start while another live process
+holds `state/daemon.pid` (launchd/start.sh write that file with the daemon's
+own pid, so the normal paths always pass). A second instance — e.g.
+`daemon.py --once` for smoke while the supervised daemon runs — would
+clobber `state.json` (observed live 2026-09-05). Set `GRID_NO_PIDGUARD=1`
+to override deliberately. A ctl-port bind failure is journaled as
+`ctl-error` instead of killing the control plane silently. Note the launchd
+daemon's stdout/stderr goes to `~/Library/Logs/grid-autonomy-launchd.log`,
+not `state/daemon.log` (that one only collects start.sh launches).
+
 **Start (dry-run planning):**
 
 ```sh
@@ -236,7 +258,8 @@ scripts/start.sh
 ```
 
 `start.sh` exports `CLOUDFLARE_ACCOUNT_ID` / `CLOUDFLARE_API_KEY` from the
-running `dsh web` process environment (`/proc/<pid>/environ`) and refuses to
+running `dsh web` process environment (`/proc/<pid>/environ` on Linux,
+`ps -Eww` on macOS) and refuses to
 start if it cannot read them. It writes `state/daemon.pid` and appends to
 `state/daemon.log`.
 
@@ -348,8 +371,9 @@ is the only call site. Escalation is deliberate and gated:
    refuses new deployments of that archetype and flags existing bots.
 3. **To go real-money** you must, explicitly and together:
    - add the profile name to `autonomy.live_profiles`;
-   - ensure the profile is **not** in `daemon.PROFILE_DENYLIST` and is not
-     `paperTrading`;
+   - ensure the profile is **not** in `daemon.PROFILE_DENYLIST` (enforced in
+     code) and is not a `paperTrading` profile (operator-verified: the
+     paper=False selection path does not itself reject paper profiles);
    - pass `guardrails.check_reliability` (≥30 samples, PF ≥ 1.3, recent PF
      ≥ 1.0);
    - set `live_allow: true` in `state/state.json` (reported by `/status`);
@@ -441,6 +465,7 @@ the problem.
 | Browser down / Cloudflare 403 | `resolve.py` and `observe.py` go through `wt_browser.py`; on failure `resolve` falls back to the cached market map and `observe` returns error/empty fields. Restart the browser session and re-run. |
 | `pairCode` unresolved | Market map missing or stale. The daemon fetches `https://wundertrading.com:2087/all-markets?market=…&marketExpiryGroup=infinite` via the browser and caches `state/market_map-{spot,derivative}.json` for 24h (stale cache is still used when the browser is down). |
 | `Maximum number of Grid Bots reached` on create | Plan capacity, **not** the account-limits dashboard number. The enforced caps live in the `grid_bots/upsert` init data: `maxActiveGridBots = {other: 1, premium: 200}` — HYPERLIQUID_SWAP is a *premium* exchange (200 active bots); every other exchange (incl. `BINANCE_FUTURES`) is the *other* tier with **one active grid bot** on the free plan. The daemon observes both views every rescreen cycle (journal kind `subscription` on any change) and pre-checks this (`capacity-veto`, `GET /status → capacity` / `account_limits`), skipping the create instead of retrying into the 400. Hyperliquid's Premium caps come from WunderTrading's 0.035% builder-fee arrangement. Rotations are unaffected (stop→delete frees the slot before the challenger create). `GET /en/trader/dashboard/account-limits` reports `gridBots: n/200` but is not what `upsert` enforces. |
+| Slot 4 (binance) never deploys | Known limitation, not a bug: the default slot plan assigns **two** binance slots but the free plan's `other` tier allows only **one** active grid bot — slot 4 is permanently capacity-vetoed while slot 3 runs (one `capacity-veto` journal line per rescreen). The plan is config-driven, not derived from observed capacity; to use that capital, raise the plan tier, or re-balance venues in `portfolio.venues`/`slots_default`. |
 | Bot stillborn / tiny grid lines | The per-pair min-notional floor (`limits.cost.min` from `:2087`) bumps the allocation within caps, then widens the grid step to fit fewer lines; if neither fits it vetoes. Check `state/state.json → journal` for `size-floor` / `size-fit` / `guard-veto` entries. |
 | Rotation won’t happen | Requires a stagnant incumbent **and** Δscore ≥ 5 **and** expired per-token cooldown. Check `/status` journal for `rotation-veto` / `rotation-skip`. |
 | Empty `.md` run card | Older daemon shape bug (fixed); the companion `.json` was always correct. If you see it, upgrade daemon.py. |
@@ -452,13 +477,18 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-129 tests, all offline (network/browser calls are mocked or stubbed; state is
-isolated in temp dirs). Expected output:
+197 tests as of 2026-09-05, all offline (network/browser calls are mocked
+or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
+also disables the PocketBase write-through so tests can never pollute the
+live side channel). Expected output:
 
 ```
-Ran 129 tests in …
+Ran 197 tests in …
 OK
 ```
+
+(`python3 -m pytest tests/ -q` works too.) The count changes with the code —
+trust the runner output over any number printed in docs.
 
 A cosmetic `ResourceWarning` about unclosed fixture file handles may appear;
 it is not a failure.
@@ -472,6 +502,7 @@ it is not a failure.
 | `state/decisions.jsonl` | One JSON line per decision; outcomes attached on close. |
 | `state/reports/<UTC-ts>-<kind>.{json,md}` | Per-cycle run cards. |
 | `state/reliability.json` | Per-archetype reliability ledger — auto-refreshed from closed round-trips by the 24h reliability cron (see `GET /reliability`). |
+| `state/reliability_archive.json` | Closed round-trips of already-deleted (rotated-out) bots, per archetype — merged into every reliability recompute so history is never lost. |
 | `state/market_map-{spot,derivative}.json` | 24h all-markets caches. |
 | `watch/specs/<symbol>-s<slot>.json` | Per-bot tvcli watch specs. |
 

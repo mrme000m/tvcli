@@ -26,8 +26,9 @@ Collection map (see .agents/skills/pocketbase/references/grid-integration.md):
     reliability  <- reliability_grid.save (full archetype ledger)
     bots         <- state["active_bots"] entries
     slots        <- state["slots"]
-    market_cache <- resolve market_map / market_meta payloads
-    run_cards    <- reflect.write_run_card (md text; file field optional)
+
+    market_cache and run_cards are NOT mirrored live: they are imported by
+    the CLI's `--import-dir` backfill (see _import_dir) only.
 
 Usage:
     from pbclient import PB

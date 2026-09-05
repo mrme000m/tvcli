@@ -34,7 +34,7 @@ up or down; live values (status chips, ladder cursors, feed) update every
 
 | View | What it shows / does |
 |------|----------------------|
-| **Fleet** | One card per slot. Active bots render a **channel ladder** — the bot's actual ATR channel (`low/mid/high`) with its geometric grid rungs and a live price cursor (crimson flag when out of channel). Fills vs stagnation floor, unrealized PnL, commitment, hold time, stagnant/adopted/rotate-queued badges. Right rail: control actions, live journal feed, last screen shortlist, fleet summary. |
+| **Fleet** | One card per slot. Active bots render a **channel ladder** — the bot's actual ATR channel (`low/mid/high`) with its geometric grid rungs and a live price cursor (crimson flag when out of channel). Fills vs stagnation floor, unrealized PnL, commitment, hold time, stagnant/adopted/rotate-queued badges. Right rail: control actions, live journal feed, last screen shortlist, fleet summary. A **readiness strip** on top shows the daemon's own dependency diagnostics — LLM provider env per chain link, browser CDP, PocketBase, enforced venue capacity (non-premium/premium active vs max, from the ctl plane's capacity view), connected profiles (any real-money `paperTrading=false` profile is flagged red), and worker capabilities. |
 | **Decisions** | The full `decisions.jsonl` ledger — every deliberate → guard → deploy call with regime, score, step, slot, LLM-degraded flag, rationale, and the outcome (realized PnL) attached on close. Filter by text/state. |
 | **Run cards** | Index of `state/reports/`; each card opens the rendered markdown (Route/Ground/Deliberate/Guard/Deploy/Observe/Reflect/Caveats) with the raw JSON behind a toggle. |
 | **Reliability** | Per-archetype ledger with sizing-tier computation (base <10 samples → probe ≥10 → full ≥30 & PF ≥1.3; recent PF <1.0 kills) and a progress track to the 30-sample gate. |
@@ -47,7 +47,7 @@ Everything the UI does is a plain JSON endpoint (safe to curl):
 
 | Method | Path | Effect |
 |--------|------|--------|
-| GET | `/api/overview` | Merged snapshot: daemon info, ctl status, enriched bots, slots, committed, journal tail, reliability, last screen, config digest, PB health. |
+| GET | `/api/overview` | Merged snapshot: daemon info, ctl status, enriched bots, slots, committed, journal tail, reliability, last screen, config digest, PB health, readiness (derived dependency/capacity/profile diagnostics). |
 | GET | `/api/daemon` | Supervisor/lifecycle detail (pid, mode, launchd vs manual, uptime, KILL). |
 | GET | `/api/state` | Raw `state.json`. |
 | GET | `/api/journal?limit=` | Journal tail. |

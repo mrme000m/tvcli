@@ -98,4 +98,16 @@ class Ctl(BaseHTTPRequestHandler):
 
 def serve_ctl(daemon, port):
     Ctl.daemon = daemon
-    HTTPServer(("127.0.0.1", port), Ctl).serve_forever()
+    try:
+        HTTPServer(("127.0.0.1", port), Ctl).serve_forever()
+    except OSError as exc:
+        # e.g. EADDRINUSE when a stray `daemon.py --once` holds the port —
+        # this thread used to die silently, leaving the daemon trading with
+        # no control plane. Surface it loudly (stdout + state journal).
+        msg = f"ctl plane failed to bind 127.0.0.1:{port}: {exc}"
+        print(msg, flush=True)
+        try:
+            daemon.state.setdefault("journal", []).append(
+                {"kind": "ctl-error", "msg": msg[:200], "at": _utcnow()})
+        except Exception:
+            pass

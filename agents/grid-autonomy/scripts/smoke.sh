@@ -6,6 +6,10 @@
 # map when no provider keys are set, so it also works keyless.
 #
 # Usage: scripts/smoke.sh [--top N] [--live-paper]
+#
+# Note: the daemon refuses to start while a live daemon holds
+# state/daemon.pid (single-writer guard) — stop the daemon first, or set
+# GRID_NO_PIDGUARD=1 to run the smoke against shared state deliberately.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
