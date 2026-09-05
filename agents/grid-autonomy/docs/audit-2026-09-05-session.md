@@ -221,3 +221,74 @@ live; reliability refresh repopulated the ledger from the archive;
 console fleet/decisions/reliability views all verified rendering correct
 data; PocketBase write-through active on all 5 collections; `dev config
 check` green; 201 tests passing.
+
+
+---
+
+# Session 3b — token-selection review: findings + fixes (2026-09-05, night)
+
+Full review of the find → choose → un-choose → trade pipeline against the
+design intent and profitability logic. Everything below is code-verified
+and live-verified on the paper fleet; tests in `tests/test_selection_fixes.py`.
+
+## Confirmed bugs (all fixed)
+
+1. **`adopt_existing` crashed live** — `record_decision_safe()` was called
+   with 3 args where the wrapper required 4 (`payloads` had no default even
+   though `reflect.record_decision` does). Effect observed at 12:38 UTC:
+   a state wipe left the running WT paper bots untracked; the aborted
+   adoption pass left them orphaned and every redeploy hit
+   `capacity-veto: pair already has a bot`. The unit tests never caught it
+   because they mock `record_decision_safe` with a `*args` lambda. Fix:
+   default `payloads=None` on the wrapper. Live-verified: wiped
+   `state.json`, restarted, and the daemon adopted ARB + CHIP into slots
+   1/2 with decision records (`d20260905-005/006`).
+2. **Binance 4h trend confirmation was dead** — `confirm_directional`
+   fetched candles with the BASE symbol (`ZKP`), so every Binance
+   directional candidate 400'd and the HTF gate fail-opened silently.
+   Fix: full ticker (`ZKPUSDT`). Live-verified: NEAR/ADA/ZEN/ZEC/LTC now
+   return real 4h regimes.
+3. **Stablecoin candidates** — RLUSD/USD1 (ATR 0.009–0.016%) passed the
+   Binance universe filter and scored 91+ as `trend_down` (peg wobble);
+   a deployed grid on them would be pure fee bleed at the 0.1% step floor.
+   Fix: extended stable list + **global dead-tape floor** (ATR < 0.25%
+   dropped, journaled as `dropped_dead_tape`; live run dropped TRX 0.199%).
+
+## Profitability gaps (all addressed)
+
+4. **No fee model** — the spread gate required `step ≥ 2×spread` only;
+   exchange + WT builder fees (round trip: HL ≈ 0.10%, Binance ≈ 0.20%)
+   were never charged anywhere. Fix: single fee table in
+   `guardrails.ROUND_TRIP_FEE_PCT`, used by (a) the deploy gate
+   (`step < 2×spread + fees` vetoes), (b) `grid_adapter` (step floored at
+   the same value), (c) the screen's EV pass.
+5. **Ranking ignored oscillation** — the heuristic score rewards ATR (the
+   range to harvest) but a high-ATR token that never recrosses its lines
+   harvests nothing. Fix: `apply_harvest_ev` in the screen simulates each
+   top-20 candidate's own grid over its candles (zero extra fetches beyond
+   one per candidate, fail-open), computes
+   `expected_fills_per_24h`/`harvest_net_pct_24h`, and adjusts the ranking
+   (dead tape −10, oscillator +up to 3). The swarm brief and the run-card
+   top3 now carry the EV fields, and the brief also carries the screen
+   flags (`thin_vol`, `unharvestable`, …) which previously never reached
+   the LLM.
+6. **Run-card observability** — top3 lacked `spread_pct`, so a deploy
+   looked spread-blind in the cards even though the briefs had it. Fixed.
+
+## Verified non-findings (checked, correct as designed)
+
+- Slot allocation, tier ladder (base 25% → probe 40% → full 50%),
+  worst-case one-sided sizing, and the density-first min-cost funding.
+- Rotation discipline: min-hold 24h, Δscore ≥ 5 hysteresis, per-token
+  cooldowns, blindness fail-closed, challenger full deliberation.
+- Kill paths: out-of-channel → `needs_reanalysis` → rotate; WT
+  `stopOnOutOfGrid` + `stop_and_close_all` is the hard stop.
+- Reliability ledger + archive merge, archetype kill-flag,
+  `refuse_new_archetype` gating, memories injected into the swarm.
+
+## Live post-fix evidence
+
+- Merge run: 50 candidates, TRX dropped (dead tape), zero stablecoins,
+  binance 4h confirms real, EV fields populated (e.g. CASHCAT 10.9
+  fills/24h ≈ 20.7%/day net-harvest estimate; CHIP 2.73 fills ≈ 4.3%/day).
+- 212 tests pass (201 + 11 new regression tests).

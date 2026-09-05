@@ -26,6 +26,7 @@ sys.path.insert(0, WUN_SCRIPTS)
 sys.path.insert(0, os.path.join(HERE, "..", "policy"))
 
 import grid_config  # noqa: E402
+from guardrails import ROUND_TRIP_FEE_PCT  # noqa: E402  (same package)
 
 GRID_TYPE_MAP = {"long": "long", "short": "short", "neutral": "neutral"}
 EXCHANGE_CODE = {"hyperliquid": "HYPERLIQUID_SWAP", "binance": "BINANCE"}
@@ -151,9 +152,16 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
     spread = brief.get("spread_pct")
     grid = grid_config.build_grid(symbol, args, m, ticket.get("regime", "neutral"),
                                   brief.get("evidence", {}), spread)
-    # risk step adjustment (geometric mean from the risk team)
+    # risk step adjustment (geometric mean from the risk team), floored at
+    # the round-trip cost: 2×spread + exchange/builder fees. A step below
+    # that loses money on every fill, whatever the volatility says.
+    rt_fee = ROUND_TRIP_FEE_PCT.get(venue, 0.15)
+    fee_floor = 2 * (spread if spread is not None else 0.0) + rt_fee
     grid["profit_per_grid_pct"] = round(
-        min(args.step_max, max(args.step_min, grid["profit_per_grid_pct"] * step_mult)), 3)
+        min(args.step_max, max(args.step_min,
+                               grid["profit_per_grid_pct"] * step_mult,
+                               fee_floor)), 3)
+    grid["fee_floor_pct"] = round(fee_floor, 3)
     # affordability: widen the step until the grid count fits the budget
     if max_affordable_grids and grid["grids"] > max_affordable_grids >= args.min_grids:
         width = grid["channel"]["width_pct"]
@@ -239,6 +247,7 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
                 "total_commitment": grid["sizing"]["total_commitment_estimate"],
                 "step_pct": grid["profit_per_grid_pct"], "spread_pct": spread,
                 "venue": venue, "grid_type": ticket["grid_type"],
+                "round_trip_fee_pct": rt_fee,
             }}
 
 

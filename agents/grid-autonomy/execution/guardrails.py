@@ -22,6 +22,14 @@ import os
 
 HYSTERESIS_DEFAULT = 5.0
 
+# Round-trip cost per venue, percent, both legs of a grid round trip:
+#   hyperliquid: 2 × 0.015% maker + 2 × 0.035% WT builder fee ≈ 0.10%
+#   binance:     2 × 0.1% spot taker/maker, no builder fee  ≈ 0.20%
+# Paper fills simulate at real prices; live PnL pays these. The deploy gate
+# and the screen's EV ranking both use this table (screen/merge.py imports
+# it) so the whole pipeline charges one fee model.
+ROUND_TRIP_FEE_PCT = {"hyperliquid": 0.10, "binance": 0.20}
+
 
 def check_kill(ctx):
     kf = ctx.get("kill_file")
@@ -69,10 +77,18 @@ def check_spread(ctx):
     step, spread = ctx.get("step_pct"), ctx.get("spread_pct")
     if step is None:
         return ["step_pct missing"]
+    # fee floor: even with a zero spread the round trip pays exchange fees
+    # (plus the WT builder fee on premium venues) — the step must clear them
+    venue = ctx.get("venue")
+    fee = ROUND_TRIP_FEE_PCT.get(venue, 0.15)
+    if ctx.get("round_trip_fee_pct") is not None:
+        fee = float(ctx.get("round_trip_fee_pct"))
+    if step < fee:
+        return [f"step {step}% < round-trip fees {fee}% — unharvestable"]
     if spread is None:
         return []  # unknown spread: warn upstream, don't block
-    if step < 2 * spread:
-        return [f"step {step}% < 2×spread {2*spread}% — unharvestable"]
+    if step < 2 * spread + fee:
+        return [f"step {step}% < 2×spread {2*spread}% + fees {fee}% — unharvestable"]
     return []
 
 

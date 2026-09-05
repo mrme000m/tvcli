@@ -584,14 +584,16 @@ def llm_payload() -> dict:
         "nvidia": os.environ.get("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
         "openrouter": os.environ.get("OPENROUTER_MODEL",
                                      "arcee-ai/trinity-large-preview:free"),
+        "mistral": os.environ.get("MISTRAL_MODEL", "mistral-large-latest"),
     }
     key_env = {
         "cf": ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_TOKEN"),
         "nvidia": ("NVIDIA_API_KEY",),
         "openrouter": ("OPENROUTER_API_KEY",),
+        "mistral": ("MISTRAL_API_KEY",),
     }
     chain = side.get("GRID_LLM_CHAIN") or os.environ.get(
-        "GRID_LLM_CHAIN", "cf,nvidia,openrouter")
+        "GRID_LLM_CHAIN", "cf,nvidia,openrouter,mistral")
     chain_list = [p.strip() for p in chain.split(",") if p.strip()]
 
     def _present(name):
@@ -603,7 +605,7 @@ def llm_payload() -> dict:
     providers = {}
     for name in LLM_PROVIDERS:
         model_var = {"cf": "CF_MODEL", "nvidia": "NVIDIA_MODEL",
-                     "openrouter": "OPENROUTER_MODEL"}[name]
+                     "openrouter": "OPENROUTER_MODEL", "mistral": "MISTRAL_MODEL"}[name]
         providers[name] = {
             "key_present": _present(name),
             "model": side.get(model_var) or model_defaults[name],

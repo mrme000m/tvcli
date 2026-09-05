@@ -63,7 +63,18 @@ Accuracy note: every fact below is verified against the code at
    `grid-directional`), real Binance book-ticker spreads
    (`execution/spreads.py`), optional tvcli `/hunt` confluence (squeeze +
    choppiness + mtf-confluence), and 4h directional re-confirmation for
-   trend candidates. Output: ranked candidates with `score_final`.
+   trend candidates (full ticker — `ZKPUSDT`, not `ZKP` — on Binance).
+   Selection hygiene layers on top: USD-stable bases (RLUSD, USD1, USDE,
+   PYUSD, …) never enter the universe, a global **dead-tape floor** drops
+   candidates with ATR < 0.25% (below every preset's harvestable range,
+   above peg noise — dropped ones are journaled in
+   `candidate_report.dropped_dead_tape`), and an **expected-value pass**
+   simulates each top candidate's own grid over its recent candles
+   (`apply_harvest_ev`: `expected_fills_per_24h`, `harvest_net_pct_24h`
+   = fills × (step − round-trip fees)) and adjusts the ranking: dead tapes
+   (< 0.1%/day net harvest) lose 10 points, oscillators gain up to +3, so
+   the fleet deploys tokens that actually oscillate through their grid.
+   Output: ranked candidates with `score_final` + EV fields.
 2. **Deliberate.** `agents/swarm.py` runs a TradingAgents-style pipeline per
    candidate — bull open → bear open → bull/bear rebuttals → facilitator →
    seeking/neutral/conservative risk team — via `llm/provider.py`
@@ -73,7 +84,11 @@ Accuracy note: every fact below is verified against the code at
    outcome memories into the briefs.
 3. **Guard (fail-closed).** `execution/guardrails.py` runs 8 gates. Any
    violation vetoes the deployment. No WunderTrading mutation happens before
-   all gates pass.
+   all gates pass. The spread gate is **fee-aware**: the step must clear
+   `2×spread + round-trip fees` (`ROUND_TRIP_FEE_PCT`: Hyperliquid 0.10%
+   = maker×2 + WT builder fee×2; Binance spot 0.20%) — and
+   `grid_adapter` floors the deployed step at the same value, so a grid
+   never goes out with lines that lose money on every fill.
 4. **Deploy.** A plan-capacity pre-check (`observe.grid_capacity()` →
     `Daemon.venue_capacity_block()`) skips venues whose exchange tier is at
     its active-grid-bot cap (free plan: HYPERLIQUID_SWAP is premium/200 via
@@ -148,7 +163,7 @@ Accuracy note: every fact below is verified against the code at
 | `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
 | `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
 | `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
-| `console/` | **Mission console** — web UI + additive API on :8798 for observing the fleet (channel-ladder slot cards, decision ledger, run cards, reliability, logs), editing config.yaml (whitelisted, comment-preserving), and dev control (rescreen/rotate/KILL/start/stop/restart). See `console/README.md`. |
+| `console/` | **Mission console** — web UI + additive API on :8798 for observing the fleet (channel-ladder slot cards, decision ledger, run cards, reliability, logs), editing config.yaml (whitelisted, comment-preserving), the LLM-providers panel (set/choose/validate NVIDIA + OpenRouter, order the fallback chain, per-agent provider routing), and dev control (rescreen/rotate/KILL/start/stop/restart). See `console/README.md`. |
 | `config.yaml` | Contract: portfolio, venues, providers, policy defaults. |
 | `screen/merge.py` | Parallel HL+Binance screen, confluence, 4h confirm. |
 | `agents/swarm.py` | TradingAgents deliberation swarm (rule fallback). |
@@ -210,6 +225,7 @@ whether the daemon actually reads it:
 | `llm.nvidia_model` | `meta/llama-3.3-70b-instruct`. | env only (`NVIDIA_MODEL`) |
 | `llm.openrouter_model` | `arcee-ai/trinity-large-preview:free`. | env only (`OPENROUTER_MODEL`) |
 | `llm.max_calls_per_decision` | 8-call budget. | doc only (swarm hardcodes) |
+| `llm.roles` | Per-agent provider routing (bull → cf, etc.). | env only (`GRID_LLM_ROLES`, JSON) — set from the console "LLM providers" panel |
 | `policy.cooldown_min_h` / `cooldown_max_h` | 12–72h clamp. | doc only (stagnation.py constants) |
 | `policy.fill_ratio_stagnant` | `0.3` fill threshold. | doc only (stagnation.py constant) |
 | `policy.realized_ratio_stagnant` | `0.4` realized threshold. | doc only (stagnation.py constant) |
@@ -484,6 +500,7 @@ path so a transient failure does not silently degrade autonomy:
 |------------|---------|-----------|-----------------|
 | **CloakBrowser on CDP `:9222`** (headful, profile at `minimal-mjs/profile`) + a logged-in **wundertrading.com page** | every WT session-API call: observe, deploy, stop/delete, reliability, capacity, profiles | `watch.browser_*` watchdog in `health_cycle` probes CDP every 60 s and relaunches `browser_launch_cmd` + `wt_restore_cmd` (≤1 try / 10 min, journaled `browser-restart`) | `observe error: grid status list unavailable (browser/session down)`, `deploy-failed`, guard-profile vetoes |
 | **CF Workers AI keys** in env (`CLOUDFLARE_ACCOUNT_ID` + token) | `llm/provider.py` chain → swarm deliberation | `run_launchd.py` imports them from the `dsh web` process env at boot; the daemon re-runs `self_heal_env()` every rescreen (journaled `env-heal`) — so a `dsh web` started *after* the daemon still gets picked up | `llm_degraded: true` decisions (rule fallback, not fatal) |
+| **LLM provider sidecar** (`state/llm.env`) | NVIDIA/OpenRouter keys + models, `GRID_LLM_CHAIN`, `GRID_LLM_ROLES` — set from the console "LLM providers" panel | written `0600` by `POST /api/llm`; sourced by `start.sh` + `run_launchd.load_llm_env()` at boot; re-healed by `self_heal_env()` at runtime | provider fallback misses nvidia/openrouter, per-agent routing falls back to the global chain |
 | **PocketBase env** (`.pocketbase/pb.env`) | write-through side channel (`pbclient.py`) | sourced by `start.sh` and by `run_launchd.py` at boot; re-healed by `self_heal_env()` at runtime | PB collections go stale (file layer keeps working — it is the system of record) |
 
 Prolonged total blindness now escalates: when **every** bot errors on every

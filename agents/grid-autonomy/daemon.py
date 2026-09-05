@@ -223,9 +223,11 @@ sys.path.insert(0, os.path.join(HERE, "scripts"))
 try:
     from run_launchd import import_cf_env as _import_cf_env  # noqa: E402
     from run_launchd import load_pb_env as _load_pb_env  # noqa: E402
+    from run_launchd import load_llm_env as _load_llm_env  # noqa: E402
 except Exception:
     _import_cf_env = None
     _load_pb_env = None
+    _load_llm_env = None
 
 
 def self_heal_env(state=None):
@@ -246,6 +248,14 @@ def self_heal_env(state=None):
             pass
         if os.environ.get("PB_TOKEN") or os.environ.get("PB_ADMIN_EMAIL"):
             healed.append("pb")
+    if not (os.environ.get("NVIDIA_API_KEY")
+            or os.environ.get("OPENROUTER_API_KEY")) and _load_llm_env:
+        try:
+            _load_llm_env()
+        except Exception:
+            pass
+        if os.environ.get("NVIDIA_API_KEY") or os.environ.get("OPENROUTER_API_KEY"):
+            healed.append("llm")
     if healed and state is not None:
         log(state, {"kind": "env-heal",
                     "msg": "re-imported " + "+".join(healed)
@@ -563,7 +573,11 @@ def reliability_load_safe():
         return {}
 
 
-def record_decision_safe(ticket, brief, action, payloads):
+def record_decision_safe(ticket, brief, action, payloads=None):
+    """Adoption callers pass no payloads — mirror record_decision's default
+    (a missing default here crashed adopt_existing live on 2026-09-05:
+    "missing 1 required positional argument" aborted the whole adoption
+    pass, orphaning running WT paper bots that then blocked redeploys)."""
     if not HAS_REFLECT:
         return None
     try:
@@ -1384,7 +1398,12 @@ class Daemon:
                        "top3": [{"venue": c.get("venue"), "symbol": c.get("symbol"),
                                  "regime": c.get("regime"),
                                  "score_final": c.get("score_final"),
-                                 "step": c.get("step", c.get("step_pct"))}
+                                 "step": c.get("step", c.get("step_pct")),
+                                 "spread_pct": c.get("spread_pct"),
+                                 "expected_fills_per_24h":
+                                     c.get("expected_fills_per_24h"),
+                                 "harvest_net_pct_24h":
+                                     c.get("harvest_net_pct_24h")}
                                 for c in cands[:3]]},
             "deliberations": deliberations,
             "guard": guards,

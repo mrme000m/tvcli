@@ -36,9 +36,9 @@ SYS = ("You are a crypto grid-trading analyst. Reply with STRICT JSON only, "
        "Be terse: every string value at most 25 words, arrays at most 3 items.")
 
 
-def _call(messages, schema_hint, _chain, fallback):
+def _call(messages, schema_hint, _chain, fallback, role=None):
     try:
-        _name, obj = chat_json(messages, _chain=_chain)
+        _name, obj = chat_json(messages, _chain=_chain, role=role)
         if not isinstance(obj, dict):
             raise ValueError("non-dict reply")
         obj["_llm"] = _name
@@ -85,6 +85,9 @@ def brief_text(brief):
         "adx": m.get("adx14"), "rsi": m.get("rsi14"),
         "bb_pctile": m.get("bb_width_pctile"), "spread_pct": brief.get("spread_pct"),
         "grid_step_pct": brief.get("step"),
+        "flags": brief.get("flags"),
+        "expected_fills_per_24h": brief.get("expected_fills_per_24h"),
+        "harvest_net_pct_24h": brief.get("harvest_net_pct_24h"),
         "confluence": brief.get("confluence_notes"),
         "evidence": brief.get("evidence"),
         "stagnation": brief.get("stagnation_policy"),
@@ -110,7 +113,7 @@ def bull_open(brief, _chain=None):
          f"Argue FOR deploying a grid bot on this candidate. Schema: "
          f'{{"side":"long|short|neutral","thesis":str,"invalidation":str,'
          f'"confidence":0-1}}. Candidate: {brief_text(brief)}{_memory_sentence(brief)}'}],
-        None, _chain, fb)
+        None, _chain, fb, role="bull")
 
 
 def bear_open(brief, _chain=None):
@@ -123,12 +126,13 @@ def bear_open(brief, _chain=None):
          f"Argue AGAINST deploying a grid bot here. Schema: "
          f'{{"risks":[str],"kill_triggers":[str],"confidence":0-1}}. '
          f'Candidate: {brief_text(brief)}{_memory_sentence(brief)}'}],
-        None, _chain, fb)
+        None, _chain, fb, role="bear")
 
 
 def rebuttal(brief, own, other, stance, _chain=None):
     fb = {"refined": f"rule-fallback {stance} stands", "concedes": [],
           "confidence": 0.5}
+    role = "bull_rebuttal" if stance == "bullish" else "bear_rebuttal"
     return _call([
         {"role": "system", "content": SYS},
         {"role": "user", "content":
@@ -136,7 +140,7 @@ def rebuttal(brief, own, other, stance, _chain=None):
          f"Opponent: {json.dumps(other)}. Respond with schema "
          f'{{"refined":str,"concedes":[str],"confidence":0-1}}. '
          f'Candidate: {brief_text(brief)}'}],
-        None, _chain, fb)
+        None, _chain, fb, role=role)
 
 
 def facilitator(brief, bull, bear, _chain=None):
@@ -150,7 +154,7 @@ def facilitator(brief, bull, bear, _chain=None):
          f"Bear: {json.dumps(bear)}. Schema: "
          f'{{"decision":"GO|NO_GO","grid_type":"long|short|neutral",'
          f'"rationale":str,"confidence":0-1}}. Candidate: {brief_text(brief)}{_memory_sentence(brief)}'}],
-        None, _chain, fb)
+        None, _chain, fb, role="facilitator")
 
 
 def risk_review(brief, ticket, stance, _chain=None):
@@ -161,6 +165,8 @@ def risk_review(brief, ticket, stance, _chain=None):
         fb = {"approve": False, "max_alloc_mult": 0.0, "step_mult": 1.0,
               "notes": "rule-fallback", "veto_reason": "spot cannot short"}
         return fb, True
+    role = {"seeking": "risk_seeking", "neutral": "risk_neutral",
+            "conservative": "risk_conservative"}.get(stance)
     return _call([
         {"role": "system", "content": SYS},
         {"role": "user", "content":
@@ -168,7 +174,7 @@ def risk_review(brief, ticket, stance, _chain=None):
          f"Schema: {{\"approve\":bool,\"max_alloc_mult\":0-1,"
          f'"step_mult":0.5-2,"notes":str,"veto_reason":str|null}}. '
          f'Candidate: {brief_text(brief)}'}],
-        None, _chain, fb)
+        None, _chain, fb, role=role)
 
 
 def deliberate(brief, _chain=None, debate_rounds=1):
