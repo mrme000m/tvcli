@@ -225,6 +225,17 @@ def is_idle(bot, tracker, now, cfg):
     obs = bot.get("observed") or {}
     if obs.get("error"):
         return False, ["observe error — fail closed"]
+    # NEVER swap out a bot with open positions under water: the swap's
+    # stop is stop_and_close_all, which would realize the mark loss. The
+    # incumbent keeps running — its grid keeps working the position back
+    # toward break-even (and health_cycle may re-center the channel).
+    # This check precedes needs_reanalysis: even an out-of-channel bot
+    # is held while its positions are under water.
+    pnl = obs.get("unrealized_pnl")
+    if pnl is not None and float(pnl) < 0:
+        return False, [f"open position at loss (${float(pnl):.2f} "
+                       f"unrealized) — held for recovery, never closed "
+                       f"at a loss"]
     if bot.get("needs_reanalysis"):
         return True, ["needs_reanalysis (out-of-channel/stopped)"]
     if (obs.get("status") or "active").lower() in ("stopped", "stopped_all",

@@ -2073,6 +2073,27 @@ class Daemon:
             log(self.state, {"kind": "rotation-veto", "slot": slot_key,
                              "msg": f"{'; '.join(reasons)[:160]}"})
             return False
+        # NEVER realize a loss to reallocate capital: every rotation stops
+        # the incumbent with stop_and_close_all, which closes its open grid
+        # lines at market. An incumbent whose mark PnL is negative keeps
+        # running — its grid keeps working the position back toward
+        # break-even. This is the hard rule for optimizer swaps AND
+        # rescreen rotations AND manual /rotate alike.
+        pnl = observed.get("unrealized_pnl")
+        if observed.get("error"):
+            log(self.state, {"kind": "loss-veto", "slot": slot_key,
+                             "msg": "observe error — position PnL unknown, "
+                                    "not closing blind; incumbent kept"})
+            return False
+        if pnl is not None and float(pnl) < 0:
+            log(self.state, {"kind": "loss-veto", "slot": slot_key,
+                             "msg": f"{incumbent.get('venue')}:"
+                                    f"{incumbent.get('symbol')}: open "
+                                    f"position at loss "
+                                    f"(${float(pnl):.2f} unrealized) — "
+                                    f"never close at a loss; incumbent kept, "
+                                    f"challenger not deployed"})
+            return False
         key = f"{incumbent.get('venue')}:{incumbent.get('symbol')}"
         cooldown_ok = time.time() >= self.state["cooldowns_until"].get(key, 0)
         slot = next((s for s in self.state["slots"]
