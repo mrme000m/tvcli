@@ -13,8 +13,14 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 ## What it does
 
 - **Screen (60m):** `screen/merge.py` screens Hyperliquid perps + Binance
-  spot in parallel (regime, preset score, real spreads, optional tvcli
-  `/hunt` confluence, 4h trend confirmation).
+  spot in parallel — broad universe (≥ `screen.min_volume_usd`, top
+  `screen.universe_max_symbols` by 24h volume), regime + preset score,
+  real spreads, numeric tvcli `/hunt` fitness (squeeze/choppiness/
+  mtf-confluence/dvi — "moves large & fast" bonuses, cap +6, fail-soft),
+  4h trend confirmation, dead-tape floor + expected-value grid-fill pass.
+  When a venue's slots are full but a token scores ≥
+  `screen.open_slot_min_score` and deployable capital is spare, the daemon
+  opens another slot (up to `portfolio.slots_max`).
 - **Deliberate:** `agents/swarm.py` runs bull/bear debate → facilitator →
   3-stance risk team via `llm/provider.py`; rule-based fallback on LLM
   outage (`llm_degraded: true`). `agents/reflect.py` injects k=3 memories.
