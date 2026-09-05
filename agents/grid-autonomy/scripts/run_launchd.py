@@ -94,6 +94,32 @@ def load_pb_env():
         pass
 
 
+def load_llm_env():
+    """Source state/llm.env (NVIDIA_*/OPENROUTER_*/CF_MODEL/GRID_LLM_CHAIN/
+    GRID_LLM_ROLES) when present, so provider keys + models set from the
+    console take effect under launchd exactly as they do via start.sh.
+
+    Only sets vars NOT already in env — a `dsh web`-provided value still
+    wins (same precedence as load_pb_env). Never prints values.
+    """
+    path = os.path.join(HERE, "state", "llm.env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.removeprefix("export ").partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key not in os.environ and key:
+                    os.environ[key] = val
+    except OSError:
+        pass
+
+
 def redirect_stdio_to_state_log():
     """Point stdout/stderr at state/logs/daemon-launchd.log (append).
 
@@ -140,6 +166,7 @@ def main():
         return
     import_cf_env()
     load_pb_env()
+    load_llm_env()
     with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
     os.chdir(HERE)

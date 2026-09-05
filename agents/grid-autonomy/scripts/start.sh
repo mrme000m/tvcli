@@ -36,6 +36,15 @@ eval "$CF_ENV"
 
 mkdir -p "$STATE_DIR"
 
+# 1.25. LLM provider keys/models set from the console persist in
+# state/llm.env (NVIDIA_*/OPENROUTER_*/CF_MODEL/GRID_LLM_CHAIN/GRID_LLM_ROLES).
+# Source it so manual runs honor the same sidecar as launchd. Keys never echo.
+LLM_ENV="$HERE/state/llm.env"
+if [ -f "$LLM_ENV" ]; then
+  # shellcheck disable=SC1090
+  . "$LLM_ENV"
+fi
+
 # 1.5. Co-start PocketBase (event-driven persistence side channel) + source its
 # env. PB is non-fatal: a failure here must NOT block the daemon. setup is
 # idempotent (downloads/creates/starts only when needed) and writes pb.env

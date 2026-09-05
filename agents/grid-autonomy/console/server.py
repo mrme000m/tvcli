@@ -87,6 +87,18 @@ LAUNCHD_LABEL = "com.tvcli.grid-autonomy"
 LAUNCHD_LOG = os.path.join(STATE_DIR, "logs", "daemon-launchd.log")
 PB_URL = os.environ.get("PB_URL", "http://127.0.0.1:8090").rstrip("/")
 
+# LLM provider sidecar (set/choose/validate from the console). Mirrors the
+# .pocketbase/pb.env "export KEY=\"val\"" format; the daemon sources it via
+# run_launchd.load_llm_env / start.sh / self_heal_env. Keys land here chmod
+# 0600 and are NEVER returned by any /api/llm endpoint (presence boolean only).
+LLM_ENV_PATH = os.path.join(STATE_DIR, "llm.env")
+
+# Provider order + role keys, mirrored from llm/provider.py so the API can
+# report them without importing the daemon module (kept in sync manually).
+LLM_PROVIDERS = ["cf", "nvidia", "openrouter", "mistral"]
+LLM_ROLE_KEYS = ["bull", "bear", "bull_rebuttal", "bear_rebuttal", "facilitator",
+                 "risk_seeking", "risk_neutral", "risk_conservative"]
+
 DEFAULT_CTL_PORT = 8799
 
 # Sizing-ladder thresholds (mirror daemon.size_multiplier semantics; surfaced
@@ -527,6 +539,230 @@ def apply_config_edits(edits: dict) -> tuple[int, dict]:
                  "backup": backup, "restart_required": True}
 
 
+# ── LLM provider sidecar (set / choose / validate) ─────────────────────
+
+def _llm_sidecar() -> dict:
+    """Parse state/llm.env into {KEY: value}; {} when absent/unparseable.
+
+    Values (incl. keys) are read here but only ever used internally — the
+    API surfaces presence booleans and models, never a key's value.
+    """
+    if not os.path.isfile(LLM_ENV_PATH):
+        return {}
+    out = {}
+    try:
+        with open(LLM_ENV_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.removeprefix("export ").partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    out[key] = val
+    except OSError:
+        pass
+    return out
+
+
+def _llm_env_value(key: str, default: str) -> str:
+    """Sidecar first, live env fallback, then the module default."""
+    side = _llm_sidecar()
+    if key in side:
+        return side[key]
+    if os.environ.get(key):
+        return os.environ[key]
+    return default
+
+
+def llm_payload() -> dict:
+    side = _llm_sidecar()
+    # Models: sidecar wins, then live env, then provider.py defaults.
+    model_defaults = {
+        "cf": os.environ.get("CF_MODEL", "@cf/zai-org/glm-5.3"),
+        "nvidia": os.environ.get("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
+        "openrouter": os.environ.get("OPENROUTER_MODEL",
+                                     "arcee-ai/trinity-large-preview:free"),
+    }
+    key_env = {
+        "cf": ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_TOKEN"),
+        "nvidia": ("NVIDIA_API_KEY",),
+        "openrouter": ("OPENROUTER_API_KEY",),
+    }
+    chain = side.get("GRID_LLM_CHAIN") or os.environ.get(
+        "GRID_LLM_CHAIN", "cf,nvidia,openrouter")
+    chain_list = [p.strip() for p in chain.split(",") if p.strip()]
+
+    def _present(name):
+        for key in key_env[name]:
+            if side.get(key) or os.environ.get(key):
+                return True
+        return False
+
+    providers = {}
+    for name in LLM_PROVIDERS:
+        model_var = {"cf": "CF_MODEL", "nvidia": "NVIDIA_MODEL",
+                     "openrouter": "OPENROUTER_MODEL"}[name]
+        providers[name] = {
+            "key_present": _present(name),
+            "model": side.get(model_var) or model_defaults[name],
+            "model_env": model_var,
+            "chain_position": (chain_list.index(name)
+                               if name in chain_list else None),
+            "enabled": name in chain_list,
+        }
+    roles = {}
+    raw_roles = side.get("GRID_LLM_ROLES")
+    if raw_roles:
+        try:
+            parsed = json.loads(raw_roles)
+            if isinstance(parsed, dict):
+                roles = parsed
+        except Exception:
+            roles = {}
+    return {
+        "providers": providers,
+        "chain": chain_list,
+        "roles": roles,
+        "role_keys": LLM_ROLE_KEYS,
+        "llm_env": {"cf": _present("cf"), "nvidia": _present("nvidia"),
+                    "openrouter": _present("openrouter")},
+        "sidecar": os.path.isfile(LLM_ENV_PATH),
+        "note": "Keys are stored in state/llm.env (0600) and never returned. "
+                "Models/chain/roles are read by the daemon at the next LLM "
+                "call via self-heal — no full restart required.",
+    }
+
+
+def apply_llm(updates: dict) -> tuple[int, dict]:
+    """Persist provider models, chain order, keys, and role routing to the sidecar.
+
+    Body: {"providers": {name: {model?, key?}}, "chain": [..], "roles": {..}}.
+    A `key` value of "" or "__KEEP__" leaves the stored key untouched; any
+    other non-empty string replaces it. Models/chain/roles are written verbatim
+    (model strings are free-form; chain entries must be known providers).
+    """
+    side = _llm_sidecar()
+
+    providers = updates.get("providers") or {}
+    if not isinstance(providers, dict):
+        return 400, {"error": "providers must be an object"}
+    chain = updates.get("chain")
+    roles = updates.get("roles")
+
+    # Merge models + keys.
+    for name, spec in providers.items():
+        if name not in LLM_PROVIDERS or not isinstance(spec, dict):
+            continue
+        model_var = {"cf": "CF_MODEL", "nvidia": "NVIDIA_MODEL",
+                     "openrouter": "OPENROUTER_MODEL"}[name]
+        if "model" in spec:
+            model = str(spec["model"]).strip()
+            if model:
+                side[model_var] = model
+        if "key" in spec:
+            key_val = str(spec["key"])
+            key_var = {"cf": "CLOUDFLARE_API_KEY", "nvidia": "NVIDIA_API_KEY",
+                       "openrouter": "OPENROUTER_API_KEY"}[name]
+            if key_val and key_val != "__KEEP__":
+                side[key_var] = key_val
+            # "" / "__KEEP__" → leave existing key (or none) untouched.
+
+    # Chain order: validate names, dedupe, append any omitted enabled providers.
+    if chain is not None:
+        if not isinstance(chain, list):
+            return 400, {"error": "chain must be a list"}
+        clean = []
+        for p in chain:
+            if p in LLM_PROVIDERS and p not in clean:
+                clean.append(p)
+        for p in LLM_PROVIDERS:
+            if p not in clean:
+                clean.append(p)
+        side["GRID_LLM_CHAIN"] = ",".join(clean)
+
+    # Roles: validate keys + provider values; drop unknown.
+    if roles is not None:
+        if not isinstance(roles, dict):
+            return 400, {"error": "roles must be an object"}
+        clean_roles = {}
+        for role, provider in roles.items():
+            if role in LLM_ROLE_KEYS and provider in LLM_PROVIDERS:
+                clean_roles[role] = provider
+        side["GRID_LLM_ROLES"] = json.dumps(clean_roles)
+
+    # Serialize back to "export K=\"v\"" lines, atomic + backup + 0600.
+    lines = []
+    for key, val in side.items():
+        lines.append(f'export {key}="{val}"')
+    text = "\n".join(lines) + "\n"
+
+    try:
+        os.makedirs(os.path.dirname(LLM_ENV_PATH), exist_ok=True)
+        if os.path.isfile(LLM_ENV_PATH):
+            shutil.copy2(LLM_ENV_PATH, LLM_ENV_PATH + ".bak")
+    except OSError:
+        pass
+    tmp = LLM_ENV_PATH + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write(text)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, LLM_ENV_PATH)
+    except OSError as exc:
+        return 500, {"error": f"write failed: {exc}"}
+
+    return 200, {"applied": True, "providers": list(providers),
+                 "chain": side.get("GRID_LLM_CHAIN", "").split(","),
+                 "roles": json.loads(side.get("GRID_LLM_ROLES", "{}")),
+                 "note": "Saved to state/llm.env. The daemon loads it at the "
+                         "next LLM call (self-heal) — no restart required."}
+
+
+def validate_llm() -> tuple[int, dict]:
+    """Live ping each provider via `llm/provider.py --ping --json`, sourcing
+    the sidecar into the child env so validation matches runtime exactly.
+    Never returns key values — only ok/latency/error.
+    """
+    provider_script = os.path.join(GRID_HOME, "llm", "provider.py")
+    if not os.path.isfile(provider_script):
+        return 500, {"error": "llm/provider.py not found"}
+    env = dict(os.environ)
+    for key, val in _llm_sidecar().items():
+        env[key] = val
+    try:
+        proc = subprocess.run(
+            [sys.executable, provider_script, "--ping", "--json"],
+            capture_output=True, text=True, timeout=90, env=env,
+            cwd=GRID_HOME)
+    except subprocess.TimeoutExpired:
+        return 504, {"error": "ping timed out after 90s"}
+    except Exception as exc:
+        return 500, {"error": f"ping failed: {exc}"}
+    if proc.returncode != 0:
+        return 502, {"error": "provider.py --ping exited "
+                              f"{proc.returncode}: {(proc.stderr or '')[:200]}"}
+    try:
+        data = json.loads(proc.stdout)
+    except Exception:
+        return 500, {"error": "unparseable ping output"}
+    results = data.get("results") or []
+    # Strip any key material defensively — ping() already emits none, but the
+    # "error" field can echo a URL/response; truncate to be safe.
+    safe = []
+    for r in results:
+        safe.append({
+            "provider": r.get("provider"),
+            "ok": bool(r.get("ok")),
+            "latency_ms": r.get("latency_ms"),
+            "error": str(r.get("error", ""))[:160] if not r.get("ok") else None,
+        })
+    return 200, {"chain": data.get("chain", [p for p, _ in
+                  [(r.get("provider"), r) for r in safe]]),
+                 "results": safe}
+
+
 def overview_payload() -> dict:
     st = _load_state()
     ok_status, ctl_status = _ctl("/status")
@@ -832,6 +1068,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, logs_payload(int(q1("lines", 300)), q1("grep", None)))
         elif route == "/api/config":
             self._json(200, config_payload())
+        elif route == "/api/llm":
+            self._json(200, llm_payload())
         elif route == "/api/meta":
             self._json(200, {
                 "console_port": CONSOLE_PORT, "ctl_port": _ctl_port(),
@@ -897,6 +1135,12 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"kill_file": False})
         elif route == "/api/config":
             code, resp = apply_config_edits(body.get("edits"))
+            self._json(code, resp)
+        elif route == "/api/llm":
+            code, resp = apply_llm(body)
+            self._json(code, resp)
+        elif route == "/api/llm/validate":
+            code, resp = validate_llm()
             self._json(code, resp)
         elif route == "/api/daemon/stop":
             if not confirmed:

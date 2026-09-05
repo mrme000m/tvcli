@@ -124,7 +124,7 @@ function selectView(name) {
   if (name === "decisions") loadDecisions();
   if (name === "reports") loadReports();
   if (name === "reliability") loadReliability();
-  if (name === "config") loadConfig();
+  if (name === "config") { loadConfig(); loadLlm(); }
   if (name === "logs") loadLogs(true);
 }
 
@@ -691,6 +691,193 @@ $("#cfg-save").addEventListener("click", async () => {
     loadConfig();
   } catch (e) {
     toast(`config save failed: ${e.message}`, true);
+  }
+});
+
+/* ── llm providers ────────────────────────────────────────────────── */
+
+const LLM_PROVIDER_LABELS = { cf: "Cloudflare", nvidia: "NVIDIA", openrouter: "OpenRouter" };
+const LLM_MASK = "•"; // never a real key; empty/sentinel means "keep existing"
+
+let llmState = null; // last GET /api/llm payload (providers, chain, roles)
+
+async function loadLlm() {
+  let p;
+  try { p = await api("/api/llm"); }
+  catch (e) { toast(`llm: ${e.message}`, true); return; }
+  llmState = p;
+  renderLlmLadder(p);
+  renderLlmProviders(p);
+  renderLlmMatrix(p);
+  $("#llm-sidecar-note").textContent = p.sidecar
+    ? "sidecar: state/llm.env present"
+    : "sidecar: none yet — save to create state/llm.env";
+}
+
+function renderLlmLadder(p) {
+  const chain = p.chain || [];
+  const ladder = $("#llm-ladder");
+  ladder.innerHTML = "";
+  chain.forEach((name, i) => {
+    const prov = p.providers[name] || {};
+    const chip = el("span", { class: "llm-chip" },
+      el("span", { class: "llm-chip-idx" }, String(i + 1)),
+      el("span", { class: "llm-chip-name" }, LLM_PROVIDER_LABELS[name] || name),
+      el("span", { class: "llm-chip-key " + (prov.key_present ? "has-key" : "no-key") },
+        prov.key_present ? "key" : "no key"),
+      el("button", { class: "llm-chip-btn", title: "move up", onclick: () => moveChain(i, -1) }, "↑"),
+      el("button", { class: "llm-chip-btn", title: "move down", onclick: () => moveChain(i, 1) }, "↓"));
+    ladder.append(chip);
+  });
+}
+
+function moveChain(i, delta) {
+  if (!llmState) return;
+  const chain = (llmState.chain || []).slice();
+  const j = i + delta;
+  if (j < 0 || j >= chain.length) return;
+  [chain[i], chain[j]] = [chain[j], chain[i]];
+  llmState.chain = chain;
+  renderLlmLadder(llmState);
+}
+
+function renderLlmProviders(p) {
+  const wrap = $("#llm-providers");
+  wrap.innerHTML = "";
+  for (const name of ["cf", "nvidia", "openrouter"]) {
+    const prov = p.providers[name] || {};
+    const enabled = (p.chain || []).includes(name);
+    const modelInput = el("input", { type: "text", class: "llm-model",
+      value: prov.model || "", spellcheck: "false", "data-prov": name,
+      placeholder: "model id" });
+    const keyInput = el("input", { type: "password", class: "llm-key",
+      value: prov.key_present ? LLM_MASK : "", "data-prov": name,
+      placeholder: prov.key_present ? "key set (leave to keep)" : "paste API key" });
+    // typing anything (except the mask sentinel) marks the key as "will set".
+    keyInput.addEventListener("input", () => {
+      const v = keyInput.value;
+      keyInput.dataset.dirty = (v && v !== LLM_MASK) ? "1" : "";
+    });
+    const validateBtn = el("button", { class: "btn btn--ghost llm-validate-btn",
+      onclick: () => validateProvider(name) }, "validate");
+    const status = el("span", { class: "mono llm-prov-status", id: `llm-status-${name}` }, "");
+    const row = el("div", { class: "llm-prov-row" + (enabled ? "" : " is-off") },
+      el("div", { class: "llm-prov-head" },
+        el("span", { class: "llm-prov-name" }, LLM_PROVIDER_LABELS[name]),
+        el("span", { class: "badge " + (prov.key_present ? "badge--ok" : "badge--warn") },
+          prov.key_present ? "key set" : "no key"),
+        el("label", { class: "llm-toggle" },
+          el("input", { type: "checkbox", "data-enable": name, checked: enabled,
+            onchange: (e) => toggleProvider(name, e.target.checked) }),
+          el("span", {}, "enabled")),
+        el("span", { class: "spacer" }),
+        validateBtn, status),
+      el("div", { class: "llm-prov-fields" },
+        el("label", { class: "llm-field" }, el("span", { class: "llm-field-l" }, "model"),
+          modelInput),
+        el("label", { class: "llm-field" }, el("span", { class: "llm-field-l" }, "API key"),
+          keyInput)));
+    wrap.append(row);
+  }
+}
+
+function toggleProvider(name, on) {
+  if (!llmState) return;
+  let chain = (llmState.chain || []).slice();
+  if (on && !chain.includes(name)) chain.push(name);
+  if (!on) chain = chain.filter((x) => x !== name);
+  llmState.chain = chain;
+  renderLlmLadder(llmState);
+  // reflect enabled styling without a full re-render (keeps input values)
+  document.querySelectorAll(".llm-prov-row").forEach((row) => {
+    const en = row.querySelector(`[data-enable]`);
+    if (en && en.dataset.enable === name) row.classList.toggle("is-off", !on);
+  });
+}
+
+function renderLlmMatrix(p) {
+  const roles = p.roles || {};
+  const matrix = $("#llm-matrix");
+  matrix.innerHTML = "";
+  const opts = ["", "cf", "nvidia", "openrouter"]; // "" = follow chain
+  for (const role of (p.role_keys || [])) {
+    const select = el("select", { class: "llm-role-select", "data-role": role });
+    for (const o of opts) {
+      const opt = el("option", { value: o }, o === "" ? "follow chain" : (LLM_PROVIDER_LABELS[o] || o));
+      if ((roles[role] || "") === o) opt.selected = true;
+      select.append(opt);
+    }
+    select.addEventListener("change", () => {
+      if (!llmState) return;
+      llmState.roles = llmState.roles || {};
+      if (select.value) llmState.roles[role] = select.value;
+      else delete llmState.roles[role];
+    });
+    const cell = el("div", { class: "llm-role-cell" },
+      el("span", { class: "llm-role-name mono" }, role.replace(/_/g, " ")),
+      select);
+    matrix.append(cell);
+  }
+}
+
+async function validateProvider(name) {
+  const status = $(`#llm-status-${name}`);
+  if (status) status.textContent = "pinging…";
+  try {
+    const resp = await api("/api/llm/validate", { method: "POST", body: {} });
+    const r = (resp.results || []).find((x) => x.provider === name);
+    if (!r) { toast(`no result for ${name}`); return; }
+    setStatus(name, r.ok, r.latency_ms, r.error);
+    // update all rows' statuses we received, and the validate-all note
+    for (const res of resp.results || []) {
+      if (res.provider !== name) setStatus(res.provider, res.ok, res.latency_ms, res.error);
+    }
+    const okCount = (resp.results || []).filter((x) => x.ok).length;
+    $("#llm-validate-note").textContent =
+      `${okCount}/${(resp.results || []).length} ok`;
+  } catch (e) {
+    if (status) status.textContent = "failed";
+    toast(`validate ${name}: ${e.message}`, true);
+  }
+}
+
+function setStatus(name, ok, latency, err) {
+  const elm = $(`#llm-status-${name}`);
+  if (!elm) return;
+  elm.textContent = ok ? `ok ${latency}ms` : "FAIL";
+  elm.className = "mono llm-prov-status " + (ok ? "ok" : "fail");
+  elm.title = ok ? "" : (err || "");
+}
+
+$("#llm-validate-all").addEventListener("click", async () => {
+  const note = $("#llm-validate-note");
+  note.textContent = "pinging…";
+  for (const name of ["cf", "nvidia", "openrouter"]) {
+    await validateProvider(name);
+  }
+});
+
+$("#llm-save").addEventListener("click", async () => {
+  if (!llmState) { toast("load LLM config first"); return; }
+  const providers = {};
+  for (const name of ["cf", "nvidia", "openrouter"]) {
+    const prov = llmState.providers[name] || {};
+    const entry = { model: prov.model };
+    const keyInput = document.querySelector(`.llm-key[data-prov="${name}"]`);
+    if (keyInput && keyInput.dataset.dirty === "1") entry.key = keyInput.value;
+    providers[name] = entry;
+  }
+  const body = {
+    providers,
+    chain: llmState.chain,
+    roles: llmState.roles || {},
+  };
+  try {
+    const resp = await api("/api/llm", { method: "POST", body });
+    toast("LLM config saved — applied at the next LLM call (no restart).");
+    await loadLlm();
+  } catch (e) {
+    toast(`llm save failed: ${e.message}`, true);
   }
 });
 

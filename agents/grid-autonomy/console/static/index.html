@@ -167,6 +167,35 @@
         <div class="card-head"><span class="card-title">Contract (read-only)</span></div>
         <div class="card-body kv-view" id="cfg-readonly"></div>
       </div>
+      <div class="card card--full">
+        <div class="card-head">
+          <span class="card-title">LLM providers</span>
+          <span class="sub">Set NVIDIA / OpenRouter keys &amp; models, order the fallback chain, validate live, and route each swarm agent to a provider. Persists to <code class="mono">state/llm.env</code> (0600); keys never echo. Applied at the next LLM call — no restart.</span>
+        </div>
+        <div class="card-body llm-body">
+          <div class="llm-top">
+            <div class="llm-ladder-wrap">
+              <span class="llm-label">Fallback chain</span>
+              <div class="llm-ladder" id="llm-ladder"></div>
+            </div>
+            <div class="llm-validate-wrap">
+              <span class="llm-label">Live validation</span>
+              <button class="btn" id="llm-validate-all">Validate all</button>
+              <span class="mono llm-validate-note" id="llm-validate-note">not run</span>
+            </div>
+          </div>
+          <div class="llm-providers" id="llm-providers"></div>
+          <div class="llm-matrix-wrap">
+            <span class="llm-label">Agent → provider routing</span>
+            <div class="llm-matrix" id="llm-matrix"></div>
+          </div>
+          <div class="llm-actions">
+            <span class="mono llm-sidecar-note" id="llm-sidecar-note"></span>
+            <span class="spacer"></span>
+            <button class="btn btn--primary" id="llm-save">Save LLM config</button>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 

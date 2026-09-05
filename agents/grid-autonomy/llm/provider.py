@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grid-autonomy LLM provider chain — Cloudflare primary, Nvidia/OpenRouter fallback.
+"""Grid-autonomy LLM provider chain — Cloudflare primary, Nvidia/OpenRouter/Mistral fallback.
 
 Pluggable, stdlib-only (urllib). All roles talk to `chat()`; provider order
 and models come from env so the harness stays extendable without code edits.
@@ -9,7 +9,8 @@ Env:
     CF_MODEL (default @cf/zai-org/glm-5.3)
   NVIDIA_API_KEY, NVIDIA_MODEL (default meta/llama-3.3-70b-instruct)
   OPENROUTER_API_KEY, OPENROUTER_MODEL (default arcee-ai/trinity-large-preview:free)
-  GRID_LLM_CHAIN (default "cf,nvidia,openrouter" — comma order = fallback order)
+  MISTRAL_API_KEY, MISTRAL_MODEL (default mistral-large-latest)
+  GRID_LLM_CHAIN (default "cf,nvidia,openrouter,mistral" — comma order = fallback order)
 
 Usage:
   provider.py --ping [--json]            # try chain in order, report latency
@@ -28,6 +29,12 @@ import urllib.request
 CF_MODEL_DEFAULT = "@cf/zai-org/glm-5.3"
 NVIDIA_MODEL_DEFAULT = "meta/llama-3.3-70b-instruct"
 OPENROUTER_MODEL_DEFAULT = "arcee-ai/trinity-large-preview:free"
+MISTRAL_MODEL_DEFAULT = "mistral-large-latest"
+
+# Stable role keys for per-agent routing (GRID_LLM_ROLES maps role -> provider).
+# Order mirrors the swarm pipeline; unassigned roles follow the global chain.
+ROLE_KEYS = ["bull", "bear", "bull_rebuttal", "bear_rebuttal", "facilitator",
+             "risk_seeking", "risk_neutral", "risk_conservative"]
 
 TIMEOUT_S = 60
 
@@ -74,7 +81,8 @@ def _openai_compat_chat(base_url, key, model, messages, max_tokens=1024, extra_h
 
 def _providers():
     """[(name, fn)] in chain order — only providers with creds present."""
-    chain = [p.strip() for p in os.environ.get("GRID_LLM_CHAIN", "cf,nvidia,openrouter").split(",")]
+    chain = [p.strip() for p in os.environ.get(
+        "GRID_LLM_CHAIN", "cf,nvidia,openrouter,mistral").split(",")]
     fns = {
         "cf": lambda msgs, mt: _cf_chat(
             msgs, os.environ.get("CF_MODEL", CF_MODEL_DEFAULT), mt),
@@ -87,15 +95,47 @@ def _providers():
             os.environ.get("OPENROUTER_API_KEY"),
             os.environ.get("OPENROUTER_MODEL", OPENROUTER_MODEL_DEFAULT), msgs, mt,
             {"HTTP-Referer": "https://github.com/mrme000m/tvcli", "X-Title": "tvcli-grid-autonomy"}),
+        "mistral": lambda msgs, mt: _openai_compat_chat(
+            "https://api.mistral.ai/v1",
+            os.environ.get("MISTRAL_API_KEY"),
+            os.environ.get("MISTRAL_MODEL", MISTRAL_MODEL_DEFAULT), msgs, mt),
     }
     return [(p, fns[p]) for p in chain if p in fns]
 
 
-def chat(messages, max_tokens=1024, _chain=None):
-    """First healthy provider wins. Returns (provider_name, text)."""
+def role_chain(role):
+    """Single-provider chain for a role, or None when unassigned (follow global).
+
+    GRID_LLM_ROLES is a JSON object mapping a role key (see ROLE_KEYS) to a
+    provider name (cf|nvidia|openrouter). Returns [(name, fn)] for that one
+    provider so a role can be pinned to a specific model independent of the
+    fallback order; returns None when the role is absent or the provider has
+    no credentials (so the caller degrades to the global chain).
+    """
+    if not role:
+        return None
+    try:
+        roles = json.loads(os.environ.get("GRID_LLM_ROLES", "{}"))
+    except Exception:
+        return None
+    provider = roles.get(role) if isinstance(roles, dict) else None
+    if not provider:
+        return None
+    return [(name, fn) for name, fn in _providers() if name == provider]
+
+
+def chat(messages, max_tokens=1024, _chain=None, role=None):
+    """First healthy provider wins. Returns (provider_name, text).
+
+    `role` (optional) pins the call to a single provider via GRID_LLM_ROLES;
+    it is ignored when the role is unassigned or its provider lacks creds.
+    """
     if isinstance(messages, str):
         messages = [{"role": "user", "content": messages}]
-    chain = _chain if _chain is not None else _providers()
+    if _chain is not None:
+        chain = _chain
+    else:
+        chain = role_chain(role) or _providers()
     if not chain:
         raise RuntimeError("no LLM providers configured (set GRID_LLM_CHAIN + keys)")
     errors = {}
@@ -156,7 +196,7 @@ def _extract_json(text):
     return None
 
 
-def chat_json(messages, max_tokens=4096, _chain=None, attempts=3):
+def chat_json(messages, max_tokens=4096, _chain=None, attempts=3, role=None):
     """chat() + parse the reply as JSON.
 
     LLM JSON output is flaky (truncation, prose-wrapped replies), so retry
@@ -167,7 +207,7 @@ def chat_json(messages, max_tokens=4096, _chain=None, attempts=3):
     """
     errors = {}
     for attempt in range(max(1, attempts)):
-        name, text = chat(messages, max_tokens, _chain)
+        name, text = chat(messages, max_tokens, _chain, role=role)
         parsed = _extract_json(text)
         if isinstance(parsed, dict):
             return name, parsed

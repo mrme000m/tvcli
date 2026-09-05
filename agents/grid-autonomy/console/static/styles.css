@@ -790,6 +790,190 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
 .kv-row .k { color: var(--ink-faint); min-width: 220px; }
 .kv-row .v { color: var(--ink); word-break: break-all; }
 
+/* ── llm providers panel (config view) ────────────────────────────── */
+
+.card--full { grid-column: 1 / -1; }
+
+.llm-body { display: flex; flex-direction: column; gap: 18px; }
+
+.llm-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--teal-deep);
+}
+
+.llm-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+
+.llm-ladder-wrap, .llm-validate-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.llm-ladder { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; }
+
+.llm-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--panel-deep);
+  border: 1.5px solid var(--rule);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.llm-chip-idx {
+  font-size: 10px;
+  color: var(--ink-faint);
+  border: 1px solid var(--rule);
+  border-radius: 4px;
+  padding: 0 5px;
+  line-height: 1.4;
+}
+
+.llm-chip-name { color: var(--ink); font-weight: 600; }
+
+.llm-chip-key { font-size: 10px; }
+.llm-chip-key.has-key { color: var(--teal-deep); }
+.llm-chip-key.no-key { color: var(--amber); }
+
+.llm-chip-btn {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--rule);
+  border-radius: 5px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.llm-chip-btn:hover { border-color: var(--teal); color: var(--teal-deep); }
+
+.llm-validate-note { font-size: 11px; color: var(--ink-faint); }
+
+.llm-providers { display: flex; flex-direction: column; gap: 10px; }
+
+.llm-prov-row {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--panel);
+}
+
+.llm-prov-row.is-off { opacity: 0.55; }
+
+.llm-prov-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px dashed var(--rule-faint);
+  flex-wrap: wrap;
+}
+
+.llm-prov-name {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.llm-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.llm-prov-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  padding: 12px 14px;
+}
+
+@media (max-width: 720px) { .llm-prov-fields { grid-template-columns: 1fr; } }
+
+.llm-field { display: flex; flex-direction: column; gap: 4px; }
+
+.llm-field-l {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.llm-model, .llm-key {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  padding: 6px 9px;
+  border: 1.5px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  width: 100%;
+}
+.llm-model:focus, .llm-key:focus { border-color: var(--teal); outline: none; }
+.llm-key[data-dirty="1"] { border-color: var(--amber); background: #FFFBF2; }
+
+.llm-prov-status { font-size: 11px; }
+.llm-prov-status.ok { color: var(--teal-deep); }
+.llm-prov-status.fail { color: var(--crimson); }
+
+.llm-matrix-wrap { display: flex; flex-direction: column; gap: 8px; }
+
+.llm-matrix {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+
+.llm-role-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--rule-faint);
+  border-radius: 7px;
+  background: var(--panel-deep);
+}
+
+.llm-role-name { font-size: 11px; color: var(--ink-soft); }
+
+.llm-role-select {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1.5px solid var(--rule);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+}
+
+.llm-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px dashed var(--rule);
+  padding-top: 14px;
+}
+
+.llm-sidecar-note { font-size: 11px; color: var(--ink-faint); }
+
 /* ── logs ────────────────────────────────────────────────────────── */
 
 .logbox {
