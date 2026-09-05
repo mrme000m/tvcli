@@ -583,6 +583,7 @@ the problem.
 | `pairCode` unresolved | Market map missing or stale. The daemon fetches `https://wundertrading.com:2087/all-markets?market=…&marketExpiryGroup=infinite` via the browser and caches `state/market_map-{spot,derivative}.json` for 24h (stale cache is still used when the browser is down). |
 | `Maximum number of Grid Bots reached` on create | Plan capacity, **not** the account-limits dashboard number. The enforced caps live in the `grid_bots/upsert` init data: `maxActiveGridBots = {other: 1, premium: 200}` — HYPERLIQUID_SWAP is a *premium* exchange (200 active bots); every other exchange (incl. `BINANCE_FUTURES`) is the *other* tier with **one active grid bot** on the free plan. The daemon observes both views every rescreen cycle (journal kind `subscription` on any change) and pre-checks this (`capacity-veto`, `GET /status → capacity` / `account_limits`), skipping the create instead of retrying into the 400. Hyperliquid's Premium caps come from WunderTrading's 0.035% builder-fee arrangement. Rotations are unaffected (stop→delete frees the slot before the challenger create). `GET /en/trader/dashboard/account-limits` reports `gridBots: n/200` but is not what `upsert` enforces. |
 | Slot 4 (binance) never deploys | Known limitation, not a bug: the default slot plan assigns **two** binance slots but the free plan's `other` tier allows only **one** active grid bot — slot 4 is permanently capacity-vetoed while slot 3 runs (one `capacity-veto` journal line per rescreen). The plan is config-driven, not derived from observed capacity; to use that capital, raise the plan tier, or re-balance venues in `portfolio.venues`/`slots_default`. |
+| Slot opened but no bot deployed (`deploy-failed`: "maximum number of Demo Trading Grid Bots") | A THIRD capacity layer: WunderTrading caps **demo (paper) grid bots at 5** on this plan — separate from `maxActiveGridBots` ({other: 1, premium: 200}) and NOT exposed in any capacity API. The daemon learns it from the create-400 (journal `demo-cap`, persisted as `state.demo_bot_cap`) and then vetoes new deploys + dynamic slot opens while the fleet is at the cap (journal `demo-cap-veto`, once per rescreen). Rotations still work (stop→delete frees the slot before the challenger create). To grow the paper fleet past 5, upgrade the plan or delete a demo bot. |
 | Bot stillborn / tiny grid lines | The per-pair min-notional floor (`limits.cost.min` from `:2087`) bumps the allocation within caps, then widens the grid step to fit fewer lines; if neither fits it vetoes. Check `state/state.json → journal` for `size-floor` / `size-fit` / `guard-veto` entries. |
 | Rotation won’t happen | Requires a stagnant incumbent **and** Δscore ≥ 5 **and** expired per-token cooldown. Check `/status` journal for `rotation-veto` / `rotation-skip`. |
 | Empty `.md` run card | Older daemon shape bug (fixed); the companion `.json` was always correct. If you see it, upgrade daemon.py. |
@@ -594,13 +595,13 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-277 tests as of 2026-09-05, all offline (network/browser calls are mocked
+281 tests as of 2026-09-05, all offline (network/browser calls are mocked
 or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
 also disables the PocketBase write-through so tests can never pollute the
 live side channel). Expected output:
 
 ```
-Ran 277 tests in …
+Ran 281 tests in …
 OK
 ```
 

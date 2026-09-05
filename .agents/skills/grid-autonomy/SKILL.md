@@ -156,6 +156,10 @@ re-login in the browser window (or vault `wundertrading-session` →
   density cap applied), `reliability-migrate` (ledger key normalization),
   `slot-open`/`slot-open-veto` (dynamic venue slot opening),
   `slots-reconciled` (config edits re-normalized slot budgets at startup),
+  `demo-cap`/`demo-cap-veto` (WunderTrading's demo/paper grid-bot cap — 5
+  on the free plan, learned from the create-400 because no API exposes it;
+  at the cap, new deploys + dynamic slot opens are skipped, rotations still
+  work), `rescreen-queued` (manual rescreen feedback),
   `browser-restart`,
   `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
   `re-analysis` log once per state transition, not every 60 s sweep.
@@ -202,4 +206,4 @@ re-login in the browser window (or vault `wundertrading-session` →
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 277 offline tests as of 2026-09-05; trust the runner output over any count in docs.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 281 offline tests as of 2026-09-05; trust the runner output over any count in docs.

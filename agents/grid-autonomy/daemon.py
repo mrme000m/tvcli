@@ -29,6 +29,7 @@ import copy
 import json
 import math
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -656,6 +657,19 @@ def write_run_card_safe(cycle_report):
         return None
 
 
+def demo_cap_from_error(err):
+    """WunderTrading's demo (paper) grid-bot cap from a create-400 message.
+
+    The paper-bot limit ("You've reached the maximum number of Demo Trading
+    Grid Bots! (Limit: 5)") is NOT part of the upsert init data or the
+    account-limits dashboard — the only way to learn it is to hit it. Parse
+    it from the rejection so the daemon adapts after ONE failure instead of
+    re-failing every cycle."""
+    m = re.search(r"Demo Trading Grid Bots.*?Limit:\s*(\d+)",
+                  err or "", re.S)
+    return int(m.group(1)) if m else None
+
+
 def retry_grid_call(fn, dry, *args, attempts=3, backoff=2.0, **kwargs):
     """Retry wt_browser subprocess failures twice with backoff (call-site retry).
 
@@ -997,6 +1011,14 @@ class Daemon:
     def queue_rescreen(self):
         with self._lock:
             self._rescreen_flag = True
+        # immediate feedback: a forced rescreen otherwise looks like nothing
+        # happened for minutes (the loop consumes the flag within ~10 s and
+        # the screen itself takes ~2-4 min before any slot-open/deploy line)
+        log(self.state, {"kind": "rescreen-queued",
+                         "msg": "manual rescreen requested — cycle starts "
+                                "within ~10 s (screen + deploy decisions "
+                                "take ~2-4 min)"})
+        save_state(self.state)
 
     def consume_rescreen(self):
         with self._lock:
@@ -1342,6 +1364,18 @@ class Daemon:
             action["kind"] = "deploy-failed"
             action["error"] = (msg or (res.get("stderr") or "")[:200]
                                 or "grid_create ok=false")
+            # learn the demo (paper) grid-bot cap from the 400 — it is not
+            # part of any plan/capacity API, so the rejection is the only
+            # teacher; persist it so the rescreen gates stop trying
+            demo_cap = demo_cap_from_error(action["error"])
+            if demo_cap and self.state.get("demo_bot_cap") != demo_cap:
+                self.state["demo_bot_cap"] = demo_cap
+                log(self.state, {
+                    "kind": "demo-cap",
+                    "msg": f"WunderTrading caps demo (paper) grid bots at "
+                           f"{demo_cap} — fleet is at the cap; new deploys "
+                           f"vetoed until one is stopped (rotations still "
+                           f"work: stop+delete frees the slot first)"})
             # close the decision record: outcomes only attach on rotation,
             # so a failed create used to leave an open decision line in the
             # journal/console ledger forever
@@ -1521,6 +1555,17 @@ class Daemon:
                                     f"[premium: {','.join(premium_ex) or 'none'}]"})
         capacity_noted = set()  # one capacity-veto log per venue per cycle
         slot_open_noted = set()  # one slot-open-veto log per venue per cycle
+        # the demo (paper) grid-bot cap is learned from a create-400 (not
+        # part of any capacity API): once at the cap, no NEW bot can exist —
+        # opening slots or deploying candidates is pointless until one is
+        # stopped (rotations are fine: stop+delete frees the slot first)
+        demo_cap = self.state.get("demo_bot_cap")
+        if demo_cap and len(self.state["active_bots"]) >= demo_cap:
+            log(self.state, {
+                "kind": "demo-cap-veto",
+                "msg": f"fleet at the demo (paper) grid-bot cap "
+                       f"{len(self.state['active_bots'])}/{demo_cap} — "
+                       f"new deploys skipped, rotations still allowed"})
         plan = self.plan_slots()
         if not self.state["slots"]:
             self.state["slots"] = plan["slots"]
@@ -1552,6 +1597,8 @@ class Daemon:
         for cand in cands:
             if deployed >= max_new:
                 break
+            if demo_cap and len(self.state["active_bots"]) >= demo_cap:
+                break  # every remaining create would 400 at the demo cap
             key = f"{cand['venue']}:{cand['symbol']}"
             if key in active_keys:
                 continue  # already running in another slot — no duplicate deploy

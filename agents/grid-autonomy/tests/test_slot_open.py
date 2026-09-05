@@ -10,13 +10,17 @@ import sys
 import unittest
 from unittest import mock
 
+import daemon  # noqa: E402  (path set up by test_daemon_manage import below)
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "policy"))
 
 try:
-    from test_daemon_manage import ManageHarness, PROFILES  # unittest discover
+    from test_daemon_manage import (ManageHarness, PROFILES,  # noqa: F401
+                                     make_payloads)
 except ImportError:  # pytest rootdir=agents/grid-autonomy
-    from tests.test_daemon_manage import ManageHarness, PROFILES
+    from tests.test_daemon_manage import (ManageHarness, PROFILES,  # noqa: F401
+                                          make_payloads)
 
 from stagnation import slot_plan
 
@@ -71,6 +75,87 @@ class TestOpenSlot(ManageHarness):
         slot, err = d.open_slot("bybit")
         self.assertIsNone(slot)
         self.assertIn("not funded", err)
+
+
+class TestDemoBotCap(ManageHarness):
+    """WunderTrading's demo (paper) grid-bot cap (5 on this plan) is not in
+    any capacity API — it is learned from the create-400 and must gate new
+    deploys + slot opens (rotations unaffected)."""
+
+    def test_parse_demo_cap_from_error(self):
+        err = ("You\u2019ve reached the maximum number of Demo Trading "
+               "Grid Bots! (Limit: 5)")
+        self.assertEqual(daemon.demo_cap_from_error(err), 5)
+        self.assertIsNone(daemon.demo_cap_from_error("some other 400"))
+        self.assertIsNone(daemon.demo_cap_from_error(None))
+
+    def test_commit_deploy_learns_the_cap(self):
+        import json as _json
+        d = self.make_daemon()
+        slot = d.state["slots"][0]
+        action = {"kind": "DEPLOY-PAPER", "slot": 1, "venue": "hyperliquid",
+                  "symbol": "PEPE", "grid_type": "neutral",
+                  "decision_id": "d1"}
+        payloads = make_payloads()
+        bad = {"ok": False, "stdout": _json.dumps({
+            "status": 400, "ok": False, "gridBotCode": None,
+            "message": "You\u2019ve reached the maximum number of Demo "
+                       "Trading Grid Bots! (Limit: 5)"})}
+        with mock.patch("daemon.retry_grid_call", return_value=bad):
+            d.commit_deploy(action, {"symbol": "PEPE"}, payloads,
+                            {"symbol": "PEPE", "venue": "hyperliquid"},
+                            {"venue": "hyperliquid", "symbol": "PEPE",
+                             "score_final": 90.0}, slot, dry_run=False)
+        self.assertEqual(d.state["demo_bot_cap"], 5)
+        kinds = [e["kind"] for e in d.state["journal"]]
+        self.assertIn("demo-cap", kinds)
+        self.assertIn("deploy-failed", kinds)
+
+    def _fill_all_slots(self, d):
+        for k, (symbol, venue) in {
+                "1": ("HYPE", "hyperliquid"), "2": ("ARB", "hyperliquid"),
+                "3": ("SOL", "binance"), "4": ("NEAR", "binance")}.items():
+            d.state["active_bots"][k] = _active_bot(symbol, venue, f"B{k}")
+
+    def test_rescreen_gated_at_demo_cap(self):
+        d = self.make_daemon()
+        self._fill_all_slots(d)
+        d.state["demo_bot_cap"] = 5   # already learned
+        self.assertEqual(len(d.state["active_bots"]), 4)
+        d.state["active_bots"]["9"] = _active_bot("EXTRA", "hyperliquid",
+                                                  "B9")  # now 5 = cap
+        cands = [_cand("hyperliquid", "PEPE", 90.0)]
+        with mock.patch("daemon.run_merge", return_value={"results": cands}):
+            d.rescreen_cycle(dry_run=False, max_new=2)
+        # at the cap: no slot opened, no bot created, one clear veto line
+        self.assertEqual(len(d.state["slots"]), 4)
+        creates = [op for op in self.ops if op[0] == "create"]
+        self.assertEqual(creates, [])
+        kinds = [e.get("kind") for e in d.state["journal"]]
+        self.assertIn("demo-cap-veto", kinds)
+        self.assertNotIn("slot-open", kinds)
+
+    def test_rotation_still_allowed_at_demo_cap(self):
+        # the gate sits in the DEPLOY loop only — execute_rotation must
+        # still be able to stop+delete+deploy (net count unchanged)
+        d = self.make_daemon()
+        d.state["demo_bot_cap"] = 5
+        d.state["active_bots"]["1"] = {
+            "symbol": "PUMP", "venue": "hyperliquid", "bot_code": "OLDBOT",
+            "score_final": 40.0,
+            "stagnation_policy": {
+                "regime": "neutral",
+                "stagnant_if": {"min_fills_24h": 1.0,
+                                "min_realized_ratio": 0.4},
+                "score_drop_rotate": 12.0, "hysteresis_score": 5.0,
+                "cooldown_h": 12.0},
+            "observed": {"fills_24h": 0.0, "realized_ratio": 0.0},
+            "decision_id": "OLD1"}
+        challenger = _cand("hyperliquid", "SOL", 90.0)
+        self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
+        ok = d.execute_rotation("1", challenger, dry_run=False)
+        self.assertTrue(ok)
+        self.assertIn("create", [op[0] for op in self.ops])
 
 
 class TestDynamicSlotOpen(ManageHarness):
