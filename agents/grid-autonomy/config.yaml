@@ -60,6 +60,12 @@ reliability:                   # Phase G gates before any live scale-up
 watch:                         # daemon health-poll loop (Phase 4)
   interval_s: 60               # observe_all poll cadence
   adjust_steps_threshold: 2.0  # in-place adjust once price drifts >2 grid steps from mid
+  browser_cdp: http://127.0.0.1:9222      # CloakBrowser CDP probe (WT session-API transport)
+  browser_restart_cooldown_s: 600         # watchdog relaunch at most every 10 min
+  # The WT cookie session lives in the minimal-mjs browser profile — relaunch
+  # from THERE (a fresh browser-debug profile would be logged out).
+  browser_launch_cmd: "node /Volumes/ExMac/code/tradingview/minimal-mjs/launch.mjs"
+  wt_restore_cmd: "node /Volumes/ExMac/code/tradingview/go/browser-debug/wt.mjs"
 
 autonomy:                      # escalation ladder + profile allowlists
   mode: auto                   # auto: manage loop runs unattended

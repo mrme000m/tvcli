@@ -40,9 +40,11 @@ Usage:
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -50,10 +52,42 @@ import urllib.request
 DEFAULT_URL = "http://127.0.0.1:8090"
 DEFAULT_TIMEOUT = 5.0
 
+# Re-auth when the JWT is within this many seconds of expiring, so writes never
+# race a just-expired token. PocketBase returns 400 (not 401) for an expired
+# token on an auth-only rule, so a post-hoc 401-retry can never fire — the only
+# reliable signal is the `exp` claim decoded locally.
+EXPIRY_SKEW_SECONDS = 60
+
 # Shared superuser token cache. Set by _reauth() and reused by later PB()
 # instances when PB_TOKEN env is empty (avoids re-logging-in per instance in
 # the long-running daemon, which creates a PB() lazily in each worker module).
 _shared_token: str | None = None
+# Monotonic timestamp of the last successful _reauth(), used to avoid hammering
+# the auth endpoint when a token is absent/broken. Keyed process-wide.
+_last_auth_at: float = 0.0
+# Minimum gap between re-auth attempts (seconds). Prevents a tight retry loop
+# when the admin credentials are wrong or PB is unreachable.
+_AUTH_RETRY_GAP = 30.0
+
+
+def _jwt_exp(token: str) -> float | None:
+    """Return the JWT `exp` claim as a unix timestamp, or None if undecodable.
+
+    PocketBase auth JWTs are `header.payload.signature`; `exp` is in the payload
+    (base64url, no padding). We decode best-effort — a malformed token simply
+    yields None and the caller falls back to proactive re-auth.
+    """
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None
+        payload = parts[1]
+        payload += "=" * (-len(payload) % 4)
+        data = json.loads(base64.urlsafe_b64decode(payload).decode("utf-8", "replace"))
+        exp = data.get("exp")
+        return float(exp) if exp is not None else None
+    except Exception:
+        return None
 
 
 def _env(name: str, default: str | None = None) -> str | None:
@@ -101,8 +135,14 @@ class PB:
         `PB_ADMIN_EMAIL`/`PB_ADMIN_PASS`. Non-fatal: on any failure the current
         token is left unchanged and False is returned.
         """
-        global _shared_token
+        global _shared_token, _last_auth_at
         if not (self._admin_email and self._admin_pass):
+            return False
+        now = time.monotonic()
+        # Rate-limit re-auth only while the token we already hold is still valid
+        # (a transient 401/400 shouldn't trigger a login storm). If the token is
+        # expired/absent we always try immediately — no point waiting.
+        if now - _last_auth_at < _AUTH_RETRY_GAP and not self._token_expired():
             return False
         body = self._request_raw(
             "POST",
@@ -114,17 +154,30 @@ class PB:
         token = body.get("token") if isinstance(body, dict) else None
         if not token:
             return False
+        _last_auth_at = now
         self.token = token
         _shared_token = token
         return True
 
+    def _token_expired(self) -> bool:
+        """True when the current token is absent, malformed, or within
+        EXPIRY_SKEW_SECONDS of (or past) its JWT `exp`."""
+        if not self.token:
+            return True
+        exp = _jwt_exp(self.token)
+        if exp is None:
+            # Undecodable token: treat as expired so we re-auth (cheap, safe).
+            return True
+        return exp <= time.time() + EXPIRY_SKEW_SECONDS
+
     def _request_raw(self, method, path, payload=None, auth=True, _retry=True):
         """Low-level request returning parsed JSON; no auto-re-auth here."""
-        # If we're meant to send an authenticated request but have no token,
-        # re-auth first. PocketBase returns 400 (not 401) for a create that
-        # fails an auth-only rule, so a post-hoc 401-retry is not enough.
-        if auth and not self.token and _retry and self._reauth():
-            pass  # token now populated below
+        # Proactive re-auth: PocketBase returns 400 (not 401) for a create that
+        # fails an auth-only rule, so a post-hoc 401-retry is not enough. Re-auth
+        # up front whenever the token is absent or expired/near-expiry, and once
+        # more on an actual 401 (for real invalid-token cases).
+        if auth and _retry and self._token_expired():
+            self._reauth()
         url = self.url + path
         headers = {
             "Accept": "application/json",
@@ -143,6 +196,18 @@ class PB:
         except urllib.error.HTTPError as exc:
             body = exc.read().decode("utf-8", "replace")
             if exc.code == 401 and auth and _retry and self._reauth():
+                return self._request_raw(method, path, payload, auth=True, _retry=False)
+            # PocketBase reports an expired/invalid token on an auth-only rule as
+            # a 400 "Failed to create record.", not 401. If an authenticated write
+            # gets a 400 and we have admin creds, re-auth once and retry — this
+            # covers the token-just-expired race the 401 path can't see.
+            if (
+                exc.code == 400
+                and auth
+                and _retry
+                and payload is not None
+                and self._reauth()
+            ):
                 return self._request_raw(method, path, payload, auth=True, _retry=False)
             if self.strict:
                 raise PBError(exc.code, body, url)
@@ -193,6 +258,20 @@ class PB:
             return False
         path = f"/api/collections/{collection}/records/{record_id}"
         return bool(self._request("DELETE", path))
+
+    def upsert(self, collection: str, match_field: str, data: dict) -> dict | None:
+        """PATCH the first record whose `match_field` equals `data[match_field]`,
+        else POST a new one. Prevents duplicate mirror records when the same
+        logical row (e.g. bots slot=3) is written through repeatedly."""
+        if not self._guard():
+            return None
+        value = data.get(match_field)
+        if value is not None:
+            flt = f'{match_field} = "{value}"'
+            rows = self.list(collection, filter=flt, per_page=1)
+            if rows:
+                return self.update(collection, rows[0]["id"], data)
+        return self.create(collection, data)
 
     def list(
         self,
@@ -246,8 +325,10 @@ class PB:
 
     def reliability(self, ledger: dict) -> dict | None:
         """Mirror reliability_grid.save(): upsert the whole archetype ledger.
-        Stored as a single `reliability` record with a stable id."""
-        return self.create("reliability", ledger)
+        Stored as a single `reliability` record with a stable ledger_id so
+        repeated saves PATCH one row instead of appending duplicates."""
+        return self.upsert("reliability", "ledger_id",
+                           {"ledger_id": "main", **ledger})
 
     def close(self) -> None:
         """No-op (HTTP client is stateless); present for symmetry."""

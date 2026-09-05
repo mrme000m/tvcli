@@ -51,6 +51,9 @@ class Ctl(BaseHTTPRequestHandler):
                              "account_limits": st.get("account_limits", {}),
                              "capabilities": getattr(
                                  self.daemon, "capabilities", {}),
+                             # dependency readiness (presence booleans only)
+                             "env": getattr(self.daemon, "env_status",
+                                            lambda: {})(),
                              "last_cycle": st.get("last_cycle"),
                              "journal_tail": st["journal"][-10:]})
         elif self.path == "/reliability":

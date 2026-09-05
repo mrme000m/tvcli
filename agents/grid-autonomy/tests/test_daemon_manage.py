@@ -110,6 +110,7 @@ class ManageTestCase(unittest.TestCase):
             "daemon.grid_profiles_safe": lambda: list(PROFILES),
             "daemon.grid_capacity_safe": lambda: {},
             "daemon.account_limits_safe": lambda: {},
+            "daemon.self_heal_env": lambda *a, **k: [],
             "daemon.reliability_load_safe": lambda: dict(self.reliability),
             "daemon.grid_status_safe": fake_grid_status,
             "daemon.grid_edit_safe": fake_grid_edit,
@@ -498,6 +499,10 @@ class CapacityBlockTestCase(unittest.TestCase):
                              os.path.join(self.tmp.name, "state.json"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        self._heal = mock.patch("daemon.self_heal_env",
+                                lambda *a, **k: [])
+        self._heal.start()
+        self.addCleanup(self._heal.stop)
         self.d = daemon.Daemon()
         self.d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
         self.d.profiles = list(PROFILES_LIVE)
@@ -548,6 +553,10 @@ class SubscriptionObservationTestCase(unittest.TestCase):
                              os.path.join(self.tmp.name, "state.json"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        self._heal = mock.patch("daemon.self_heal_env",
+                                lambda *a, **k: [])
+        self._heal.start()
+        self.addCleanup(self._heal.stop)
         self.d = daemon.Daemon()
         self.d.state["slots"] = slot_plan(500.0, n_slots=4)["slots"]
         patches = {

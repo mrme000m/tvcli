@@ -403,6 +403,31 @@ Ping the chain:
 python3 llm/provider.py --ping --json
 ```
 
+## Runtime dependencies & self-healing
+
+The daemon has three **hard runtime dependencies**. Each has a self-healing
+path so a transient failure does not silently degrade autonomy:
+
+| Dependency | Used by | Self-heal | Failure symptom |
+|------------|---------|-----------|-----------------|
+| **CloakBrowser on CDP `:9222`** (headful, profile at `minimal-mjs/profile`) + a logged-in **wundertrading.com page** | every WT session-API call: observe, deploy, stop/delete, reliability, capacity, profiles | `watch.browser_*` watchdog in `health_cycle` probes CDP every 60 s and relaunches `browser_launch_cmd` + `wt_restore_cmd` (≤1 try / 10 min, journaled `browser-restart`) | `observe error: grid status list unavailable (browser/session down)`, `deploy-failed`, guard-profile vetoes |
+| **CF Workers AI keys** in env (`CLOUDFLARE_ACCOUNT_ID` + token) | `llm/provider.py` chain → swarm deliberation | `run_launchd.py` imports them from the `dsh web` process env at boot; the daemon re-runs `self_heal_env()` every rescreen (journaled `env-heal`) — so a `dsh web` started *after* the daemon still gets picked up | `llm_degraded: true` decisions (rule fallback, not fatal) |
+| **PocketBase env** (`.pocketbase/pb.env`) | write-through side channel (`pbclient.py`) | sourced by `start.sh` and by `run_launchd.py` at boot; re-healed by `self_heal_env()` at runtime | PB collections go stale (file layer keeps working — it is the system of record) |
+
+Prolonged total blindness now escalates: when **every** bot errors on every
+observe sweep for ~30 min, the journal gets one loud `observe-outage` entry
+per 30-min window (in addition to the per-bot `health-warn` lines).
+
+**Known operator task — WT session expiry:** the WunderTrading `PHPSESSID`
+cookie (in the browser profile) expires roughly weekly (current one:
+2026-09-06 ~19:34 UTC). When it lapses, `wt_restore_cmd` re-asserts cookies
+only if `browser-debug/secrets/runtime/wt-session.env` exists (vault item
+`wundertrading-session`, materialized by `bw-provision.sh`); otherwise a
+**manual re-login in the CloakBrowser window** is required. Watch for
+`browser-restart … relaunch ok` followed by persisting
+`grid status list unavailable` errors — that means login, not browser, is
+the problem.
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
@@ -411,6 +436,8 @@ python3 llm/provider.py --ping --json
 | “daemon already running (PID …)” | A PID file exists and is alive. `scripts/stop.sh` first. |
 | “KILL file present …” | `agents/grid-autonomy/KILL` exists. `rm -f agents/grid-autonomy/KILL`, then start. |
 | All LLM calls fail | The daemon **does not block**: swarm falls back to the rule map and tags decisions `llm_degraded: true`. Check keys with `python3 llm/provider.py --ping`. |
+| `observe error: grid status list unavailable (browser/session down)` on every bot | CloakBrowser/CDP is down or the WT login lapsed. The watchdog relaunches the browser every 10 min (journal `browser-restart`); if relaunch is `ok` but errors persist, the session cookie expired — re-login in the browser window (see “Runtime dependencies & self-healing”). |
+| Decisions tagged `llm_degraded: true` under launchd | Env import failed at boot (`dsh web` was down/restarting). The daemon self-heals each rescreen (`env-heal` journal) — or restart the agent: `launchctl kickstart -k gui/$(id -u)/com.tvcli.grid-autonomy`. |
 | Browser down / Cloudflare 403 | `resolve.py` and `observe.py` go through `wt_browser.py`; on failure `resolve` falls back to the cached market map and `observe` returns error/empty fields. Restart the browser session and re-run. |
 | `pairCode` unresolved | Market map missing or stale. The daemon fetches `https://wundertrading.com:2087/all-markets?market=…&marketExpiryGroup=infinite` via the browser and caches `state/market_map-{spot,derivative}.json` for 24h (stale cache is still used when the browser is down). |
 | `Maximum number of Grid Bots reached` on create | Plan capacity, **not** the account-limits dashboard number. The enforced caps live in the `grid_bots/upsert` init data: `maxActiveGridBots = {other: 1, premium: 200}` — HYPERLIQUID_SWAP is a *premium* exchange (200 active bots); every other exchange (incl. `BINANCE_FUTURES`) is the *other* tier with **one active grid bot** on the free plan. The daemon observes both views every rescreen cycle (journal kind `subscription` on any change) and pre-checks this (`capacity-veto`, `GET /status → capacity` / `account_limits`), skipping the create instead of retrying into the 400. Hyperliquid's Premium caps come from WunderTrading's 0.035% builder-fee arrangement. Rotations are unaffected (stop→delete frees the slot before the challenger create). `GET /en/trader/dashboard/account-limits` reports `gridBots: n/200` but is not what `upsert` enforces. |

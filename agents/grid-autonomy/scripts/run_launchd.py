@@ -65,7 +65,32 @@ def import_cf_env():
     for tok in raw.split():
         m = CF_RE.match(tok)
         if m:
-            os.environ[m.group(1)] = m.group(2)
+            # group(1) is only the SUFFIX (ACCOUNT_ID/API_KEY/AI_TOKEN) — the
+            # CLOUDFLARE_ prefix must be re-added or the daemon runs LLM-blind
+            # (provider.py looks for CLOUDFLARE_ACCOUNT_ID).
+            os.environ["CLOUDFLARE_" + m.group(1)] = m.group(2)
+
+
+def load_pb_env():
+    """Source .pocketbase/pb.env (PB_URL/PB_TOKEN/PB_ADMIN_*) when present so
+    the PB write-through side channel works under launchd exactly as it does
+    via start.sh. Never prints values."""
+    path = os.path.join(HERE, ".pocketbase", "pb.env")
+    if not os.path.isfile(path):
+        return
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.removeprefix("export ").partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key.startswith("PB_") and key not in os.environ:
+                    os.environ[key] = val
+    except OSError:
+        pass
 
 
 def main():
@@ -86,6 +111,7 @@ def main():
               flush=True)
         return
     import_cf_env()
+    load_pb_env()
     with open(PID_FILE, "w") as f:
         f.write(str(os.getpid()))
     os.chdir(HERE)

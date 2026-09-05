@@ -78,7 +78,22 @@ installs two per-user LaunchAgents — `com.tvcli.grid-autonomy`
 KILL file blocks startup on purpose. macOS TCC: the repo is on a removable
 volume, so the agent must run under Homebrew python3 (`/opt/homebrew/bin/
 python3` holds the Removable Volumes grant; launchd bash cannot read the
-volume).
+volume). `run_launchd.py` also imports the CF Workers-AI keys from the
+`dsh web` process env and sources `.pocketbase/pb.env` at boot.
+
+**Dependency self-healing (in-daemon, verified 2026-09-05):** the daemon
+depends on the headful **CloakBrowser on CDP :9222** (WT cookie session in
+the `minimal-mjs/profile` profile) for ALL WunderTrading session-API calls.
+`health_cycle` probes CDP every 60 s and relaunches the browser + re-asserts
+the WT page (≤1 try/10 min; journal `browser-restart`; config
+`watch.browser_*`). `self_heal_env()` re-imports CF/PB env each rescreen
+when missing (journal `env-heal`). ~30 min of total observation blindness
+journals a loud `observe-outage` entry. Observe errors distinguish
+`grid status list unavailable (browser/session down)` (transport/login
+down) from `grid resource not found in status list` (bot actually gone).
+The WT `PHPSESSID` cookie expires ~weekly — after expiry a manual
+re-login in the browser window (or vault `wundertrading-session` →
+`browser-debug/secrets/runtime/wt-session.env`) is required.
 
 ## Read run cards + journal
 
@@ -87,9 +102,10 @@ volume).
   sibling `.json` is the exact cycle report.
 - **Journal:** `state/state.json → journal` (last 200 events) and
   `GET /status → journal_tail`. Kinds: `screen`, `veto`, `guard-veto`,
-  `reliability-veto`, `deploy-paper`, `adopted`, `stagnant`, `adjust`,
-  `rotation-stop/delete/rotate`, `capacity-veto` (plan bot cap),
-  `subscription` (plan limits observed/changed), `kill`, and more.
+  `reliability-veto`, `deploy-paper`, `deploy-failed`, `adopted`, `stagnant`,
+  `adjust`, `rotation-stop/delete/rotate`, `capacity-veto` (plan bot cap),
+  `subscription` (plan limits observed/changed), `browser-restart`,
+  `env-heal`, `observe-outage`, `kill`, and more.
 - **Decision journal:** `state/decisions.jsonl` — one line per decision;
   `record_outcome` attaches `"outcome"` on close. Ids are
   `dYYYYMMDD-NNN`. `payload_digest` is an md5 — full payloads are never

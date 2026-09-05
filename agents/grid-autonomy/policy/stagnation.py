@@ -102,16 +102,23 @@ def derive_policy(closes, interval, step_pct, regime):
 
 def is_stagnant(observed, policy, regime_now=None, score_drop=0.0,
                 ladder_full=False, dd_vs_atr_band=0.0):
-    """observed: {fills_24h, realized_ratio}. Returns (stagnant, [reasons])."""
+    """observed: {fills_24h, realized_ratio}. Returns (stagnant, [reasons]).
+
+    Missing policy thresholds (derive failure `{"error": …}`, adopted bot
+    without history) never raise: they contribute no stagnation signal —
+    rotating on missing data would be churn, not adaptation."""
+    policy = policy if isinstance(policy, dict) else {}
     reasons = []
-    th = policy["stagnant_if"]
-    if observed.get("fills_24h", 0) < th["min_fills_24h"] and \
-            observed.get("realized_ratio", 0) < th["min_realized_ratio"]:
+    th = policy.get("stagnant_if") or {}
+    if th and \
+            observed.get("fills_24h", 0) < th.get("min_fills_24h", 0) and \
+            observed.get("realized_ratio", 0) < th.get("min_realized_ratio", 0):
         reasons.append(
-            f"fills {observed.get('fills_24h')} < {th['min_fills_24h']} and "
-            f"realized {observed.get('realized_ratio')} < {th['min_realized_ratio']}")
-    if regime_now and regime_now != policy["regime"] and score_drop > policy["score_drop_rotate"]:
-        reasons.append(f"regime {policy['regime']}→{regime_now} + score -{score_drop}")
+            f"fills {observed.get('fills_24h')} < {th.get('min_fills_24h')} and "
+            f"realized {observed.get('realized_ratio')} < {th.get('min_realized_ratio')}")
+    if regime_now and regime_now != policy.get("regime") and \
+            score_drop > policy.get("score_drop_rotate", SCORE_DROP_ROTATE):
+        reasons.append(f"regime {policy.get('regime')}→{regime_now} + score -{score_drop}")
     if ladder_full and dd_vs_atr_band > 1.5:
         reasons.append(f"full ladder, DD {dd_vs_atr_band}× ATR band")
     return (len(reasons) > 0), reasons

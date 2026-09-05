@@ -29,11 +29,14 @@ import copy
 import json
 import math
 import os
+import shlex
+import shutil
 import subprocess
 import sys
 import threading
 import time
 import traceback
+import urllib.request
 from datetime import datetime, timezone
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -170,23 +173,92 @@ def _pb_journal(event):
 
 
 def _pb_mirror_state(state):
-    """Mirror bots/slots from state.json into the PB side channel."""
+    """Mirror bots/slots from state.json into the PB side channel (upsert by
+    slot so repeated saves PATCH one row instead of appending duplicates)."""
     pb = _pb()
     if pb is None:
         return
     try:
         for slot, bot in (state.get("active_bots") or {}).items():
-            pb.create("bots", {
+            pb.upsert("bots", "slot", {
                 "slot": str(slot),
                 "spec": bot if isinstance(bot, dict) else {},
             })
-        for slot, plan in (state.get("slots") or {}).items():
-            pb.create("slots", {"slot": str(slot), "plan": plan})
+        slots = state.get("slots") or {}
+        # slots may be a list (slot_plan) or dict (hand-edited state)
+        rows = slots.items() if isinstance(slots, dict) else \
+            [(s.get("slot"), s) for s in slots if isinstance(s, dict)]
+        for slot, plan in rows:
+            if slot is None:
+                continue
+            pb.upsert("slots", "slot", {"slot": str(slot), "plan": plan})
     except Exception:
         pass
 
 # Real-money profile hard denylist (refused even if allowlisted by mistake).
 PROFILE_DENYLIST = {"c629f5ba3a643a82137e7864"}
+
+
+# ── runtime env self-heal (launchd starts with a bare environment) ────
+# The daemon needs CLOUDFLARE_* (LLM chain) and PB_* (side channel) that a
+# shell start gets from start.sh. Under launchd both arrive via
+# scripts/run_launchd.py — and if that import failed at boot (dsh web down,
+# ps -Eww restricted), the daemon would silently run LLM-degraded and PB-less
+# forever. These helpers re-import at runtime so the next cycle heals.
+sys.path.insert(0, os.path.join(HERE, "scripts"))
+try:
+    from run_launchd import import_cf_env as _import_cf_env  # noqa: E402
+    from run_launchd import load_pb_env as _load_pb_env  # noqa: E402
+except Exception:
+    _import_cf_env = None
+    _load_pb_env = None
+
+
+def self_heal_env(state=None):
+    """Re-import CF/LLM + PocketBase env when missing. Returns healed: [str]."""
+    healed = []
+    if not os.environ.get("CLOUDFLARE_ACCOUNT_ID") and _import_cf_env:
+        try:
+            _import_cf_env()
+        except Exception:
+            pass
+        if os.environ.get("CLOUDFLARE_ACCOUNT_ID"):
+            healed.append("cf")
+    if not (os.environ.get("PB_TOKEN")
+            or os.environ.get("PB_ADMIN_EMAIL")) and _load_pb_env:
+        try:
+            _load_pb_env()
+        except Exception:
+            pass
+        if os.environ.get("PB_TOKEN") or os.environ.get("PB_ADMIN_EMAIL"):
+            healed.append("pb")
+    if healed and state is not None:
+        log(state, {"kind": "env-heal",
+                    "msg": "re-imported " + "+".join(healed)
+                           + " env (LLM chain / PB side channel restored)"})
+    return healed
+
+
+def cdp_alive(url, timeout=3.0):
+    """True when the CloakBrowser CDP endpoint answers /json/version."""
+    try:
+        with urllib.request.urlopen(url.rstrip("/") + "/json/version",
+                                    timeout=timeout) as r:
+            return r.status == 200
+    except Exception:
+        return False
+
+
+def resolve_cmd(cmd):
+    """First token of `cmd` resolved to an absolute path (launchd PATH lacks
+    mise/homebrew). Unresolvable commands pass through and fail at run."""
+    parts = shlex.split(cmd)
+    if not parts:
+        return None
+    if "/" in parts[0]:
+        return parts
+    exe = shutil.which(parts[0])
+    return ([exe] + parts[1:]) if exe else parts
 
 # Minimum viable notional per grid line when :2087 market metadata is
 # unavailable (live values are per-pair `limits.cost.min`: 10 USDC on
@@ -222,7 +294,12 @@ DEFAULT_CONFIG = {
         "max_alloc_per_slot": 0.5, "cash_buffer_pct": 0.15,
     },
     "screen": {"rescreen_minutes": 60, "confirm_interval": "4h"},
-    "watch": {"interval_s": 60, "adjust_steps_threshold": 2.0},
+    "watch": {"interval_s": 60, "adjust_steps_threshold": 2.0,
+              # browser watchdog: every WunderTrading session-API call rides
+              # the headful CloakBrowser on CDP — when it dies the daemon is
+              # blind and deploy/rotate fail. Probed each health pass.
+              "browser_cdp": "http://127.0.0.1:9222",
+              "browser_restart_cooldown_s": 600},
     "autonomy": {"mode": "auto", "base_pct": 0.25, "probe_pct": 0.40, "full_pct": 0.50,
                  "live_profiles": [], "paper_profiles": ["demo-hype"]},
     "memory": {"k": 3},
@@ -657,6 +734,7 @@ class Daemon:
         self.config = load_config()
         self.port = port or int(self.config["server"].get("daemon_port", 8799))
         self.state = load_state()
+        self_heal_env(self.state)
         self.profiles = grid_profiles_safe()
         self.reliability = reliability_load_safe()
         self.state["profiles"] = self.profiles
@@ -668,6 +746,67 @@ class Daemon:
         self._lock = threading.Lock()
         self._rescreen_flag = False
         self._reliability_flag = False
+        self._browser_down_since = None
+        self._last_browser_restart = 0.0
+
+    # ── browser watchdog (WT session-API dependency) ────────────────────
+    def browser_watchdog(self):
+        """Keep the CloakBrowser + WunderTrading page alive.
+
+        Observe/deploy/rotate all call wt_browser.py, which drives a headful
+        CloakBrowser over CDP. If the browser dies (crash, reboot, logout)
+        the daemon goes blind. This probes the CDP endpoint every health
+        pass and, past the restart cooldown, relaunches the browser and
+        re-asserts the WT page. Journaled as browser-restart; never raises.
+        """
+        w = self.config.get("watch", {})
+        cdp = w.get("browser_cdp", "http://127.0.0.1:9222")
+        if cdp_alive(cdp):
+            self._browser_down_since = None
+            return True
+        now = time.time()
+        if self._browser_down_since is None:
+            self._browser_down_since = now
+        cooldown = float(w.get("browser_restart_cooldown_s", 600))
+        if now - self._last_browser_restart < cooldown:
+            return False
+        self._last_browser_restart = now
+        launch = w.get("browser_launch_cmd")
+        restore = w.get("wt_restore_cmd")
+        detail = ""
+        for cmd in (launch, restore):
+            if not cmd:
+                continue
+            try:
+                argv = resolve_cmd(cmd)
+                p = subprocess.run(argv, capture_output=True, text=True,
+                                   timeout=300)
+                detail = ((p.stdout or "") + (p.stderr or "")).strip()[-160:]
+            except Exception as exc:
+                detail = f"{cmd.split()[0]}: {str(exc)[:120]}"
+        ok = cdp_alive(cdp)
+        log(self.state, {"kind": "browser-restart",
+                         "msg": (f"CDP {cdp} was down {int(now - (self._browser_down_since or now))}s — "
+                                 f"relaunch {'ok' if ok else 'FAILED'}"
+                                 + (f" | {detail}" if detail else ""))[:220]})
+        return ok
+
+    def env_status(self):
+        """Readiness booleans for the ctl plane (presence only — never values)."""
+        w = self.config.get("watch", {})
+        cdp = w.get("browser_cdp", "http://127.0.0.1:9222")
+        return {
+            "llm_env": {
+                "cf": bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID") and
+                           (os.environ.get("CLOUDFLARE_API_KEY") or
+                            os.environ.get("CLOUDFLARE_AI_TOKEN"))),
+                "nvidia": bool(os.environ.get("NVIDIA_API_KEY")),
+                "openrouter": bool(os.environ.get("OPENROUTER_API_KEY")),
+            },
+            "pb_env": bool(os.environ.get("PB_TOKEN") or
+                           os.environ.get("PB_ADMIN_EMAIL")),
+            "browser_cdp": cdp_alive(cdp),
+        }
 
     # ctl hook
     def queue_rescreen(self):
@@ -994,6 +1133,9 @@ class Daemon:
                        top=None):
         actions = []
         top = top or getattr(self, "top", 30)
+        # LLM env can heal at any time (dsh web restarted with keys, etc.) —
+        # cheap no-op when the env is already complete
+        self_heal_env(self.state)
         # self-heal: refresh the profile snapshot every cycle (survives
         # browser restarts / Cloudflare blips that emptied the cache)
         try:
@@ -1200,6 +1342,7 @@ class Daemon:
 
     # ── health poll ────────────────────────────────────────────────────
     def health_cycle(self, dry_run=True):
+        self.browser_watchdog()
         if not self.state["active_bots"]:
             return
         observed_all = observe_all_safe(self.state["active_bots"])
@@ -1267,6 +1410,24 @@ class Daemon:
                                          "msg": f"{bot.get('venue')}:{bot.get('symbol')} "
                                                 f"{policy.get('regime')}→{regime_now} "
                                                 f"(no in-place adjust)"})
+        # total-blindness escalation: when EVERY bot errors on EVERY sweep,
+        # individual health-warn lines are too quiet — surface one loud
+        # observe-outage event every ~30 blind minutes instead.
+        bots = self.state["active_bots"] or {}
+        if bots:
+            errs = sum(1 for b in bots.values()
+                       if (b.get("observed") or {}).get("error"))
+            if errs and errs == len(bots):
+                n = int(self.state.get("observe_error_sweeps", 0)) + 1
+                self.state["observe_error_sweeps"] = n
+                if n >= 30:
+                    self.state["observe_error_sweeps"] = 0
+                    log(self.state, {"kind": "observe-outage",
+                                     "msg": f"all {len(bots)} bots unobservable for "
+                                            f"~30 min — WT browser/session down "
+                                            f"(watchdog should be restarting it)"})
+            else:
+                self.state["observe_error_sweeps"] = 0
         save_state(self.state)
 
     def adjust_bot(self, slot_key, dry_run=True):

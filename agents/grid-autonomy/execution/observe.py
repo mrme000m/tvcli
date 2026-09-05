@@ -68,9 +68,19 @@ def _resources(raw):
     return out
 
 
-def _grid_resources():
+def _grid_resources_ex():
+    """(resources, fetch_ok). fetch_ok=False when the status API call itself
+    failed (browser down, session expired, non-JSON body) — a very different
+    situation from a healthy empty list, and one the caller must not confuse
+    with "bot disappeared"."""
     raw = _api_json("/en/trader/grid_bots/grid?page=1&limit=50")
-    return _resources(raw)
+    if raw is None:
+        return [], False
+    return _resources(raw), True
+
+
+def _grid_resources():
+    return _grid_resources_ex()[0]
 
 
 def grid_status():
@@ -293,9 +303,11 @@ def observe_all(active_bots):
 
     `active_bots` maps slot keys to bot dicts carrying at least `bot_code`;
     `channel` and `stagnation_policy` are optional and improve the derived
-    fields. Never raises.
+    fields. Never raises. When the status list itself could not be fetched
+    (browser/session down) every bot gets `error: "grid status list
+    unavailable …"` so callers can tell blindness from removal.
     """
-    resources = _grid_resources()
+    resources, list_ok = _grid_resources_ex()
     by_code = {}
     for res in resources:
         code = res.get("code")
@@ -303,11 +315,11 @@ def observe_all(active_bots):
             by_code[code] = res
     out = {}
     for slot, bot in (active_bots or {}).items():
-        out[str(slot)] = _observe_one(bot, by_code)
+        out[str(slot)] = _observe_one(bot, by_code, list_ok=list_ok)
     return out
 
 
-def _observe_one(bot, by_code):
+def _observe_one(bot, by_code, list_ok=True):
     bot = bot if isinstance(bot, dict) else {}
     bot_code = bot.get("bot_code") or bot.get("code")
     if not bot_code:
@@ -370,7 +382,9 @@ def _observe_one(bot, by_code):
         "dd_vs_atr_band": dd_vs_atr_band,
     }
     if not res:
-        obs["error"] = "grid resource not found in status list"
+        obs["error"] = ("grid status list unavailable (browser/session down)"
+                        if not list_ok
+                        else "grid resource not found in status list")
     return obs
 
 

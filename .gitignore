@@ -90,3 +90,6 @@ browser-debug/secrets/runtime/
 # stealth-browser-mcp checkout (bootstrapped by prime-stack, not committed)
 tools/stealth-browser-mcp/
 .stealth-browser-mcp/
+
+# Firecrawl research scrape artifacts (one-off, not source)
+.firecrawl/

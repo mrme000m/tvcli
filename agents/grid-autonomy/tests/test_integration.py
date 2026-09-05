@@ -197,6 +197,8 @@ class TestRotationPass(unittest.TestCase):
             mock.patch("daemon.STATE_PATH", state_path),
             mock.patch("daemon.SPECS_DIR",
                        os.path.join(self.tmp.name, "watch", "specs")),
+            mock.patch("daemon.self_heal_env",
+                       side_effect=lambda *a, **k: []),
             mock.patch("daemon.deliberate",
                        side_effect=lambda brief: {
                            "decision": "GO", "grid_type": "neutral",
@@ -448,6 +450,8 @@ class TestMinHoldFloor(unittest.TestCase):
                        os.path.join(self.tmp.name, "state.json")),
             mock.patch("daemon.SPECS_DIR",
                        os.path.join(self.tmp.name, "watch", "specs")),
+            mock.patch("daemon.self_heal_env",
+                       side_effect=lambda *a, **k: []),
             mock.patch("daemon.grid_profiles_safe", side_effect=lambda: []),
             mock.patch("daemon.grid_capacity_safe", side_effect=lambda: {}),
             mock.patch("daemon.account_limits_safe", side_effect=lambda: {}),
