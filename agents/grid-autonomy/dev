@@ -18,6 +18,11 @@
 #   stop [--all]               stop console + daemon + PocketBase
 #                              (--all also stops tvcli serve)
 #   restart [--dry-run]        stop + start
+#   restart <what>             restart ONE component: daemon | console |
+#                              pb | serve. `dev restart console` reloads
+#                              console code changes (server.py/static/*)
+#                              without touching the daemon; `dev restart
+#                              daemon` applies config.yaml edits
 #   logs [what] [-f] [-n N]   what: daemon | console | pb | serve | dev
 #                              (default daemon); -f follow, -n lines
 #   reset [--yes] [--wt|--no-wt] [--keep-decisions] [--no-backup] [--start]
@@ -309,10 +314,41 @@ cmd_stop() {
 }
 
 # ── restart ───────────────────────────────────────────────────────────
+# dev restart            — full stop + start (daemon + console + PB + serve)
+# dev restart --dry-run  — full restart, daemon in dry-run mode
+# dev restart <what>     — ONE component: daemon | console | pb | serve.
+#                          Use `dev restart console` after changing
+#                          console/server.py or console/static/* — the
+#                          console is a long-lived launchd process and
+#                          only a process restart reloads its code
+#                          (daemon restarts alone leave it stale).
 cmd_restart() {
+  local what="${1:-}"
+  case "$what" in
+    daemon|console|pb|serve)
+      hr "restarting $what only"
+      case "$what" in
+        daemon)
+          # scripts/stop.sh also stops PocketBase (the daemon's
+          # write-through side channel) — bring it back up before the
+          # daemon so a restarted daemon does not run half-blind
+          stop_daemon
+          start_pb
+          start_daemon live
+          ;;
+        console) stop_console; start_console ;;
+        pb)      stop_pb; start_pb ;;
+        serve)   launchctl bootout "gui/$UID_/$SERVE_LABEL" 2>/dev/null || true
+                  start_serve ;;
+      esac
+      say ""
+      cmd_status | tail -n +2
+      return 0
+      ;;
+  esac
   cmd_stop
   say ""
-  cmd_start "${1:-}"
+  cmd_start "${what:-}"
 }
 
 # ── logs ──────────────────────────────────────────────────────────────

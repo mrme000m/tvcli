@@ -21,11 +21,20 @@ browser ── http://127.0.0.1:8798 ──> console/server.py
 ```sh
 cd agents/grid-autonomy
 ./dev start                    # starts the console with the whole stack
+./dev restart console          # restart JUST the console — required after
+                                # changing console/server.py or static/*:
+                                # the console is a long-lived launchd process
+                                # and only a process restart reloads its code
+                                # (daemon restarts alone leave it stale)
 python3 console/server.py      # standalone: http://127.0.0.1:8798
 CONSOLE_PORT=8800 python3 console/server.py   # override port
 ```
 
 Stdlib only — no pip installs, no build step. Binds `127.0.0.1` only.
+The console itself queries the daemon ctl plane (`:8799`) per request —
+it reconnects automatically after daemon restarts, so a brief
+`ctl offline` in the statusbar during a restart is expected and
+self-heals within one 5 s poll.
 
 Under `scripts/install_launchd.sh` the console is supervised as
 `com.tvcli.grid-autonomy-console` (via `scripts/run_console.py`, stdio

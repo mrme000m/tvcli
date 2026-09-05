@@ -363,10 +363,10 @@ DEFAULT_STATE = {
 
 DEFAULT_CONFIG = {
     "portfolio": {
-        "total_usd": 500.0,
-        "venues": {"hyperliquid": {"balance_usd": 300.0},
+        "total_usd": 600.0,
+        "venues": {"hyperliquid": {"balance_usd": 400.0},
                    "binance": {"balance_usd": 200.0}},
-        "slots_min": 3, "slots_max": 5, "slots_default": 4,
+        "slots_min": 3, "slots_max": 6, "slots_default": 4,
         "max_alloc_per_slot": 0.5, "cash_buffer_pct": 0.15,
     },
     "screen": {"rescreen_minutes": 60, "confirm_interval": "4h",
@@ -1017,7 +1017,7 @@ class Daemon:
         but a profitable candidate is waiting and deployable capital is spare.
 
         Gates (fail-closed — any refusal leaves the slot count unchanged):
-          1. total slots < portfolio.slots_max (config, default 5)
+          1. total slots < portfolio.slots_max (config, default 6)
           2. venue is funded in the portfolio
           3. spare deployable capital ≥ the new slot's worst-case commitment
         Returns (slot, None) on open, (None, reason) on refusal. Existing
@@ -1540,6 +1540,10 @@ class Daemon:
                         log(self.state, {"kind": "slot-open-veto",
                                          "msg": f"{key}: {open_err}"})
                     continue
+                # the freshly opened slot is usable THIS cycle: a guard-veto
+                # on the opener must not orphan it for every later candidate
+                # (free was computed before the open)
+                free.append(slot)
             action, ticket, payloads, brief = self.plan_candidate(cand, slot, dry_run)
             deliberations.append({
                 "symbol": cand["symbol"], "venue": cand["venue"],
@@ -2152,6 +2156,58 @@ class Daemon:
                          "msg": f"reloaded ({len(self.reliability)} keys)"})
         save_state(self.state)
 
+    def reconcile_slots(self):
+        """Re-normalize persisted slot budgets to the CURRENT config.
+
+        Slots persist in state.json (open_slot grows the plan, rotations
+        free them) — but nothing ever re-read portfolio.venues into them,
+        so a config edit + daemon restart left the fleet sizing from the
+        OLD sleeves while the console config editor showed the new ones
+        (the console-vs-backend drift a restart was supposed to close).
+        Keep the persisted slot COUNT and venue assignment (that is the
+        runtime truth — which slots exist), only recompute each venue's
+        per-slot budget: scaled sleeve / venue slot count. Never raises.
+        """
+        try:
+            p = self.config["portfolio"]
+            total = float(p.get("total_usd", 0) or 0)
+            venues = {k: float(v.get("balance_usd", 0) or 0)
+                      for k, v in (p.get("venues") or {}).items()}
+            vsum = sum(venues.values())
+            slots = self.state.get("slots") or []
+            if not slots or total <= 0 or vsum <= 0:
+                return
+            scale = total / vsum
+            counts = {}
+            for s in slots:
+                counts[s["venue"]] = counts.get(s["venue"], 0) + 1
+            max_alloc = float(p.get("max_alloc_per_slot", 0.5))
+            changed = []
+            for s in slots:
+                n = counts.get(s["venue"], 0)
+                if n <= 0:
+                    continue
+                sleeve = round(venues.get(s["venue"], 0) * scale, 2)
+                balance = round(sleeve / n, 2)
+                commitment = round(balance * max_alloc, 2)
+                if s.get("balance") != balance or \
+                        s.get("max_commitment") != commitment:
+                    changed.append(f"slot {s['slot']} {s['venue']} "
+                                   f"${s.get('balance')}→${balance}")
+                s["venue_sleeve"] = sleeve
+                s["venue_slots"] = n
+                s["balance"] = balance
+                s["max_commitment"] = commitment
+            if changed:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": f"slot budgets re-normalized to "
+                                        f"config (total ${total:.0f}): "
+                                        + "; ".join(changed)[:300]})
+                save_state(self.state)
+        except Exception as exc:
+            log(self.state, {"kind": "health-warn",
+                             "msg": f"slot reconcile failed: {str(exc)[:120]}"})
+
     # ── manage loop ────────────────────────────────────────────────────
     def run(self, once=False, dry_run=True, no_confluence=False, top=None):
         self.top = top
@@ -2163,6 +2219,9 @@ class Daemon:
         if os.path.exists(os.path.join(HERE, "KILL")):
             print("KILL present — refusing to run", flush=True)
             return []
+        # apply config.yaml venue/total edits to the persisted slot budgets
+        # BEFORE the first adopt/rescreen seeds or uses them
+        self.reconcile_slots()
         try:
             self.adopt_existing(dry_run)
         except Exception as exc:

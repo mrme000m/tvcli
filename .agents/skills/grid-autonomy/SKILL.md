@@ -13,14 +13,18 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 ## What it does
 
 - **Screen (60m):** `screen/merge.py` screens Hyperliquid perps + Binance
-  spot in parallel — broad universe (≥ `screen.min_volume_usd`, top
-  `screen.universe_max_symbols` by 24h volume), regime + preset score,
-  real spreads, numeric tvcli `/hunt` fitness (squeeze/choppiness/
-  mtf-confluence/dvi — "moves large & fast" bonuses, cap +6, fail-soft),
-  4h trend confirmation, dead-tape floor + expected-value grid-fill pass.
-  When a venue's slots are full but a token scores ≥
-  `screen.open_slot_min_score` and deployable capital is spare, the daemon
-  opens another slot (up to `portfolio.slots_max`).
+  spot — broad universe (≥ `screen.min_volume_usd`, top
+  `screen.universe_max_symbols` by 24h volume; universe fetches retry with
+  backoff and fail soft per venue), regime + preset score, real spreads,
+  numeric tvcli `/hunt` fitness (squeeze/choppiness/mtf-confluence/dvi —
+  "moves large & fast" bonuses, cap +6, fail-soft), 4h trend confirmation,
+  dead-tape floor + expected-value grid-fill pass. When a venue's slots are
+  full but a token scores ≥ `screen.open_slot_min_score` and deployable
+  capital is spare, the daemon opens another slot (up to
+  `portfolio.slots_max`). On every startup, `reconcile_slots` re-normalizes
+  the persisted slot budgets to the current `portfolio.venues`/`total_usd`
+  (journal `slots-reconciled`) so config edits actually reach the fleet on
+  restart.
 - **Deliberate:** `agents/swarm.py` runs bull/bear debate → facilitator →
   3-stance risk team via `llm/provider.py`; rule-based fallback on LLM
   outage (`llm_degraded: true`). `agents/reflect.py` injects k=3 memories.
@@ -58,6 +62,11 @@ console + PocketBase + tvcli serve, all launchd-supervised after
 ./dev start [--dry-run]   # start the whole stack (live-paper default)
 ./dev stop [--all]        # stop console + daemon + PB (--all + tvcli serve)
 ./dev restart             # stop + start
+./dev restart console     # restart ONE component (daemon|console|pb|serve)
+                          # — `dev restart console` reloads console code
+                          # changes (server.py/static/*) without touching
+                          # the daemon; `dev restart daemon` applies
+                          # config.yaml edits (stop → PB up → start)
 ./dev logs daemon|console|pb|serve [-f]   # tail any component log
 ./dev reset [--wt|--no-wt] [--keep-decisions] [--start]  # wipe runtime state
                           # (interactive runs ask about the WT reset too)
@@ -141,6 +150,8 @@ re-login in the browser window (or vault `wundertrading-session` →
   `adjust`, `rotation-stop/delete/rotate`, `capacity-veto` (plan bot cap),
   `subscription` (plan limits observed/changed), `tier-cap` (tier grid
   density cap applied), `reliability-migrate` (ledger key normalization),
+  `slot-open`/`slot-open-veto` (dynamic venue slot opening),
+  `slots-reconciled` (config edits re-normalized slot budgets at startup),
   `browser-restart`,
   `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
   `re-analysis` log once per state transition, not every 60 s sweep.
@@ -187,4 +198,4 @@ re-login in the browser window (or vault `wundertrading-session` →
 - Binance sleeve runs on `demo-bn` (`BINANCE_FUTURES` paper) because
   WunderTrading has no Binance spot paper mode; the spot-like no-Short rule
   is still enforced.
-- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 232 offline tests as of 2026-09-05; trust the runner output over any count in docs.
+- Tests: `python3 -m unittest discover -s tests -t .` (or `pytest tests/`) — 271 offline tests as of 2026-09-05; trust the runner output over any count in docs.

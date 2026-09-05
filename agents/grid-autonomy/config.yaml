@@ -3,18 +3,22 @@
 # execution/guardrails.py passes every gate below.
 
 portfolio:
-  total_usd: 500.0
+  total_usd: 600.0
   venues:
-    hyperliquid: { balance_usd: 300.0, market: perps, grids: [Long, Short, Neutral] }
+    hyperliquid: { balance_usd: 400.0, market: perps, grids: [Long, Short, Neutral] }
     binance:     { balance_usd: 200.0, market: spot,  grids: [Long, Neutral] }  # spot-like sleeve: NO Short (kept even on the futures paper stand-in)
   slots_min: 3
-  slots_max: 5                  # dynamic ceiling — a venue slot opens BEYOND
+  slots_max: 6                  # dynamic ceiling — a venue slot opens BEYOND
                                 # slots_default when a token scores ≥
                                 # screen.open_slot_min_score and deployable
-                                # capital is spare (daemon open_slot)
+                                # capital is spare (daemon open_slot). The HL
+                                # sleeve funds 4 slots at $100 each — the
+                                # exchange $10/line floor needs ≥$100/slot for
+                                # a 50%-worst-case grid, so sleeve + slots_max
+                                # move together.
   slots_default: 4
   max_alloc_per_slot: 0.5      # worst-case commitment ≤ 50% of slot
-  cash_buffer_pct: 0.15        # portfolio deployable ceiling = 85% of 500
+  cash_buffer_pct: 0.15        # portfolio deployable ceiling = 85% of 600
 
 screen:
   presets: [grid-neutral, grid-directional]

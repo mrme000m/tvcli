@@ -213,7 +213,7 @@ Accuracy note: every fact below is verified against the code at
 | `scripts/wt_reset.py` | `dev reset-wt` worker: stop + delete all WunderTrading paper bots (real-money bots never touched). |
 | `scripts/install_launchd.sh` + `launchd/*.plist` | Install the supervision agents (grid-autonomy + tvcli serve). |
 | `scripts/smoke.sh` | One-shot dry-run E2E smoke (see Operations runbook). |
-| `tests/` | Offline unit tests — 232 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
+| `tests/` | Offline unit tests — 267 as of 2026-09-05 (`python3 -m unittest` / `pytest`). The count changes; trust the runner output over this table. |
 | `state/` | Runtime state, journal, reports, market-map caches. **Not source.** |
 | `docs/binance-paper-profile.md` | Binance paper-stand-in investigation + runbook. |
 
@@ -224,12 +224,12 @@ whether the daemon actually reads it:
 
 | Key | Value / effect | Wired? |
 |-----|----------------|--------|
-| `portfolio.total_usd` | Fund size; feeds the slot plan. | yes |
-| `portfolio.venues.hyperliquid.balance_usd` | HL sleeve (`300.0`). | yes |
-| `portfolio.venues.binance.balance_usd` | Binance sleeve (`200.0`). | yes |
+| `portfolio.total_usd` | Fund size (`600.0`); feeds the slot plan. | yes |
+| `portfolio.venues.hyperliquid.balance_usd` | HL sleeve (`400.0`) — funds up to 4 slots at $100 each (the $10/line exchange floor needs ≥$100/slot for a 50%-worst-case grid). On daemon restart, `reconcile_slots` re-normalizes the persisted slot budgets to the current sleeve (journal kind `slots-reconciled`). | yes |
+| `portfolio.venues.binance.balance_usd` | Binance sleeve (`200.0`). Same restart reconciliation as the HL sleeve. | yes |
 | `portfolio.venues.*.market` | `perps` / `spot` label. | doc only |
 | `portfolio.venues.*.grids` | Allowed grid types per venue. | doc only |
-| `portfolio.slots_min` / `slots_max` | 3 / 5 — `slots_max` is the dynamic ceiling: a venue slot opens beyond `slots_default` when a token scores ≥ `screen.open_slot_min_score` and deployable capital is spare. | `slots_max` yes / `slots_min` doc only |
+| `portfolio.slots_min` / `slots_max` | 3 / 6 — `slots_max` is the dynamic ceiling: a venue slot opens beyond `slots_default` when a token scores ≥ `screen.open_slot_min_score` and deployable capital is spare. | `slots_max` yes / `slots_min` doc only |
 | `portfolio.slots_default` | Number of slots (`4`). | yes |
 | `portfolio.max_alloc_per_slot` | Per-slot worst-case commitment cap (`0.5`). | yes |
 | `portfolio.cash_buffer_pct` | Deployable ceiling = total × (1 − buffer) = 85%. | yes |
@@ -302,6 +302,11 @@ the tvcli serve confluence backend (repo-level, shared):
 ./dev start --dry-run         # daemon in planning-only mode instead
 ./dev stop [--all]            # console + daemon + PB (--all also tvcli serve)
 ./dev restart                 # stop + start
+./dev restart console         # restart ONE component (daemon|console|pb|serve)
+                              # `dev restart console` reloads console code
+                              # changes (server.py / static/*) without touching
+                              # the daemon; `dev restart daemon` applies
+                              # config.yaml edits (stop → PB up → start)
 ./dev logs [daemon|console|pb|serve|dev] [-f] [-n N]
 ./dev reset [--wt|--no-wt] [--keep-decisions] [--no-backup] [--start]
                               # wipe runtime state (backup under state/backups);
@@ -579,13 +584,13 @@ cd agents/grid-autonomy
 python3 -m unittest discover -s tests -t .
 ```
 
-232 tests as of 2026-09-05, all offline (network/browser calls are mocked
+271 tests as of 2026-09-05, all offline (network/browser calls are mocked
 or stubbed; state is isolated in temp dirs, and a `GRID_STATE_DIR` override
 also disables the PocketBase write-through so tests can never pollute the
 live side channel). Expected output:
 
 ```
-Ran 232 tests in …
+Ran 271 tests in …
 OK
 ```
 
