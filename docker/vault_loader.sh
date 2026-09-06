@@ -45,8 +45,19 @@ BW_VAULT_ONLY="${BW_VAULT_ONLY:-}"
 want() { [ -z "$BW_VAULT_ONLY" ] && return 0; case ",$BW_VAULT_ONLY," in *",$1,"*) return 0;; *) return 1;; esac; }
 
 # ── authenticate: config server → login (idempotent) → unlock → sync ───────
+# The bw-cli state persists in a volume, so a restart can find the CLI
+# already logged in — `bw config server` then fails with "Logout required".
+# Detect that state and reset it before configuring.
 log "configuring bw CLI server"
-bw config server "$BW_URL" >/dev/null
+if bw login --check >/dev/null 2>&1; then
+  log "bw already logged in — resetting session for server config"
+  bw logout >/dev/null 2>&1 || true
+fi
+if ! bw config server "$BW_URL" >/dev/null 2>&1; then
+  # still refusing (edge states) — force a clean slate once
+  bw logout >/dev/null 2>&1 || true
+  bw config server "$BW_URL" >/dev/null
+fi
 
 set +e; login_out="$(bw login --apikey 2>&1)"; login_rc=$?; set -e
 if [ "$login_rc" -eq 0 ]; then
