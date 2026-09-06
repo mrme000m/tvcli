@@ -19,6 +19,7 @@ from .common import (
 )
 from .trade import PlaceStrategyTrade, EditTradeStrategy, PlaceTakeProfit, EditTakeProfit
 from .grid import GridUpsertPayload, grid_line_geometry, bracket_levels
+from .profiles import Profile, parse_profiles
 
 __all__ = [
     "AmountPerTradeType",
@@ -44,4 +45,6 @@ __all__ = [
     "GridUpsertPayload",
     "grid_line_geometry",
     "bracket_levels",
+    "Profile",
+    "parse_profiles",
 ]

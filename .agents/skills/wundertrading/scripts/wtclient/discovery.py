@@ -689,6 +689,9 @@ PUBLIC_SURFACES: dict[str, list[str]] = {
         "GET /en/trader/grid_bots/{code}/positions-history/grid",
         "POST /en/trader/my-exchanges/api-profile/fetch_profiles_leverage",
         "POST /en/trader/grid_bots/find_notional_prices",
+        "GET /en/trader/my-exchanges/master-api-profile/grid",
+        "POST /en/trader/my-exchanges/master-api-profile/upsert",
+        "GET /en/trader/dashboard/account-limits",
     ],
     "market": [
         "GET /all-markets",

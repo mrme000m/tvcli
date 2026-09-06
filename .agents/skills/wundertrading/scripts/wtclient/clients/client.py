@@ -11,6 +11,7 @@ from ..transport.market import MarketTransport
 from ..transport.mcp import McpTransport
 from ..transport.session import SessionTransport
 from .bots import BotsClient
+from .exchanges import ExchangesClient
 from .grid import GridClient
 from .market import MarketDataClient
 from .mcp import McpClient
@@ -73,13 +74,18 @@ class WunderTrading:
         return BotsClient(self._grid_transport())
 
     @cached_property
+    def exchanges(self) -> ExchangesClient:
+        """my-exchanges profile management + account limits (session-auth)."""
+        return ExchangesClient(self._grid_transport())
+
+    @cached_property
     def market(self) -> MarketDataClient:
         if self.use_browser:
             return MarketDataClient(BrowserTransport(cdp_base=self.cdp_base))
         return MarketDataClient(MarketTransport())
 
     def close(self) -> None:
-        for name in ("rest", "mcp", "grid", "bots", "market"):
+        for name in ("rest", "mcp", "grid", "bots", "exchanges", "market"):
             client = self.__dict__.get(name)
             if client is not None:
                 client.transport.close()

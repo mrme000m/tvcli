@@ -4,8 +4,9 @@ Surfaces covered:
 
 - ``/open_api``  HMAC-SHA256 REST (no browser)
 - ``:2083/mcp``  MCP streamable HTTP (no browser)
-- ``/en/trader`` session web surface, incl. Grid bots (raw httpx replay **or**
-  optional headful-browser CDP transport)
+- ``/en/trader`` session web surface, incl. Grid bots and my-exchanges
+  profile management (raw httpx replay **or** optional headful-browser CDP
+  transport)
 - ``:2087``      public market data (raw httpx **or** browser transport)
 
 Discovery + debug machinery is baked in:
@@ -64,6 +65,7 @@ from .errors import (
 from .secrets import Secrets, load_secrets
 from .clients.bots import BotsClient
 from .clients.client import WunderTrading
+from .clients.exchanges import ExchangesClient
 from .clients.open_api import OpenApiClient
 from .clients.mcp import McpClient
 from .clients.grid import GridClient
@@ -71,6 +73,7 @@ from .clients.market import MarketDataClient
 from .transport.browser import BrowserTransport
 from .transport.hmac import OpenApiTransport
 from .transport.mcp import McpTransport
+from .models.profiles import Profile
 from .transport.session import SessionTransport
 from .transport.market import MarketTransport
 
@@ -81,6 +84,8 @@ __all__ = [
     "McpClient",
     "GridClient",
     "BotsClient",
+    "ExchangesClient",
+    "Profile",
     "MarketDataClient",
     "OpenApiTransport",
     "McpTransport",

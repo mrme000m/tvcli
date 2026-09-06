@@ -11,6 +11,8 @@ Used by:
 
 - ``execution/grid_adapter.py`` — the deploy/stop/edit/delete calls
 - ``scripts/repair_ledger.py`` — the read-only ``grid list`` refresh
+- ``execution/profiles.py`` — the paper-profile bootstrap
+  (``exchanges`` passthroughs: list/limits/ensure)
 
 All write functions honor ``dry_run=True`` (the default) and never mutate
 WunderTrading without the guardrail layer having signed off.
@@ -123,6 +125,94 @@ def api_profiles(*, limit: int | None = None) -> Any:
 
 def live_strategies(*, statuses: list[str] | None = None) -> Any:
     return get_wun().mcp.live_strategies(statuses=statuses)
+
+
+# -- exchanges (paper profiles / plan limits) --------------------------------
+
+
+def exchanges_list_profiles() -> list[dict[str, Any]]:
+    """List WT exchange profiles via ``wtclient.ExchangesClient.list_profiles``.
+
+    Returns the ``Profile.as_dict()`` shape: ``id``, ``name``,
+    ``exchangeFamily``, ``paperTrading``, ``enabled``, ``marginMode``,
+    ``tradeMode``, ``favorite``. Read-only; propagates transport errors so
+    the daemon's ``*_safe`` wrappers decide the fallback.
+    """
+    return get_wun().exchanges.list_profiles() or []
+
+
+def exchanges_account_limits() -> dict[str, Any]:
+    """Plan limits via ``wtclient.ExchangesClient.account_limits``.
+
+    ``{"gridBots": {"active": n, "max": m, ...}, ...}`` — the dashboard
+    account-limits view (the tier caps actually enforced by
+    ``grid_bots/upsert`` come from ``grid_capacity`` instead).
+    """
+    return get_wun().exchanges.account_limits() or {}
+
+
+def create_paper_profile(
+    name: str, exchange_family: str, *, dry_run: bool = True
+) -> dict[str, Any]:
+    """Create one paper profile (no real exchange keys — wtclient submits
+    the same random 32-hex placeholders the WT UI sends).
+
+    Binance paper resolves to ``BINANCE_FUTURES`` (USDT-M); there is no
+    Binance spot paper mode. Prefer :func:`ensure_paper_profiles` — it
+    checks existence first instead of relying on the 400-duplicate reply.
+    """
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "transport": "wtclient.ExchangesClient.create_paper_profile",
+            "name": name,
+            "exchange_family": exchange_family,
+        }
+    wun = get_wun()
+    try:
+        result = wun.exchanges.create_paper_profile(name, exchange_family)
+        return {"ok": True,
+                "transport": "wtclient.ExchangesClient.create_paper_profile",
+                "result": result}
+    except WunError as exc:
+        return {"ok": False,
+                "transport": "wtclient.ExchangesClient.create_paper_profile",
+                "error": str(exc)}
+
+
+def ensure_paper_profiles(
+    spec: dict[str, list[str]], *, dry_run: bool = True
+) -> dict[str, Any]:
+    """Ensure the venue-keyed paper profiles exist (idempotent, never raises).
+
+    ``spec`` maps a venue key to the profile names wanted on that venue's
+    exchange family, e.g. ``{"hyperliquid": ["demo-hype"],
+    "binance": ["demo-bn"]}``. wtclient treats an existing profile of the
+    wrong shape (non-paper / family mismatch) as an "error" state and never
+    mutates it, so this is safe to re-run on every boot.
+    """
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
+            "spec": dict(spec or {}),
+        }
+    wun = get_wun()
+    try:
+        result = wun.exchanges.ensure_paper_profiles(spec)
+        return {"ok": True,
+                "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
+                "result": result}
+    except WunError as exc:
+        return {"ok": False,
+                "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
+                "error": str(exc)}
+    except Exception as exc:  # belt-and-braces: the ensure path never raises
+        return {"ok": False,
+                "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
+                "error": f"{type(exc).__name__}: {exc}"}
 
 
 # -- write helpers ------------------------------------------------------------
@@ -281,6 +371,10 @@ __all__ = [
     "grid_edit",
     "api_profiles",
     "live_strategies",
+    "exchanges_list_profiles",
+    "exchanges_account_limits",
+    "create_paper_profile",
+    "ensure_paper_profiles",
     "enable_debug",
     "catalog",
     "recorder",

@@ -110,7 +110,7 @@ class BrowserTransport(BaseTransport):
             f"  const method = {json.dumps(method)};\n"
             f"  const path = {json.dumps(path)};\n"
             f"  const body = {body_js};\n"
-            "  const headers = { 'Accept': 'application/json' };\n"
+            "  const headers = { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };\n"
             "  if (body !== undefined) headers['Content-Type'] = 'application/json';\n"
             "  if (!['GET','HEAD'].includes(method)) headers['X-W-CSRF-Token'] = window.baseServerConfig.appCsrfToken;\n"
             "  try {\n"

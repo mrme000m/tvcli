@@ -81,6 +81,12 @@ browser-debug/secrets/runtime/
 .tvcli-autoserve
 !browser-debug/secrets/manifest.json
 
+# isolated vault-account CloakBrowser profile (live session cookies)
+browser-debug/profile-vault/
+
+# python build artifacts
+*.egg-info/
+
 # vendored tvvisual (visual/) — recipes + example are source, not artifacts
 !visual/recipes/*.json
 !visual/chart.example.json

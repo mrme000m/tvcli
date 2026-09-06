@@ -34,6 +34,7 @@ wtclient/
 ├── clients/          # typed high-level clients per surface
 │   ├── bots.py       # signal/dca/mn/mp bots (session-auth)
 │   ├── client.py     # WunderTrading facade
+│   ├── exchanges.py  # my-exchanges profiles + account limits (session-auth)
 │   ├── grid.py       # grid bots
 │   ├── market.py     # public market data
 │   ├── mcp.py        # MCP tools
@@ -88,7 +89,32 @@ wun = WunderTrading(browser=True)
 wun.grid.list()
 wun.grid.analyze("HYPERLIQUID_SWAP:191")
 wun.market.ohlc_last("HYPERLIQUID_SWAP:191", timeframe=15)
+
+# Exchange-profile management (my-exchanges, session-auth)
+wun.exchanges.list_profiles()            # -> [Profile(...)] (paper + live)
+wun.exchanges.account_limits()           # -> raw plan-limits payload
+result = wun.exchanges.create_paper_profile("demo-hype", "HYPERLIQUID")
+# -> {"created": bool, "already_exists": bool, "status": int|None,
+#     "message": str|None, "violations": [...], "response": raw}  (never raises)
+wun.exchanges.ensure_paper_profiles({"hyperliquid": ["demo-hype"]})
+# -> {"ok": bool, "venues": {...}, "created": ["hyperliquid/demo-hype"],
+#     "errors": [...]}  (idempotent; never mutates wrong-shape profiles)
+
+# Deletion (verified live): DELETE master-api-profile/{code}/delete
+wun.exchanges.delete_profile("47ca341d5a01c1df91b8b9ed")   # hex resource.code
+wun.exchanges.delete_profile_by_name("stale-paper")        # lookup by name;
+# paper_only=True (default) refuses NON-paper profiles — a live exchange
+# connection is never deleted by a name match.
 ```
+
+Paper profiles need **no real exchange keys** — the WT UI itself submits
+random 32-hex placeholders for `api`/`secret` and `paper_profile_body()`
+generates the same locally. `BINANCE` paper resolves to `BINANCE_FUTURES`
+(USDT-M); Binance spot has no paper mode. There is no way to set a paper
+balance (fixed $10k demo). **Account cap: only 2 paper trading accounts
+are allowed** — a third create returns HTTP 400
+`"Limit reached. Only 2 Paper trading accounts are allowed."`; free a
+stale slot with `delete_profile_by_name` first.
 
 ### Discovery
 
@@ -163,6 +189,13 @@ python3 wt_httpx.py grid analyze HYPERLIQUID_SWAP:191 --transport browser
 python3 wt_httpx.py grid create cfg.json --transport browser --grid-market derivative
 python3 wt_httpx.py grid stop <code> --transport browser
 python3 wt_httpx.py market /supported-markets --transport browser
+
+# Exchange profiles + plan limits (dry run by default; --execute to write)
+python3 wt_httpx.py exchanges profiles --transport browser
+python3 wt_httpx.py exchanges limits --transport browser
+python3 wt_httpx.py exchanges create-paper demo-hype --family HYPERLIQUID
+python3 wt_httpx.py exchanges create-paper demo-hype --family HYPERLIQUID --execute
+python3 wt_httpx.py exchanges ensure --spec '{"hyperliquid":["demo-hype"]}' --execute
 
 # Discovery + debug
 python3 wt_httpx.py discover surfaces               # known endpoint index

@@ -18,6 +18,9 @@ reliability gate passes (>=30 samples, PF>=1.3); live needs live_allow=true in
 state.json (set only by an explicit operator action) AND guardrails.deploy().
 --dry-run (default) plans everything without creating anything.
 --once runs a single rescreen cycle plus one health pass then exits.
+Missing allowlisted paper profiles (autonomy.paper_profiles) are self-healed:
+created at boot in live-paper mode via wtclient's idempotent ensure, retried
+on the rescreen/health profile refresh under autonomy.profile_bootstrap_cooldown_s.
 
 State: state/state.json {slots, active_bots, cooldowns_until, reliability,
 live_allow, committed, journal}. HTTP ctl (thread): GET /health /status
@@ -178,6 +181,30 @@ try:
 except Exception:
     HAS_POSITION_OPTIMIZER = False
     _PositionOptimizer = None
+
+# ── Paper-profile bootstrap layer (defensive) ───────────────────────────
+# execution/profiles.py turns autonomy.paper_profiles (venue-keyed allowlist)
+# into a wtclient ensure call — the daemon self-heals missing paper profiles
+# instead of guard-vetoing every deploy forever. Fail-soft import so the
+# daemon runs even when wtclient/wt_library are missing entirely.
+try:
+    from profiles import (ensure_paper_profiles as _profiles_ensure,  # noqa: E402
+                          paper_profile_spec as _profiles_spec)
+    HAS_PROFILES = True
+except Exception:
+    HAS_PROFILES = False
+
+    def _profiles_ensure(cfg, execute=False):
+        return {"ok": False, "executed": False, "spec": {}, "result": None,
+                "error": "execution/profiles unavailable"}
+
+    def _profiles_spec(cfg):
+        return {}
+
+# Paper-profile ensure retry cadence on the health cycle (the boot attempt
+# is immediate; failures here back off). Configurable via
+# autonomy.profile_bootstrap_cooldown_s.
+PROFILE_BOOTSTRAP_COOLDOWN_S = 1800.0
 
 # ── PocketBase write-through side channel (defensive) ─────────────────
 # PocketBase is an optional, best-effort projection: the file layer stays the
@@ -432,6 +459,9 @@ DEFAULT_CONFIG = {
               "browser_restart_cooldown_s": 600},
     "autonomy": {"mode": "auto", "base_pct": 0.25, "probe_pct": 0.40, "full_pct": 0.50,
                  "live_profiles": [], "paper_profiles": ["demo-hype"],
+                 # health-cycle retry cadence for the paper-profile ensure
+                 # (boot is immediate; retries back off this long)
+                 "profile_bootstrap_cooldown_s": 1800.0,
                  # tier caps grid DENSITY too, not just the worst-case
                  # target — at min-notional-dominated sizes the exchange
                  # floor otherwise raised every tier to the hard cap
@@ -794,6 +824,58 @@ def _allowed_profile_names(cfg):
     return set(pp)
 
 
+def _missing_paper_profiles(cfg, profiles):
+    """venue -> [allowlisted paper-profile names missing from `profiles`].
+
+    The mirror of select_profile's gate: a name counts as PRESENT only when
+    a snapshot profile carries it on a venue-coherent exchange AND is a
+    paperTrading account. A same-name non-paper or wrong-family profile
+    stays "missing" — the wtclient ensure reports it as an error state and
+    never mutates it. Fail-soft: {} when anything is unexpected.
+    """
+    try:
+        spec = _profiles_spec(cfg) if HAS_PROFILES else {}
+        if not spec:
+            return {}
+        present = set()
+        for prof in profiles or []:
+            if not isinstance(prof, dict):
+                continue
+            name = str(prof.get("name") or "").strip()
+            venue = venue_from_exchange(prof.get("exchange"))
+            if name and venue and prof.get("paperTrading"):
+                present.add((venue, name))
+        missing = {}
+        for venue, names in spec.items():
+            gaps = [n for n in names if (venue, n) not in present]
+            if gaps:
+                missing[venue] = gaps
+        return missing
+    except Exception:
+        return {}
+
+
+def _json_safe(value):
+    """Deep JSON-safe copy of a result dict (str repr fallback per value)."""
+    try:
+        return json.loads(json.dumps(value))
+    except Exception:
+        if isinstance(value, dict):
+            return {str(k): _json_safe(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [_json_safe(v) for v in value]
+        return str(value)
+
+
+def _ensure_paper_profiles_safe(cfg, execute):
+    """profiles.ensure_paper_profiles with a fail-soft guard (never raises)."""
+    try:
+        return _profiles_ensure(cfg, execute=execute)
+    except Exception as exc:
+        return {"ok": False, "executed": bool(execute), "spec": {},
+                "result": None, "error": str(exc)[:200]}
+
+
 def select_profile(venue, profiles, cfg, paper=True):
     """(profile, violation). Venue-strict; paper deploys use paper only.
 
@@ -936,7 +1018,7 @@ def refuse_new_archetype(reliability, archetype, min_samples=None):
 # ── Daemon ─────────────────────────────────────────────────────────────
 
 class Daemon:
-    def __init__(self, port=None):
+    def __init__(self, port=None, live_paper=False):
         self.config = load_config()
         self.port = port or int(self.config["server"].get("daemon_port", 8799))
         self.state = load_state()
@@ -945,6 +1027,15 @@ class Daemon:
         self.reliability = reliability_load_safe()
         self.state["profiles"] = self.profiles
         self.state["reliability"] = self.reliability
+        # paper-profile bootstrap state: the deploy guard vetoes forever
+        # when an allowlisted paper profile is missing (e.g. demo-bn on a
+        # fresh WT account), so the daemon ensures it exists itself.
+        # Only EXECUTES in live-paper mode; a dry-run boot stays a silent
+        # no-op (the health-cycle retry below journals its attempts).
+        self._live_paper = bool(live_paper)
+        self._profile_bootstrap_ts = 0.0
+        if self._live_paper:
+            self._bootstrap_paper_profiles()
         self.capabilities = {
             "resolve": HAS_RESOLVE, "observe": HAS_OBSERVE,
             "reliability": HAS_RELIABILITY, "reflect": HAS_REFLECT,
@@ -1720,6 +1811,64 @@ class Daemon:
                         f"has a bot on profile {prof.get('name')}")
         return None
 
+    # ── paper-profile bootstrap (self-heal) ─────────────────────────────
+    def _profile_bootstrap_cooldown_s(self):
+        """Retry cadence for the paper-profile ensure (autonomy tunable)."""
+        try:
+            v = float(self.config.get("autonomy", {}).get(
+                "profile_bootstrap_cooldown_s",
+                PROFILE_BOOTSTRAP_COOLDOWN_S) or PROFILE_BOOTSTRAP_COOLDOWN_S)
+        except (TypeError, ValueError):
+            v = PROFILE_BOOTSTRAP_COOLDOWN_S
+        return max(0.0, v)
+
+    def _bootstrap_paper_profiles(self):
+        """Boot-time ensure of the allowlisted paper profiles (no-op when
+        nothing is missing). Live-paper mode only — the caller gates it."""
+        missing = _missing_paper_profiles(self.config, self.profiles)
+        if not missing:
+            return None
+        return self._run_paper_profile_ensure(missing, execute=True)
+
+    def _run_paper_profile_ensure(self, missing, execute):
+        """One ensure attempt: journals a "profile-bootstrap" event with the
+        report and refreshes the profile snapshot after a successful
+        execute (an empty refresh is ignored — a browser hiccup must not
+        wipe the last good snapshot)."""
+        self._profile_bootstrap_ts = time.time()
+        report = _ensure_paper_profiles_safe(self.config, execute=execute)
+        if execute and report.get("ok"):
+            fresh = grid_profiles_safe()
+            if fresh:
+                self.profiles = fresh
+                self.state["profiles"] = fresh
+        msg = ("paper-profile ensure executed: missing="
+               f"{missing} ok={report.get('ok')}" if execute else
+               f"paper-profile ensure PLANNED (dry-run): missing={missing}")
+        log(self.state, {"kind": "profile-bootstrap",
+                         "msg": msg + (f" error={report.get('error')}"
+                                       if report.get("error") else ""),
+                         "executed": bool(execute),
+                         "missing": missing,
+                         # JSON-safe copy: state.json must never fail on a
+                         # non-serializable wtclient payload
+                         "report": _json_safe(report)})
+        return report
+
+    def _retry_paper_profile_bootstrap(self):
+        """Health-cycle paper-profile ensure retry, cooldown-gated.
+
+        Runs only in live-paper mode (dry-run cycles never mutate
+        WunderTrading); an empty/missing profile snapshot counts as
+        everything missing, so a wiped WT account self-heals too."""
+        now = time.time()
+        if now - self._profile_bootstrap_ts < self._profile_bootstrap_cooldown_s():
+            return
+        missing = _missing_paper_profiles(self.config, self.profiles)
+        if not missing:
+            return
+        self._run_paper_profile_ensure(missing, execute=True)
+
     # ── rescreen cycle ─────────────────────────────────────────────────
     def rescreen_cycle(self, dry_run=True, no_confluence=False, max_new=2,
                        top=None):
@@ -1744,6 +1893,17 @@ class Daemon:
         except Exception as exc:
             log(self.state, {"kind": "health-warn",
                               "msg": f"profile refresh failed: {str(exc)[:120]}"})
+        # paper-profile self-heal retry: an allowlisted profile that is
+        # still missing (or a wiped snapshot — everything missing) retries
+        # the ensure on a cooldown instead of vetoing deploys forever.
+        # Live-paper only: dry-run cycles never mutate WunderTrading.
+        if not dry_run:
+            try:
+                self._retry_paper_profile_bootstrap()
+            except Exception as exc:
+                log(self.state, {"kind": "health-warn",
+                                 "msg": f"paper-profile bootstrap retry "
+                                        f"failed: {str(exc)[:120]}"})
         # subscription observation: enforced tier caps (upsert init) + the
         # dashboard plan view (account-limits). Journaled on any change so
         # plan upgrades/downgrades and the Hyperliquid premium tier are
@@ -3333,7 +3493,7 @@ def main():
     ap.add_argument("--top", type=int, default=30, help="merge --top passthrough")
     ap.add_argument("--port", type=int, default=None)
     args = ap.parse_args()
-    d = Daemon(port=args.port)
+    d = Daemon(port=args.port, live_paper=args.live_paper)
     try:
         d.run(once=args.once, dry_run=not args.live_paper,
               no_confluence=args.no_confluence, top=args.top)

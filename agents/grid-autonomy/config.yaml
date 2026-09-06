@@ -210,6 +210,10 @@ autonomy:                      # escalation ladder + profile allowlists
                                #   the derivative map, no-Short rule still enforced.
                                #   Connect a real BINANCE (spot) account and list it in
                                #   live_profiles for the spot sleeve to go live.
+                               # Missing paper profiles are SELF-HEALED: the daemon
+                               # ensures they exist at boot (live-paper mode) and
+                               # retries on the health cycle.
+  profile_bootstrap_cooldown_s: 1800  # retry cadence between ensure attempts
 
 memory:                        # reflect.py memory recall for swarm briefs
   k: 3                         # top-k past memories injected per candidate

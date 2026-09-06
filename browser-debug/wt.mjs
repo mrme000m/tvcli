@@ -81,11 +81,16 @@ async function ensureBrowser() {
     .then((r) => r.ok).catch(() => false);
   let up = false;
   for (let i = 0; i < 2; i++) { if (await alive(9222)) { up = true; break; } await new Promise((r) => setTimeout(r, 300)); }
-  if (!up) {
+  if (!up && !process.env.CB_PORT) {
     spawnSync(process.execPath, [join(SCRIPT_DIR, 'launch.mjs')], { stdio: 'inherit' });
   }
-  // find the live CDP port
+  // find the live CDP port (CB_PORT pins it — e.g. an isolated second
+  // CloakBrowser instance next to the daemon's shared one)
   let port = null;
+  if (process.env.CB_PORT) {
+    port = parseInt(process.env.CB_PORT, 10);
+    if (!(await alive(port))) throw new Error(`CB_PORT ${port} is not alive`);
+  }
   for (let p = 9222; p < 9322 && !port; p++) {
     for (let i = 0; i < 20; i++) {
       if (await alive(p)) { port = p; break; }

@@ -198,6 +198,11 @@ re-login in the browser window (or vault `wundertrading-session` →
   density cap applied), `reliability-migrate` (ledger key normalization),
   `slot-open`/`slot-open-veto` (dynamic venue slot opening),
   `slots-reconciled` (config edits re-normalized slot budgets at startup),
+  `profile-bootstrap` (missing allowlisted paper profiles ensured via
+  wtclient — executed at boot in live-paper mode, retried on the health
+  cycle under `autonomy.profile_bootstrap_cooldown_s`; WT allows only 2
+  paper accounts per account, so a stale paper slot must be deleted
+  before a new venue profile can be created),
   `demo-cap`/`demo-cap-veto` (WunderTrading's demo/paper grid-bot cap — 5
   on the free plan, learned from the create-400 because no API exposes it;
   at the cap, new deploys + dynamic slot opens are skipped, rotations still

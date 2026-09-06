@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from .clients.exchanges import DEFAULT_VENUE_FAMILIES, ExchangesClient
 from .clients.grid import GridClient
 from .clients.market import MarketDataClient
 from .config import MARKET_ORIGIN
@@ -158,6 +159,57 @@ def cmd_grid(args: argparse.Namespace) -> int:
         _print_json(client.profiles())
     else:
         raise SystemExit(f"unknown grid action {action!r}")
+    return 0
+
+
+def cmd_exchanges(args: argparse.Namespace) -> int:
+    """my-exchanges surface — profiles, plan limits, paper-profile creation."""
+    from .clients.exchanges import paper_profile_body
+
+    action = args.action
+
+    if action == "create-paper" and not args.execute:
+        # dry run: no credentials needed, just print the planned body
+        body = paper_profile_body(
+            args.name,
+            args.family,
+            trade_mode=args.trade_mode,
+            margin_mode=args.margin_mode,
+        )
+        print("# dry run (pass --execute to POST the upsert)")
+        _print_json(body)
+        return 0
+    if action == "ensure" and not args.execute:
+        spec = load_json_arg(args.spec)
+        if not isinstance(spec, dict):
+            raise SystemExit("--spec must be a JSON object mapping venue -> [names]")
+        print("# dry run (pass --execute to create missing paper profiles)")
+        _print_json({"spec": spec, "families": DEFAULT_VENUE_FAMILIES})
+        return 0
+
+    secrets = load_secrets()
+    client = ExchangesClient(_grid_transport(secrets, args.transport == "browser"))
+
+    if action == "profiles":
+        _print_json([p.as_dict() for p in client.list_profiles()])
+    elif action == "limits":
+        _print_json(client.account_limits())
+    elif action == "create-paper":
+        _print_json(
+            client.create_paper_profile(
+                args.name,
+                args.family,
+                trade_mode=args.trade_mode,
+                margin_mode=args.margin_mode,
+            )
+        )
+    elif action == "ensure":
+        spec = load_json_arg(args.spec)
+        if not isinstance(spec, dict):
+            raise SystemExit("--spec must be a JSON object mapping venue -> [names]")
+        _print_json(client.ensure_paper_profiles(spec))
+    else:
+        raise SystemExit(f"unknown exchanges action {action!r}")
     return 0
 
 
@@ -338,6 +390,32 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--grid-market", choices=["spot", "derivative"], default=None)
     p.add_argument("--bot-type", dest="bot_type", default=None, help="for list-bots")
     p.set_defaults(func=cmd_grid)
+
+    p = sub.add_parser(
+        "exchanges",
+        help="my-exchanges: paper profiles + account limits (raw session or browser)",
+    )
+    p.add_argument(
+        "action",
+        choices=["profiles", "limits", "create-paper", "ensure"],
+    )
+    p.add_argument(
+        "name",
+        nargs="?",
+        default=None,
+        help="for `create-paper`: profile name",
+    )
+    p.add_argument("--family", default="BINANCE", help="exchangeFamily (BINANCE|HYPERLIQUID)")
+    p.add_argument("--trade-mode", dest="trade_mode", default="hedge_mode")
+    p.add_argument("--margin-mode", dest="margin_mode", default="cross")
+    p.add_argument("--spec", default=None, help="for `ensure`: JSON {venue: [names]}")
+    p.add_argument(
+        "--execute",
+        action="store_true",
+        help="actually write (without it, print the planned body only)",
+    )
+    p.add_argument("--transport", choices=["raw", "browser"], default="raw")
+    p.set_defaults(func=cmd_exchanges)
 
     p = sub.add_parser("curl", help="print a redacted curl equivalent without executing")
     p.add_argument("method")

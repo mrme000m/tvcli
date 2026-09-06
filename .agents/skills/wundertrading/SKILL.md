@@ -45,6 +45,18 @@ wun = WunderTrading(browser=True)          # needs a running CloakBrowser tab; s
 wun.grid.list()
 wun.grid.analyze("HYPERLIQUID_SWAP:191")
 wun.market.ohlc_last("HYPERLIQUID_SWAP:191", timeframe=15)
+
+# my-exchanges surface: paper-profile bootstrap + plan limits (browser)
+wun.exchanges.list_profiles()              # Profile objects (code/name/family/paper/enabled)
+wun.exchanges.account_limits()            # {"gridBots": {"active": n, "max": 200}, ...}
+wun.exchanges.ensure_paper_profiles({"hyperliquid": ["demo-hype"],
+                                     "binance": ["demo-bn"]})
+#   idempotent: present -> skip, missing -> create (dummy 32-hex keys,
+#   no real exchange keys EVER), wrong-shape -> error, never mutated.
+#   Binance paper resolves to BINANCE_FUTURES (USDT-M); balance is WT's
+#   fixed $10k demo (NOT settable). Account cap: only 2 paper accounts —
+#   free a stale slot with delete_profile_by_name("stale-paper") which
+#   refuses non-paper profiles by default.
 ```
 
 Request models mirror the live MCP schemas + cross-field rules and fail before
