@@ -163,8 +163,12 @@ jobs:
         if: env.TRANSPORT == 'ghcr'
         run: |
           # Layer-diffed pull: unchanged layers are already present from
-          # the previous deploy; only new layers cross the wire.
-          $SSH_CMD 'sudo docker pull "$0"' "${{ env.IMAGE }}:${{ github.sha }}"
+          # the previous deploy; only new layers cross the wire. NOTE: ssh
+          # appends extra argv to the remote command STRING (they are not
+          # positional parameters), so the image ref must be interpolated
+          # into the quoted command — not passed as a trailing argument.
+          IMAGE_REF="${{ env.IMAGE }}:${{ github.sha }}"
+          $SSH_CMD "sudo docker pull '$IMAGE_REF'"
 
       - name: Stream the image to the host and load it (SSH fallback)
         if: env.TRANSPORT == 'ssh-stream'
