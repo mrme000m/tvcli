@@ -245,3 +245,35 @@ mismatch in the smoke script itself ("WT login OK" vs the entrypoint's "WT
 credential login OK") — fixed in run_smoke4.sh, which now also requires
 `WT_SESSION_SAVED_AT` so a pre-seeded bogus file can't satisfy the
 persistence check.
+
+## Phase 4 — az00 CD via GitHub Actions (2026-09-06)
+
+`.github/workflows/grid-autonomy-deploy.yml` (manual `workflow_dispatch`,
+`mode` input = GRID_MODE, dry-run default): CI builds the image (~4 min on
+ubuntu-latest), streams it (`docker save | gzip -1 | ssh … | sudo docker
+load` — no tarball on the host), writes `/opt/grid-autonomy/.env` from the
+BW_* repo secrets (mode 600), ships `docker/vps-run.sh`, restarts the
+container on named volumes, gates on ctl `/health` (~195s to healthy), and
+prints a deployment report. SSH host config secrets: SSH_HOST / SSH_USER /
+SSH_PORT / SSH_PRIVATE_KEY (az00 = azureuser@13.72.98.141, passwordless
+sudo; vps-run.sh auto-sudos docker when the user is not in the docker
+group). Ports published on 127.0.0.1 only — tunnel in.
+
+Host notes (az00, Azure 2 vCPU / 8GB / Ubuntu 24.04, runs the quantdinger
+stack alongside — untouched):
+- Root disk is 29GB and ~87% full; before deploying, `docker builder prune
+  -af` + `docker image prune -f` reclaimed ~5GB (orphaned layers from the
+  first interrupted load). vps-run.sh prunes orphaned image versions after
+  every redeploy so repeated deploys stay bounded.
+- `/mnt` is the Azure EPHEMERAL disk (DATALOSS_WARNING_README.txt) —
+  deliberately NOT used; all volumes are named docker volumes on the root
+  disk (state, PB, browser profile, secrets, bw-cli).
+- Verified live run #3 (34051046952, 2026-09-06T18:23Z): vault load (8
+  exports incl. vault-restored WT session) → PB :8090 → serve :8765 →
+  CloakBrowser :9222 → **WT auth probe: AUTH OK** → daemon (dry-run
+  planning) → console :8798 → keeper 1800s; container `Up (healthy)`;
+  daemon journal reads the live account (`gridBots 5/200 premium
+  HYPERLIQUID_SWAP`), screens (53 candidates), guardrails veto duplicate
+  pairs. Two earlier runs failed on: (1) plain `docker` without sudo —
+  fixed with DOCKER auto-sudo detection in vps-run.sh; (2) `apply layer`
+  disk-full from the interrupted first load — fixed by pruning orphans.
