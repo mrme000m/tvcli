@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [
-    { name = "tvcli workspace", email = "noreply@local" },
+    { name = "tvcli workspace" },
 ]
 keywords = ["wundertrading", "trading", "crypto", "grid-bot", "api-client"]
 classifiers = [
