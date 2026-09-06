@@ -40,6 +40,9 @@ on:
       - 'pkg/**'
       - 'go.mod'
       - 'go.sum'
+      # docs-only changes never redeploy (last match wins)
+      - '!docker/README.md'
+      - '!docker/BUILD_NOTES.md'
   workflow_dispatch:
     inputs:
       mode:

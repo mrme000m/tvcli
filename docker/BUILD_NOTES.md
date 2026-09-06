@@ -277,3 +277,40 @@ stack alongside — untouched):
   pairs. Two earlier runs failed on: (1) plain `docker` without sudo —
   fixed with DOCKER auto-sudo detection in vps-run.sh; (2) `apply layer`
   disk-full from the interrupted first load — fixed by pruning orphans.
+
+## Phase 5 — Cloudflare publishing + push-to-deploy CD (2026-09-06)
+
+**Public hostnames** (tunnel `grid-autonomy` 466c7b40-7474-…, remotely
+managed, connector `grid-cloudflared` beside the stack on the `grid-net`
+docker network — ingress targets `http://grid-autonomy:PORT`, no host port
+publishing):
+`grid` (console :8798), `grid-ctl` (ctl API :8799), `grid-pb`
+(PocketBase :8090), `grid-api` (tvcli serve :8765) — all
+`*.00m.indevs.in`, all verified live (200 / healthy JSONs).
+
+- `cf` skill: new `tunnel-token` command (connector token for
+  `cloudflared tunnel run --token`); SKILL.md gained the worked example +
+  token-sourcing docs. Baked into the image (`.dockerignore` + Dockerfile
+  COPY → `/app/.agents/skills/cf/`).
+- `vault_loader.sh`: new `cf-tunnels` section — vault item
+  `cloudflare-tunnels` (folder cloudflare, fields account-id/read-all/
+  write-all) → `CF_ACCOUNT_ID` + `CF_API_TOKEN_READ/WRITE` (the exact env
+  names the skill resolves first). Verified in-container: `cf.sh
+  auth-status` shows all three from `env:*`. Boot hook appends a guarded
+  `source /data/secrets/grid-vault.env` to /root/.bashrc so exec shells
+  (agents) inherit them.
+- `vps-run.sh`: `--network grid-net`, `PB_HOST=0.0.0.0` (PocketBase must
+  bind non-localhost for the connector; ports stay 127.0.0.1-published),
+  `grid-cloudflared` ensured from `GRID_TUNNEL_TOKEN` in the host env file
+  (written by the deploy workflow from repo secrets).
+- **Push-to-deploy**: `on: push` to main filtered to the build context
+  (docker/, agents/grid-autonomy/, .agents/skills/, browser-debug login
+  driver, Go sources) auto-deploys in dry-run; docs-only paths excluded
+  (README/BUILD_NOTES). Verified end-to-end three times (1761dcd, 8fc1832,
+  82a82e8 → run → build ~4 min → stream → redeploy → /health gate).
+- Live issues found + fixed on az00: (1) persisted bw login across
+  container restarts made `bw config server` fail ("Logout required") →
+  loader now resets the session first (two-run test on a persistent state
+  dir); (2) CF "Just a moment…" interstitials on the Azure datacenter IP
+  outlasted the 120s login budget (login OK on retry in ~4 min) → entrypoint
+  timeout 300s + poll budget 25×3s.
