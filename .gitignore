@@ -103,3 +103,7 @@ agents/grid-autonomy/watchdog/reviews/
 
 # console UI screenshots (session artifacts)
 console-*.png
+
+# browser-debug npm driver deps (Dockerfile npm ci needs the lock; keep tracked)
+!browser-debug/package.json
+!browser-debug/package-lock.json

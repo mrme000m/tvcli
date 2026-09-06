@@ -1,0 +1,90 @@
+# Whitelist-style .dockerignore — the build context carries ONLY what the
+# image needs (Go source, grid-autonomy source, the two skill dirs, the 3
+# self-contained Node ESM tools, docker/ scripts). Everything else in this
+# 393MB working repo (dumps, screenshots, secrets, .git, builds, agent
+# session dirs) stays out. Rules are last-match-wins, so the granular
+# exclusions at the bottom override the broad re-includes above.
+
+# ── start from nothing ────────────────────────────────────────────────────────
+*
+
+# ── Go build inputs ──────────────────────────────────────────────────────────
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!pkg/
+!pkg/**
+
+# ── docker/ (Dockerfile itself + entrypoint/healthcheck/patcher) ────────────
+!docker/
+!docker/Dockerfile
+!docker/entrypoint.sh
+!docker/healthcheck.sh
+!docker/patch_config.py
+!docker/vault_loader.sh
+
+# ── grid-autonomy daemon source ──────────────────────────────────────────────
+!agents/
+!agents/grid-autonomy/
+!agents/grid-autonomy/**
+
+# ── skill helpers imported by the daemon (load-bearing relative layout) ─────
+!.agents/
+!.agents/skills/
+!.agents/skills/wundertrading/
+!.agents/skills/wundertrading/scripts/
+!.agents/skills/wundertrading/scripts/**
+!.agents/skills/pocketbase/
+!.agents/skills/pocketbase/pb_hooks/
+!.agents/skills/pocketbase/pb_hooks/**
+!.agents/skills/pocketbase/pb_migrations/
+!.agents/skills/pocketbase/pb_migrations/**
+
+# ── self-contained Node ESM tools (baked CloakBrowser lands here at build) ──
+!browser-debug/launch.mjs
+!browser-debug/wt.mjs
+!browser-debug/socks-relay.mjs
+!browser-debug/wt-login.mjs
+!browser-debug/package.json
+!browser-debug/package-lock.json
+
+# ── granular exclusions (win over the re-includes above) ────────────────────
+
+# runtime state / secrets — never bake
+agents/grid-autonomy/state
+agents/grid-autonomy/.pocketbase
+agents/grid-autonomy/**/wt-session*
+agents/grid-autonomy/**/.env
+
+# dead weight / caches / local backups (global — these win over every
+# re-include above, so no compiled junk rides into the image via COPY)
+**/__pycache__
+**/.pytest_cache
+**/.DS_Store
+agents/grid-autonomy/KILL
+agents/grid-autonomy/config.yaml.bak
+agents/grid-autonomy/**/*.log
+agents/grid-autonomy/launchd
+
+# watchdog self-heal artifacts are runtime state, never source
+agents/grid-autonomy/watchdog/snapshots
+agents/grid-autonomy/watchdog/LEDGER.jsonl
+agents/grid-autonomy/watchdog/STATE.md
+agents/grid-autonomy/watchdog/LAST_FOREIGN_CHECK
+agents/grid-autonomy/watchdog/reviews
+
+# other worker's deploy files — not needed in the build context
+docker/docker-compose.yml
+docker/env.example
+docker/verify.sh
+docker/README.md
+docker/BUILD_NOTES.md
+
+# never bake secrets living anywhere near the whitelisted trees
+browser-debug/secrets
+.agents/skills/wundertrading/scripts/wt-session*
+.agents/skills/pocketbase/pb_hooks/*.env
+.agents/skills/pocketbase/pb_migrations/*.env

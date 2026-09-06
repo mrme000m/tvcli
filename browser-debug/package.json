@@ -1,0 +1,10 @@
+{
+  "name": "grid-browser-debug",
+  "private": true,
+  "type": "module",
+  "description": "Node deps for the WT credential-login driver: the official cloakbrowser npm package (stealth human layer — Bezier mouse curves, per-character typing, isTrusted CDP key events) riding on puppeteer-core, attached at runtime to the persistent CloakBrowser binary that launch.mjs owns. The login form's invisible Google reCAPTCHA scores the interaction; raw CDP evaluate fills fail it.",
+  "dependencies": {
+    "cloakbrowser": "0.5.10",
+    "puppeteer-core": "25.10.0"
+  }
+}

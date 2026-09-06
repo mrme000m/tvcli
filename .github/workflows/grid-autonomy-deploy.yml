@@ -1,0 +1,111 @@
+name: grid-autonomy deploy (az00)
+
+# Deploys the grid-autonomy system to the az00 VPS using the docker image:
+# builds grid-autonomy:local from the repo, streams it (docker save | gzip
+# over SSH — no tarball ever lands on the host's small root disk), loads
+# it, (re)starts the container with the BW_* vault env, and gates on the
+# ctl /health endpoint.
+#
+# SSH host config comes from repo secrets:
+#   SSH_HOST         az00 hostname/IP
+#   SSH_USER         ssh user (passwordless sudo + docker)
+#   SSH_PORT         ssh port (22)
+#   SSH_PRIVATE_KEY  OpenSSH private key for that user
+#
+# The deployment itself is vault-driven: the container's entrypoint logs
+# into the Bitwarden vault with the BW_* machine credentials (repo secrets,
+# written to /opt/grid-autonomy/.env on the host, mode 600) and pulls ALL
+# runtime secrets at boot — WunderTrading creds, MISTRAL/NVIDIA/OPENROUTER
+# keys, TradingView cookies, Cloudflare keys. If the WT session is missing
+# or stale it logs in with the vault creds via the CloakBrowser stealth
+# driver and persists fresh cookies to the grid-secrets volume.
+#
+# Manual dispatch only: this deploys a long-running trading daemon; an
+# accidental auto-deploy would clobber a live instance. Two instances on
+# one WunderTrading account must not both run live — the default mode is
+# dry-run (planning only); pass live-paper deliberately.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'GRID_MODE for this deployment'
+        type: choice
+        default: 'dry-run'
+        options:
+          - dry-run
+          - live-paper
+
+concurrency:
+  group: grid-autonomy-deploy
+  cancel-in-progress: false
+
+env:
+  IMAGE: grid-autonomy:local
+  NAME: grid-autonomy
+  REMOTE_DIR: /opt/grid-autonomy
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the image
+        run: docker build -t "$IMAGE" -f docker/Dockerfile .
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "SSH_CMD=ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Stream the image to the host and load it
+        run: |
+          # ~900MB compressed stream; nothing is written to the host disk
+          # except the loaded image itself.
+          docker save "$IMAGE" | gzip -1 | $SSH_CMD 'gzip -d | sudo docker load'
+
+      - name: Write the vault env file on the host
+        run: |
+          $SSH_CMD "sudo mkdir -p $REMOTE_DIR && sudo chown ${{ secrets.SSH_USER }} $REMOTE_DIR && chmod 700 $REMOTE_DIR"
+          # BW_* machine-auth for the vault_loader (values are GitHub repo
+          # secrets; the file stays on the host for container restarts).
+          $SSH_CMD "umask 177 && cat > $REMOTE_DIR/.env" <<'ENVEOF'
+          BW_URL=${{ secrets.BW_URL }}
+          BW_USERNAME=${{ secrets.BW_USERNAME }}
+          BW_PASSWORD=${{ secrets.BW_PASSWORD }}
+          BW_CLIENTID=${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET=${{ secrets.BW_CLIENTSECRET }}
+          ENVEOF
+          $SSH_CMD "chmod 600 $REMOTE_DIR/.env && grep -c '^BW_' $REMOTE_DIR/.env"
+
+      - name: Ship the runner script
+        run: |
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.SSH_PORT }} \
+            docker/vps-run.sh \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_DIR/vps-run.sh"
+          $SSH_CMD "chmod +x $REMOTE_DIR/vps-run.sh"
+
+      - name: (Re)start the container
+        run: $SSH_CMD "GRID_MODE='${{ inputs.mode }}' IMAGE='$IMAGE' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
+
+      - name: Health gate (vault load + browser + WT auth can take minutes)
+        run: |
+          for i in $(seq 1 48); do
+            if $SSH_CMD 'curl -fs -m 5 http://127.0.0.1:8799/health' >/dev/null 2>&1; then
+              echo "healthy after ~$((i * 15))s"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::container never became healthy"
+          $SSH_CMD 'sudo docker logs --tail 60 '"$NAME"' || true'
+          exit 1
+
+      - name: Deployment report
+        if: always()
+        run: |
+          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker logs --tail 25 '"$NAME"' 2>&1 | grep -iE "vault|wt |wt-|login|auth|daemon|keeper|console|pocketbase|serve|browser" || true'

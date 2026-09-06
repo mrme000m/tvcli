@@ -1,0 +1,52 @@
+# grid-autonomy-vault-smoke — manual CI check of the vault-driven secrets path.
+#
+# Validates docker/vault_loader.sh against the REAL vault (machine auth via
+# BW_CLIENTID/BW_CLIENTSECRET + BW_PASSWORD) on a bare ubuntu runner — no
+# 2GB image build involved. The BW_* values live as GitHub repo secrets of
+# mrme000m/tvcli.
+#
+# What "pass" means: the loader logs in, unlocks, syncs, and materializes
+# /tmp/grid-vault.env with the expected exports (WT creds + LLM + CF keys).
+name: grid-autonomy-vault-smoke
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  vault-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Bitwarden CLI
+        run: |
+          npm install -g @bitwarden/cli
+          bw --version
+
+      - name: Run vault_loader.sh against the real vault
+        env:
+          BW_URL: ${{ secrets.BW_URL }}
+          BW_CLIENTID: ${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET: ${{ secrets.BW_CLIENTSECRET }}
+          BW_PASSWORD: ${{ secrets.BW_PASSWORD }}
+          # Redirect every write to the runner temp dir (no /app, /data).
+          BITWARDENCLI_APPDATA_DIR: ${{ runner.temp }}/bw
+          GRID_VAULT_ENV_OUT: ${{ runner.temp }}/grid-vault.env
+          TVCLI_ENV_OUT: ${{ runner.temp }}/tvcli.env
+          WT_SESSION_OUT: ${{ runner.temp }}/wt-session.env
+        run: bash docker/vault_loader.sh
+
+      - name: Assert materialized secrets (values are never printed)
+        run: |
+          test -s "$RUNNER_TEMP/grid-vault.env" || { echo "::error::grid-vault.env missing/empty"; exit 1; }
+          for key in WT_EMAIL WT_PASSWORD NVIDIA_API_KEY OPENROUTER_API_KEY MISTRAL_API_KEY CLOUDFLARE_ACCOUNT_ID CLOUDFLARE_API_KEY; do
+            grep -q "^export ${key}=" "$RUNNER_TEMP/grid-vault.env" \
+              || { echo "::error::${key} missing from grid-vault.env"; exit 1; }
+            echo "ok: ${key} present"
+          done
+          # Optional materializations (skip-soft in the loader): report only.
+          for f in tvcli.env wt-session.env; do
+            if [ -s "$RUNNER_TEMP/$f" ]; then echo "ok: $f materialized"; else echo "note: $f absent (skip-soft)"; fi
+          done
+          stat -c '%a %n' "$RUNNER_TEMP"/*.env

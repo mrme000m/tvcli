@@ -1,0 +1,135 @@
+# grid-autonomy — VPS deployment layer
+# ═══════════════════════════════════════════════════════════════════════════
+# This file lives in docker/ — all relative paths (build context, env_file,
+# bind mounts) resolve against docker/. The build context is the REPO ROOT
+# (..) because the Dockerfile copies the whole repo mirror into /app.
+#
+# Quick start (full guide: docker/README.md):
+#   cd docker/
+#   cp env.example grid.env && chmod 600 grid.env   # then edit
+#   cp ../agents/grid-autonomy/config.yaml config.yaml
+#   # EITHER the vault (recommended — fills .env, WT creds, LLM keys,
+#   # session cookies automatically; see README §d.0):
+#   #   set BW_URL/BW_CLIENTID/BW_CLIENTSECRET/BW_PASSWORD in grid.env
+#   # OR manual files:
+#   cp /path/to/tv-auth.env .env                    # SESSION/SIGNATURE/...
+#   docker compose up -d
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Fixed project name: the named volumes below are pinned with `name:` so
+# they are EXACTLY grid-state / grid-pb / grid-browser-profile (not
+# <project>_-prefixed) — the README's backup/restore commands rely on that.
+name: grid-autonomy
+
+services:
+  grid-autonomy:
+    # Built from the repo root: docker build -t grid-autonomy:local -f
+    # docker/Dockerfile .   (from the repo root). `image:` also names the
+    # result of `docker compose build`. For a cross-built image loaded with
+    # `docker load` (grid-autonomy:v1), either `docker tag grid-autonomy:v1
+    # grid-autonomy:local` or edit `image:` below.
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    image: grid-autonomy:local
+    container_name: grid-autonomy
+    init: true                     # reap zombies (Xvfb, Chromium, PocketBase)
+
+    # Environment file — template: docker/env.example.
+    #   cp env.example grid.env && chmod 600 grid.env
+    # GRID_MODE=dry-run is the image default; env.example ships
+    # GRID_MODE=live-paper (the intended VPS production mode — read
+    # docker/README.md §e before flipping it).
+    env_file:
+      - ./grid.env
+
+    ports:
+      # Mission console (web UI + JSON API) — NO AUTH: keep it private
+      # (SSH tunnel / firewall — see README §g) or bind to localhost only.
+      - "8798:8798"
+      # Daemon control plane: GET /health /status /reliability /observe
+      # /optimizer, POST /kill /rescreen /optimize /rotate. Also NO AUTH.
+      - "8799:8799"
+      # NEVER publish 8765 (tvcli serve) or 9222 (Chromium CDP) — they are
+      # container-internal dependencies only.
+      #
+      # ── Optional: PocketBase dashboard (:8090, bound to 127.0.0.1 inside
+      # the container). Uncommenting the port line alone is NOT enough —
+      # PocketBase must also listen on the container network: set
+      # PB_HOST=0.0.0.0 in grid.env first. The zero-config alternative is
+      # `docker compose exec grid-autonomy curl -s http://127.0.0.1:8090/api/health`
+      # (see README §f "PocketBase dashboard"). Prefer binding to localhost:
+      # - "127.0.0.1:8090:8090"   # requires PB_HOST=0.0.0.0 in grid.env
+
+    volumes:
+      # ── Named volumes (persist across rebuilds/updates) ────────────────
+      # Daemon runtime state: state.json, decisions.jsonl, run cards
+      # (state/reports/), reliability ledgers, logs (state/logs/), caches.
+      - grid-state:/app/agents/grid-autonomy/state
+      # PocketBase data dir (binary + pb_data + pb.env) — the event-driven
+      # persistence side channel.
+      - grid-pb:/app/agents/grid-autonomy/.pocketbase
+      # CloakBrowser profile — the logged-in WunderTrading cookie session.
+      # KEEP IT WARM: it is what survives restarts; losing it means a manual
+      # WT re-login in the browser window.
+      - grid-browser-profile:/data/browser-profile
+      # ── Bind-mounted FILES (create them before `docker compose up`) ────
+      # Daemon config: edit host-side, `docker compose restart` to apply.
+      # The entrypoint auto-patches the two watch.browser_* commands to
+      # container paths on boot (one-time backup: config.yaml.bak).
+      #   cp ../agents/grid-autonomy/config.yaml config.yaml
+      - ./config.yaml:/app/agents/grid-autonomy/config.yaml
+      # TradingView auth for tvcli serve (:8765): SESSION / SIGNATURE /
+      # DEVICE_T / TV_USER (+ optional TV_TIER). Extract from the cookies of
+      # a logged-in tradingview.com/chart/ session. NEVER bake into the image.
+      # OPTIONAL when the vault provides item `tvcli-primary-env` — a mounted
+      # file always WINS over the vault (see README §d.0 for precedence).
+      - ./.env:/app/.env
+      # WunderTrading session cookies (WT_COOKIES_JSON, or WT_PHPSESSID +
+      # WT_CF_CLEARANCE) for the browser watchdog's wt_restore_cmd. Written
+      # by the vault loader (item `wundertrading-session`) and refreshed by
+      # wt-login.mjs (automatic credential re-login). To pre-seed manually:
+      #   docker cp wt-session.env grid-autonomy:/app/browser-debug/secrets/runtime/
+      - grid-secrets:/app/browser-debug/secrets/runtime
+
+    restart: unless-stopped
+    # The daemon saves state and exits 0 on SIGTERM — give it a full minute
+    # before SIGKILL (browser teardown + state save can be slow).
+    stop_grace_period: 60s
+    # Healthcheck: defined IN THE IMAGE (`grid-healthcheck` → curl
+    # http://127.0.0.1:8799/health). Compose inherits it — nothing to
+    # declare here. `docker compose ps` shows (healthy).
+
+  # ── Optional debug profile: publish the internal PocketBase (:8090) ─────
+  # Default `docker compose up -d` never starts this service. To expose the
+  # PB dashboard on the host:
+  #   1. set PB_HOST=0.0.0.0 in grid.env (PB must listen on the container
+  #      network, not just 127.0.0.1, for the forwarder below to reach it);
+  #   2. docker compose --profile debug up -d
+  #   3. open http://<vps>:8090/_/  — then bring the profile back down:
+  #      docker compose --profile debug stop pb-forward
+  # Zero-config alternative (no PB_HOST change): see README §f.
+  pb-forward:
+    image: alpine:3.20
+    profiles: ["debug"]
+    # Tiny TCP forwarder host:8090 -> container:8090.
+    command: >
+      sh -c "apk add --no-cache socat >/dev/null &&
+             exec socat TCP-LISTEN:8090,fork,reuseaddr TCP:grid-autonomy:8090"
+    ports:
+      - "8090:8090"
+    depends_on:
+      - grid-autonomy
+    restart: unless-stopped
+
+volumes:
+  grid-state:
+    name: grid-state
+  # WT session cookies (wt-session.env) + materialized vault env — written by
+  # docker/vault_loader.sh + browser-debug/wt-login.mjs at runtime.
+  grid-secrets:
+    name: grid-secrets
+  grid-pb:
+    name: grid-pb
+  grid-browser-profile:
+    name: grid-browser-profile
