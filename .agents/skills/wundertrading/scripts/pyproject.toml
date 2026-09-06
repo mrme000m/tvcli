@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wtclient"
+version = "0.4.0"
+description = "Modular, validated, type-safe Python client for WunderTrading"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "tvcli workspace", email = "noreply@local" },
+]
+keywords = ["wundertrading", "trading", "crypto", "grid-bot", "api-client"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Office/Business :: Financial :: Investment",
+]
+dependencies = [
+    "httpx>=0.25",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+# Browser transport (CDP fetch-in-page); only needed for Cloudflare-fingerprinted
+# surfaces (`/en/trader/*` + `:2087`).
+browser = [
+    "websockets>=11",
+]
+# Test-only
+dev = [
+    "pytest>=7",
+    "pytest-asyncio>=0.21",
+    "responses>=0.24",
+    "respx>=0.20",
+]
+
+[project.urls]
+"Source" = "https://github.com/mrme000m/tvcli/tree/main/.agents/skills/wundertrading/scripts/wtclient"
+
+# ------------------------------------------------------------------
+# Console scripts
+# ------------------------------------------------------------------
+[project.scripts]
+wtclient = "wtclient.cli:main"
+
+# ------------------------------------------------------------------
+# Setuptools config — only used when building from source
+# ------------------------------------------------------------------
+[tool.setuptools]
+packages = [
+    "wtclient",
+    "wtclient.clients",
+    "wtclient.models",
+    "wtclient.transport",
+    "wtclient.tests",
+]
+include-package-data = true
+
+[tool.setuptools.package-data]
+wtclient = ["py.typed"]
+
+# ------------------------------------------------------------------
+# Pytest config
+# ------------------------------------------------------------------
+[tool.pytest.ini_options]
+testpaths = ["wtclient/tests"]
+addopts = "-v --tb=short"
+
+# ------------------------------------------------------------------
+# Ruff / lint config — optional, kept minimal so it works without
+# the project's broader tooling.
+# ------------------------------------------------------------------
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+ignore = ["E501"]  # long lines are fine in this codebase
+
+# ------------------------------------------------------------------
+# wtclient-specific metadata exposed via pkgutil-style imports.
+# ------------------------------------------------------------------
+[tool.wtclient]
+surfaces = ["hmac", "mcp", "session", "market", "browser"]
+debug_env_var = "WT_DEBUG"
+dump_dir_env_var = "WT_DEBUG_DUMP_DIR"

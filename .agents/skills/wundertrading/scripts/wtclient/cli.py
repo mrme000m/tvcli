@@ -3,12 +3,23 @@
 Backward-compatible with ``scripts/wt_httpx.py`` plus a ``grid`` command that
 mirrors the useful subset of ``scripts/wt_browser.py``. Every surface supports
 ``--transport raw|browser`` where a browser fallback exists.
+
+The ``discover`` and ``debug`` subcommands expose the discovery + debug
+machinery without writing any Python::
+
+    wtclient discover surfaces                # print the known endpoint index
+    wtclient discover probe GET /open_api/api_profiles?limit=5
+    wtclient debug enable --level DEBUG
+    wtclient debug status
+    wtclient debug list-dumps --limit 5
 """
 from __future__ import annotations
 
 import argparse
 import json
+import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 from .clients.grid import GridClient
@@ -179,6 +190,79 @@ def cmd_curl(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_discover(args: argparse.Namespace) -> int:
+    """Discovery helpers — surface catalog, probe an unknown endpoint."""
+    from .discovery import Probe, surface_index
+
+    if args.action == "surfaces":
+        _print_json(surface_index())
+        return 0
+    if args.action == "probe":
+        secrets = load_secrets()
+        # build a temporary wun facade (mirror WunderTrading.__init__)
+        from .clients.client import WunderTrading
+
+        wun = WunderTrading(browser=args.browser, secrets=secrets)
+        try:
+            probe = Probe(wun)
+            results = probe.try_method(args.method, args.path)
+            out = [
+                {
+                    "surface": r.surface,
+                    "ok": r.ok,
+                    "status": r.status,
+                    "elapsed_ms": round(r.elapsed_ms, 2),
+                    "error": r.error,
+                }
+                for r in results
+            ]
+            _print_json({"method": args.method, "path": args.path, "attempts": out})
+            return 0 if any(r.ok for r in results) else 2
+        finally:
+            wun.close()
+    raise SystemExit(f"unknown discover action {args.action!r}")
+
+
+def cmd_debug(args: argparse.Namespace) -> int:
+    """Debug helpers — show state, dump dir, list captured dumps."""
+    from .debug import STATE, default_dump_dir
+
+    if args.action == "status":
+        _print_json(
+            {
+                "enabled": STATE.enabled,
+                "log_level": logging.getLevelName(STATE.log_level),
+                "dump_dir": str(STATE.dump_dir),
+                "dump_on_failure": STATE.dump_on_failure,
+                "requests_logged": STATE.requests_logged,
+                "captured_dumps": len(STATE.dumps),
+            }
+        )
+        return 0
+    if args.action == "enable":
+        STATE.install(
+            level=getattr(logging, args.level.upper(), logging.INFO),
+            dump_on_failure=not args.no_dump,
+            dump_dir=Path(args.dump_dir) if args.dump_dir else None,
+        )
+        print(
+            f"wtclient debug enabled (level={args.level}, "
+            f"dump_dir={STATE.dump_dir}, dump_on_failure={STATE.dump_on_failure})",
+            file=sys.stderr,
+        )
+        return 0
+    if args.action == "list-dumps":
+        d = default_dump_dir()
+        if not d.exists():
+            print(f"# no dump dir at {d}", file=sys.stderr)
+            return 0
+        files = sorted(d.glob("*.json"))
+        for f in files[-args.limit:]:
+            _print_json({"path": str(f), "size": f.stat().st_size})
+        return 0
+    raise SystemExit(f"unknown debug action {args.action!r}")
+
+
 def _parse_response(response: Any) -> Any:
     try:
         return response.json()
@@ -260,6 +344,31 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("path")
     p.add_argument("--data", dest="data")
     p.set_defaults(func=cmd_curl)
+
+    p = sub.add_parser(
+        "discover",
+        help="discovery machinery — surface catalog, endpoint probe",
+    )
+    p.add_argument("action", choices=["surfaces", "probe"])
+    p.add_argument("method", nargs="?", help="for `probe`: HTTP method")
+    p.add_argument("path", nargs="?", help="for `probe`: path or full URL")
+    p.add_argument(
+        "--browser",
+        action="store_true",
+        help="for `probe`: include the headful browser transport",
+    )
+    p.set_defaults(func=cmd_discover)
+
+    p = sub.add_parser(
+        "debug",
+        help="debug machinery — enable logging, dump-on-failure, list dumps",
+    )
+    p.add_argument("action", choices=["enable", "status", "list-dumps"])
+    p.add_argument("--level", default="INFO", help="log level (DEBUG/INFO/WARN/ERROR)")
+    p.add_argument("--dump-dir", default=None, help="override WT_DEBUG_DUMP_DIR")
+    p.add_argument("--no-dump", action="store_true", help="disable dump-on-failure")
+    p.add_argument("--limit", type=int, default=10, help="for list-dumps")
+    p.set_defaults(func=cmd_debug)
 
     return parser
 

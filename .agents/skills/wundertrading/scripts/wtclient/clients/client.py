@@ -10,6 +10,7 @@ from ..transport.hmac import OpenApiTransport
 from ..transport.market import MarketTransport
 from ..transport.mcp import McpTransport
 from ..transport.session import SessionTransport
+from .bots import BotsClient
 from .grid import GridClient
 from .market import MarketDataClient
 from .mcp import McpClient
@@ -67,13 +68,18 @@ class WunderTrading:
         return GridClient(transport, market=market)
 
     @cached_property
+    def bots(self) -> BotsClient:
+        """signal/dca/mn/mp bots (session-auth, Cloudflare-fingerprinted)."""
+        return BotsClient(self._grid_transport())
+
+    @cached_property
     def market(self) -> MarketDataClient:
         if self.use_browser:
             return MarketDataClient(BrowserTransport(cdp_base=self.cdp_base))
         return MarketDataClient(MarketTransport())
 
     def close(self) -> None:
-        for name in ("rest", "mcp", "grid", "market"):
+        for name in ("rest", "mcp", "grid", "bots", "market"):
             client = self.__dict__.get(name)
             if client is not None:
                 client.transport.close()

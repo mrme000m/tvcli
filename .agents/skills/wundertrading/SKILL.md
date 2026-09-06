@@ -39,6 +39,7 @@ wun = WunderTrading()                      # reads provisioned secret files
 wun.rest.exchanges()                       # HMAC REST, no browser
 wun.mcp.api_profiles(limit=5)              # MCP, no browser
 wun.mcp.export_strategies_history(statuses=["completed"])
+wun.bots.list_active("dca")                # cabinet signal/dca/mn/mp bots
 
 wun = WunderTrading(browser=True)          # needs a running CloakBrowser tab; start it with node browser-debug/launch.mjs
 wun.grid.list()
@@ -51,14 +52,60 @@ any HTTP call (`PlaceStrategyTrade`, `EditTradeStrategy`, `GridUpsertPayload`,
 `takeProfits` portfolios sum to 1, limit-vs-market rules, grid geometry).
 Percent fields accept `0.6` / `"60%"` / `"60"` and canonicalize to `"0.6"`.
 The CLI (`scripts/wt_httpx.py`) is now a thin shim over this package and keeps
-the same command shapes, plus `grid` (browser or raw session) and
-`market --transport browser`. Full layout/extension guide:
-[scripts/wtclient/README.md](scripts/wtclient/README.md). Tests:
+the same command shapes, plus `grid` (browser or raw session),
+`market --transport browser`, `discover`, and `debug`. Full layout/extension
+guide: [scripts/wtclient/README.md](scripts/wtclient/README.md). Tests:
 
 ```bash
 cd .agents/skills/wundertrading/scripts
 python3 -m unittest discover -s wtclient/tests -t . -v
 ```
+
+### Discovery + debug (baked into the client)
+
+The package ships with a recorder, an endpoint catalog, a cross-surface probe,
+and a redacted stderr logger + dump-on-failure writer. Zero overhead when not
+in use:
+
+```python
+import wtclient.debug as dbg
+from wtclient.discovery import Recorder, Probe
+
+# Programmatic: wrap every transport on a wun
+rec = dbg.trace(wun)
+# … drive the UI / run a loop …
+catalog = rec.catalog()                    # grouped by surface/method/path
+for endpoint in catalog:
+    print(endpoint.surface, endpoint.method, endpoint.path,
+          endpoint.calls, f"{endpoint.success_rate:.0%}")
+
+# Probe an arbitrary endpoint across all surfaces
+probe = Probe(wun)
+for r in probe.try_method("GET", "/open_api/api_profiles?limit=5"):
+    print(r.surface, r.status, f"{r.elapsed_ms:.0f}ms", r.error or "")
+```
+
+Or from the CLI:
+
+```bash
+python3 wt_httpx.py discover surfaces                       # known endpoint index
+python3 wt_httpx.py discover probe GET /open_api/api_profiles?limit=5
+python3 wt_httpx.py debug enable --level DEBUG
+python3 wt_httpx.py debug list-dumps --limit 10
+
+# Auto-install logging + dump-on-failure (no Python required):
+WT_DEBUG=1 python3 wt_httpx.py grid list --transport browser
+# failing requests now dump the full redacted exchange to
+# /tmp/wt-debug-dumps/<surface>-<ts>-<uuid>.json
+```
+
+### Adoption outside this repo
+
+Other wt projects can either `pip install -e scripts` (uses
+`pyproject.toml`) or copy the 250-line reference adapter at
+[`agents/grid-autonomy/execution/wt_library.py`](../../agents/grid-autonomy/execution/wt_library.py)
+to get the same `get_wun()`, `grid_list()`, `grid_create(...)` API surface
+without re-implementing the subprocess wrappers.
 
 ## Core workflow
 

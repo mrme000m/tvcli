@@ -1,3 +1,6 @@
-"""wtclient package version."""
+"""wtclient package version.
 
-__version__ = "0.1.0"
+Kept in sync with ``pyproject.toml``. Bump both when releasing.
+"""
+
+__version__ = "0.4.0"
