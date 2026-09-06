@@ -314,3 +314,42 @@ publishing):
   dir); (2) CF "Just a moment…" interstitials on the Azure datacenter IP
   outlasted the 120s login budget (login OK on retry in ~4 min) → entrypoint
   timeout 300s + poll budget 25×3s.
+
+## Phase 6 — GHCR registry transport + cached builds (2026-09-07)
+
+**Problem:** every deploy rebuilt every image layer from scratch on an
+ephemeral runner (~4 min — apt/Xvfb, Node 22, bw CLI, PocketBase, the
+~350MB CloakBrowser bake re-downloaded each time; layer ORDER was good but
+the cache never survived the runner), then streamed the full ~900MB
+compressed image over SSH regardless of what changed.
+
+**Fix (`.github/workflows/grid-autonomy-deploy.yml`):** one build per
+commit via `docker/build-push-action@v6` → `ghcr.io/mrme000m/tvcli/grid-autonomy`
+(linux/amd64, tags `:<sha>` immutable + `:main` moving), with a registry-backed
+layer cache (`cache-from`/`cache-to type=registry, mode=max, ref=:buildcache`)
+— unchanged layers are cache hits, so recurring builds drop to the Go rebuild
+plus source COPYs. Push auth is the workflow's built-in `GITHUB_TOKEN`
+(`permissions: packages: write`; no new GitHub-side secret).
+
+**Transport is a choice, with SSH streaming kept as an optional fallback:**
+
+- `transport=ghcr` (default): the host does a layer-diffed
+  `sudo docker pull :<sha>` — first pull ~900MB once, later deploys tens of
+  MB (new layers only). Requires repo secret `GHCR_PULL_TOKEN` (PAT with
+  `read:packages`), refreshed on the host each deploy via
+  `docker login --password-stdin`.
+- `transport=ssh-stream` (dispatch choice, and the automatic fallback when
+  `GHCR_PULL_TOKEN` is absent): `docker pull` on the runner (the buildkit
+  build never touches the runner daemon) then the original
+  `docker save | gzip -1 | ssh 'gzip -d | sudo docker load'` stream.
+
+Both transports run the same sha-tagged image; restart/health gate are
+unchanged. `vps-run.sh` takes the full image ref via `IMAGE` (same contract),
+and now prunes older SHA-tagged versions of the grid-autonomy image after
+each redeploy (per-SHA tags would otherwise accumulate ~2GB versions on the
+29GB root disk; the running image by full ID, plus `main`/`buildcache`/
+`local` tags, are kept).
+
+**Setup needed once:** create a GitHub PAT with `read:packages` and add it
+as repo secret `GHCR_PULL_TOKEN`. Until then every deploy automatically
+uses the SSH stream (with a `::warning::` in the log) — nothing breaks.

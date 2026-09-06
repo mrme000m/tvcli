@@ -1,10 +1,33 @@
 name: grid-autonomy deploy (az00)
 
-# Deploys the grid-autonomy system to the az00 VPS using the docker image:
-# builds grid-autonomy:local from the repo, streams it (docker save | gzip
-# over SSH — no tarball ever lands on the host's small root disk), loads
-# it, (re)starts the container with the BW_* vault env, and gates on the
-# ctl /health endpoint.
+# Deploys the grid-autonomy system to the az00 VPS. Two transports, one
+# build: the image is built ONCE per commit with docker/build-push-action
+# and pushed to ghcr.io (linux/amd64) tagged with the commit SHA plus a
+# moving `main` tag, with a registry-backed layer cache (cache-from/to
+# type=registry mode=max) so unchanged layers — apt/Xvfb, Node 22, bw CLI,
+# PocketBase, the ~350MB CloakBrowser bake — are cache hits on every
+# subsequent build. Then either:
+#
+#   transport=ghcr (default): the host does a layer-diffed `docker pull`
+#     (tens of MB for a source-only change vs ~900MB for a full stream;
+#     the image still never lands as a tarball on the small root disk).
+#     Requires repo secret GHCR_PULL_TOKEN (PAT with read:packages).
+#
+#   transport=ssh-stream (optional, also the automatic fallback when
+#     GHCR_PULL_TOKEN is absent): docker save | gzip over SSH | docker
+#     load on the host — the original path, no host-side registry auth
+#     needed, but the full ~900MB compressed image crosses the wire
+#     every deploy.
+#
+# Both transports run the same sha-tagged image, so the restart/health
+# steps are identical.
+#
+# GHCR auth:
+#   - push: the workflow's built-in GITHUB_TOKEN (packages:write — the
+#     default permission grant for the repo; no extra secret).
+#   - pull from az00 (ghcr transport only): repo secret GHCR_PULL_TOKEN =
+#     a GitHub PAT with read:packages, docker-logged-in on the host via
+#     stdin each deploy.
 #
 # SSH host config comes from repo secrets:
 #   SSH_HOST         az00 hostname/IP
@@ -52,13 +75,24 @@ on:
         options:
           - dry-run
           - live-paper
+      transport:
+        description: 'How the image reaches the host'
+        type: choice
+        default: 'ghcr'
+        options:
+          - ghcr
+          - ssh-stream
 
 concurrency:
   group: grid-autonomy-deploy
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  packages: write
+
 env:
-  IMAGE: grid-autonomy:local
+  IMAGE: ghcr.io/${{ github.repository }}/grid-autonomy
   NAME: grid-autonomy
   REMOTE_DIR: /opt/grid-autonomy
 
@@ -69,8 +103,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build the image
-        run: docker build -t "$IMAGE" -f docker/Dockerfile .
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          # Immutable per-commit tag is what the host pulls; `main` is the
+          # human-friendly moving tag (and the cache ref anchor).
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          # Registry-backed cache: unchanged layers (apt, Node, bw, the
+          # CloakBrowser bake) are pulled as cache instead of rebuilt.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,mode=max,ref=${{ env.IMAGE }}:buildcache
+
+      - name: Resolve transport
+        run: |
+          TRANSPORT="${{ inputs.transport || 'ghcr' }}"
+          if [ "$TRANSPORT" = "ghcr" ] && [ -z "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+            echo "::warning::GHCR_PULL_TOKEN not set — falling back to SSH streaming"
+            TRANSPORT=ssh-stream
+          fi
+          echo "TRANSPORT=$TRANSPORT" >> "$GITHUB_ENV"
 
       - name: Set up SSH
         run: |
@@ -80,11 +144,31 @@ jobs:
           ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
           echo "SSH_CMD=ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" >> "$GITHUB_ENV"
 
-      - name: Stream the image to the host and load it
+      - name: Log the host into GHCR (idempotent)
+        if: env.TRANSPORT == 'ghcr'
         run: |
-          # ~900MB compressed stream; nothing is written to the host disk
-          # except the loaded image itself.
-          docker save "$IMAGE" | gzip -1 | $SSH_CMD 'gzip -d | sudo docker load'
+          # Refresh the cached docker login each deploy — the PAT may be
+          # rotated or expired since the last one. No-ops if unchanged.
+          printf '%s' '${{ secrets.GHCR_PULL_TOKEN }}' \
+            | $SSH_CMD 'sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin >/dev/null'
+
+      - name: Pull the image on the host
+        if: env.TRANSPORT == 'ghcr'
+        run: |
+          # Layer-diffed pull: unchanged layers are already present from
+          # the previous deploy; only new layers cross the wire.
+          $SSH_CMD 'sudo docker pull "$0"' "${{ env.IMAGE }}:${{ github.sha }}"
+
+      - name: Stream the image to the host and load it (SSH fallback)
+        if: env.TRANSPORT == 'ssh-stream'
+        run: |
+          # The buildkit build never touched the runner daemon — fetch
+          # the just-pushed image locally, then stream it (~900MB
+          # compressed; nothing is written to the host disk except the
+          # loaded image itself).
+          docker pull "${{ env.IMAGE }}:${{ github.sha }}"
+          docker save "${{ env.IMAGE }}:${{ github.sha }}" \
+            | gzip -1 | $SSH_CMD 'gzip -d | sudo docker load'
 
       - name: Write the vault env file on the host
         run: |
@@ -110,7 +194,7 @@ jobs:
           $SSH_CMD "chmod +x $REMOTE_DIR/vps-run.sh"
 
       - name: (Re)start the container
-        run: $SSH_CMD "GRID_MODE='${{ inputs.mode || 'dry-run' }}' IMAGE='$IMAGE' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
+        run: $SSH_CMD "GRID_MODE='${{ inputs.mode || 'dry-run' }}' IMAGE='${{ env.IMAGE }}:${{ github.sha }}' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
 
       - name: Health gate (vault load + browser + WT auth can take minutes)
         run: |
@@ -128,4 +212,4 @@ jobs:
       - name: Deployment report
         if: always()
         run: |
-          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker logs --tail 25 '"$NAME"' 2>&1 | grep -iE "vault|wt |wt-|login|auth|daemon|keeper|console|pocketbase|serve|browser" || true'
+          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head -5; echo; sudo docker logs --tail 25 '"$NAME"' 2>&1 | grep -iE "vault|wt |wt-|login|auth|daemon|keeper|console|pocketbase|serve|browser" || true'

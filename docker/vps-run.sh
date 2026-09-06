@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # vps-run.sh — (re)start the grid-autonomy container on the deployment host.
 # Invoked over SSH by .github/workflows/grid-autonomy-deploy.yml after the
-# image has been streamed in with `docker load`; also runnable by hand on
-# the host. Idempotent: named volumes are created on first use (state,
-# PocketBase, browser profile, secrets, bw-cli all survive redeploys), a
-# running container is stopped GRACEFULLY first (SIGTERM + 60s — never the
-# KILL file), then replaced.
-#
+# image has reached the host (registry pull or docker load); also runnable
+# by hand on the host. Idempotent: named volumes are created on first use
+# (state, PocketBase, browser profile, secrets, bw-cli all survive
+# redeploys), a running container is stopped GRACEFULLY first (SIGTERM +
+# 60s — never the KILL file), then replaced.
+
 # Env:
 #   IMAGE      image to run                       (default grid-autonomy:local)
 #   NAME       container name                     (default grid-autonomy)
@@ -87,5 +87,15 @@ else
   echo "vps-run: no GRID_TUNNEL_TOKEN in $ENV_FILE — public tunnel not managed here"
 fi
 
-# each redeploy's `docker load` orphans the previous image version — clean it
+# image hygiene: drop dangling layers, then remove older SHA-tagged
+# versions of this image left by previous redeploys — the root disk is
+# 29GB and each image version is ~2GB, so accumulation would be fatal.
+# The running image (by full ID) and every other repository are kept;
+# the moving `main` and `buildcache` tags are also kept.
 $DOCKER image prune -f >/dev/null || true
+CUR_IMG="$($DOCKER inspect --format '{{.Image}}' "$NAME" 2>/dev/null || true)"
+for img in $($DOCKER images --format '{{.Repository}}:{{.Tag}}' \
+              | awk -F: '$1 ~ /grid-autonomy$/ && $2 !~ /^(main|buildcache|local|<none>)$/'); do
+  full="$($DOCKER inspect --format '{{.Id}}' "$img" 2>/dev/null || true)"
+  [ -n "$full" ] && [ "$full" != "$CUR_IMG" ] && $DOCKER rmi "$img" >/dev/null 2>&1 || true
+done
