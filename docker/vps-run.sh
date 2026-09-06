@@ -59,3 +59,6 @@ $DOCKER run -d --name "$NAME" \
   "$IMAGE"
 
 echo "vps-run: container up — boot (vault load → browser → WT auth → daemon) takes 1-4 min"
+
+# each redeploy's `docker load` orphans the previous image version — clean it
+$DOCKER image prune -f >/dev/null || true
