@@ -6,7 +6,13 @@ or browser dependency; `bot_trades` is the only network path and it goes
 through the `wt_browser.py` subprocess with a timeout, never raising.
 
 State is persisted as `state/reliability.json`:
-    {"<archetype>": {"samples": n, "profit_factor": p, "recent_pf": r, ...}}
+    {"<archetype>": {"samples": n, "synthetic_samples": m,
+                     "profit_factor": p, "recent_pf": r, ...}}
+
+`samples` counts REAL closed round-trips only; backfilled seed rows
+(strategy_id "backfill-N") are flagged `synthetic` and reported separately
+as `synthetic_samples` — they never influence expectancy / PF / win rate
+or the sizing-escalation ladder (audit-20260906-profit-ledger §d).
 """
 from __future__ import annotations
 
@@ -28,6 +34,12 @@ WT_BROWSER = os.path.join(WUN_SCRIPTS, "wt_browser.py")
 PROFIT_FACTOR_CAP = 99.0
 RECENT_WINDOW = 20
 PNL_SCALE = 10000.0  # positions-history profitLoss is USD × 1e4
+# statuses that close a round-trip with REAL PnL. WT closes stop_and_close_all
+# leftovers as "panic_exited" — skipping them dropped real (usually negative)
+# PnL from realized/reliability accounting (fleet realized overstated ~$0.72,
+# verified live 2026-09-06: full reachable-history vocabulary is exactly
+# {completed, panic_exited}; panic_exited sum was -7229 raw = -$0.7229).
+CLOSED_STATUSES = ("completed", "panic_exited")
 
 # Canonical reliability-ledger keys. Fresh deploys key the ledger by the
 # archetype LABEL the screen emits (universe_screen.ARCHETYPE), but adopted
@@ -109,17 +121,46 @@ def _num(value, default=0.0):
         return default
 
 
+SYNTHETIC_ID_PREFIX = "backfill-"
+
+
+def is_synthetic(trade):
+    """True for seed rows, not fleet evidence.
+
+    Trades backfilled into the archive during the 2026-09-05 audit carry
+    strategy_ids "backfill-N"; they must never inflate the real sample
+    counts that gate the sizing-escalation ladder (audit-20260906).
+    """
+    if not isinstance(trade, dict):
+        return False
+    if trade.get("synthetic"):
+        return True
+    return str(trade.get("strategy_id") or "").startswith(SYNTHETIC_ID_PREFIX)
+
+
+def _mark_synthetic(trade):
+    """Return `trade` with an explicit synthetic flag (read/parse time)."""
+    if isinstance(trade, dict) and is_synthetic(trade) \
+            and not trade.get("synthetic"):
+        out = dict(trade)
+        out["synthetic"] = True
+        return out
+    return trade
+
+
 def parse_trades(items):
     """Completed round-trips from positions-history resources (pure).
 
-    Each returned trade: {pnl_usd, close_ts, entered_at, strategy_id}.
-    Sorted by close time ascending.
+    Each returned trade: {pnl_usd, close_ts, entered_at, strategy_id,
+    synthetic?}. Sorted by close time ascending. Rows whose strategy_id
+    starts with "backfill-" are marked `synthetic: true` (seed data, not
+    fleet evidence — excluded from archetype_stats).
     """
     trades = []
     for it in items or []:
         if not isinstance(it, dict):
             continue
-        if it.get("status") != "completed":
+        if it.get("status") not in CLOSED_STATUSES:
             continue
         close = _ts_epoch(it.get("exitedAt") or it.get("updatedAt")
                           or it.get("enteredAt"))
@@ -133,6 +174,8 @@ def parse_trades(items):
             "close_ts": close,
             "entered_at": it.get("enteredAt"),
             "strategy_id": it.get("strategyId") or it.get("clientId"),
+            "synthetic": str(it.get("strategyId") or it.get("clientId")
+                            or "").startswith(SYNTHETIC_ID_PREFIX),
         })
     trades.sort(key=lambda t: t["close_ts"])
     return trades
@@ -173,7 +216,13 @@ def bot_trades(bot_code):
 
 
 def _stats(trades):
-    trades = list(trades or [])
+    """Stats over REAL trades only: synthetic (backfill-N seed) rows are
+    excluded from every metric and counted separately as
+    `synthetic_samples`, so the sizing-escalation ladder sees fleet
+    evidence only while the console can still show "N real (+M seeded)"."""
+    all_trades = list(trades or [])
+    trades = [t for t in all_trades if not is_synthetic(t)]
+    synthetic_samples = len(all_trades) - len(trades)
     samples = len(trades)
     pnls = [_num(t.get("pnl_usd")) for t in trades]
     wins = [p for p in pnls if p > 0]
@@ -206,6 +255,7 @@ def _stats(trades):
 
     return {
         "samples": samples,
+        "synthetic_samples": synthetic_samples,
         "profit_factor": profit_factor,
         "recent_pf": recent_pf,
         "win_rate": round(len(wins) / samples, 4) if samples else 0.0,
@@ -279,7 +329,9 @@ def archived_by_archetype():
     try:
         with open(ARCHIVE_PATH, encoding="utf-8") as fh:
             archive = json.load(fh)
-        return {arch: [t for t in rows if isinstance(t, dict)]
+        # flag backfill-N seed rows on read (synthetic: true) WITHOUT
+        # rewriting the archive file — library reads are side-effect free
+        return {arch: [_mark_synthetic(t) for t in rows if isinstance(t, dict)]
                 for arch, rows in (archive or {}).items()} if isinstance(archive, dict) else {}
     except (OSError, ValueError):
         return {}

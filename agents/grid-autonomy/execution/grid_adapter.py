@@ -71,11 +71,29 @@ def grid_args(symbol, venue, step_pct, slot_balance, max_alloc,
 
 def compute_upsert(symbol, venue, price, atr_pct, step_pct, grids,
                    amount_per_trade, grid_type, profile_code, pair_code,
-                   band_atr=3.0, leverage=1, exchange_code=None):
+                   band_atr=3.0, leverage=1, exchange_code=None,
+                   take_profit_usd=None, stop_loss_usd=None,
+                   trailing_activation_pct=None, trailing_execute_pct=None,
+                   positions_trailing=False, positions_stop_loss_ratio=None):
     """Pure translator: ATR-band channel + geometric grid lines → upsert JSON.
 
     `exchange_code` overrides the static venue default (e.g. "BINANCE_FUTURES"
-    when the Binance sleeve runs on a futures paper profile)."""
+    when the Binance sleeve runs on a futures paper profile).
+
+    Optional server-enforced risk exits (verified semantics in
+    browser-debug/docs/wt/grid-bot-api.md §9 — the "optional, only when the
+    UI toggles are on" payload block; all default to None/False so existing
+    callers get the exact same payload as before):
+      take_profit_usd / stop_loss_usd — "takeProfit"/"stopLoss" in USD on
+        the bot's cumulative Total PnL ("stopLossPnlCompareType": "total",
+        added once when either is set).
+      trailing_activation_pct + trailing_execute_pct — cumulative-total-PnL
+        trailing stop in % ("trailingStopActivation"/"trailingStopExecute",
+        "trailingStopPnlCompareType": "total"); both must be provided.
+      positions_trailing — "strategyProfitCondition": "trailing_stop":
+        per-position trailing at 30% of the grid step.
+      positions_stop_loss_ratio — "strategyStopLossFixedPercentRatio":
+        per-position stop loss (decimal, e.g. 0.05 = 5%)."""
     band = band_atr * (atr_pct or 0.0) / 100.0
     high = price * (1 + band)
     low = price * (1 - band)
@@ -92,7 +110,7 @@ def compute_upsert(symbol, venue, price, atr_pct, step_pct, grids,
     above = [ln for ln in lines if ln > price]
     closest_low = max(below) if below else lines[0]
     closest_high = min(above) if above else lines[-1]
-    return {
+    payload = {
         "exchangeCode": exchange_code or EXCHANGE_CODE[venue],
         "pairCode": str(pair_code),
         "profilesCodes": [profile_code],
@@ -125,12 +143,37 @@ def compute_upsert(symbol, venue, price, atr_pct, step_pct, grids,
         "pumpProtection": True,
         "pumpProtectionOrderType": "market",
     }
+    # ── server-enforced risk exits (grid-bot-api.md §9) ──────────────
+    # Injected ONLY when provided — the default payload is byte-identical
+    # to the pre-exit contract.
+    if take_profit_usd is not None:
+        payload["takeProfit"] = round(float(take_profit_usd), 2)
+    if stop_loss_usd is not None:
+        payload["stopLoss"] = round(float(stop_loss_usd), 2)
+    if take_profit_usd is not None or stop_loss_usd is not None:
+        # $ thresholds compare against cumulative TOTAL PnL, not realized
+        payload["stopLossPnlCompareType"] = "total"
+    if trailing_activation_pct is not None and trailing_execute_pct is not None:
+        payload["trailingStopActivation"] = float(trailing_activation_pct)
+        payload["trailingStopExecute"] = float(trailing_execute_pct)
+        payload["trailingStopPnlCompareType"] = "total"
+    if positions_trailing:
+        payload["strategyProfitCondition"] = "trailing_stop"
+    if positions_stop_loss_ratio is not None:
+        payload["strategyStopLossFixedPercentRatio"] = float(
+            positions_stop_loss_ratio)
+    return payload
 
 
 def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
                           profile_code, pair_code, exchange_code=None,
                           amount_precision=None, max_affordable_grids=None,
-                          min_cost=None, min_grids=None):
+                          min_cost=None, min_grids=None,
+                          take_profit_usd=None, stop_loss_usd=None,
+                          trailing_activation_pct=None,
+                          trailing_execute_pct=None,
+                          positions_trailing=False,
+                          positions_stop_loss_ratio=None):
     """grid_config math (ATR channel, step, sizing) + upsert translation.
 
     `exchange_code` (from the selected profile's exchange) overrides the
@@ -142,7 +185,10 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
     is never degraded for budget reasons.
     `max_affordable_grids`: last-resort fallback (only when even min_cost
     per line breaks the worst-case cap) — widen the step so the channel
-    fits at most this many lines."""
+    fits at most this many lines.
+    `take_profit_usd`/`stop_loss_usd`/`trailing_*`/`positions_*`: optional
+    server-enforced risk exits — passed through to compute_upsert; all
+    default to None/False (no payload change)."""
     from stagnation import derive_policy  # local import: keeps module light
     symbol = ticket["symbol"]
     venue = ticket["venue"]
@@ -222,10 +268,17 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
         grid["sizing"]["total_commitment_estimate"] = round(
             amount_usd * side_lines, 2)
     mcp = grid_config.build_mcp(symbol, args, m, ticket.get("regime", "neutral"))
+    # server-enforced risk exits thread straight through (None/False
+    # default → no key added; see compute_upsert docstring + §9 semantics)
     upsert = compute_upsert(
         symbol, venue, price, atr, grid["profit_per_grid_pct"], grid["grids"],
         grid["sizing"]["amount_per_trade"], ticket["grid_type"],
-        profile_code, pair_code, exchange_code=exchange_code)
+        profile_code, pair_code, exchange_code=exchange_code,
+        take_profit_usd=take_profit_usd, stop_loss_usd=stop_loss_usd,
+        trailing_activation_pct=trailing_activation_pct,
+        trailing_execute_pct=trailing_execute_pct,
+        positions_trailing=positions_trailing,
+        positions_stop_loss_ratio=positions_stop_loss_ratio)
     policy = None
     try:
         from market_regime import fetch_candles

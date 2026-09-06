@@ -2,30 +2,66 @@
 # The daemon (Phase 4) reads this; all execution stays blocked until
 # execution/guardrails.py passes every gate below.
 
+# ══ CONFIG DERIVATION (audit 2026-09-06, loop-health §d / profit-ledger) ══
+# Platform reality: WT caps demo (paper) grid bots at 5 (account-wide) and
+# the binance free tier at 1 active grid bot — the old 9-slot plan left
+# $200 of the $600 fund in phantom slots 4/6/8/9 (27+ idle slot-hours)
+# while the top screener picks were cap/guard-vetoed. The portfolio is
+# consolidated to the 5-bot reality: 4 hyperliquid slots + 1 binance slot
+# (daemon-side reconcile_slots prunes cap-blocked EMPTY slots at restart;
+# occupied slot ids never change).
+#
+# Sizing math (worst-case = one channel side ≈ half the lines at the
+# exchange $10/line floor; cap = min(autonomy tier, max_alloc_per_slot)):
+#   • The guard-veto "cannot fund ≥5 lines at $10 within 50% worst-case
+#     cap" fired 21× on CASHCAT-class tokens (24–31%/24h net harvest):
+#     full-density grids there need 16–18 lines → side_lines 8–9 × $10
+#     = $80–90 worst-case. At the old $100 slots the cap was $50 → veto.
+#   → min_slot_usd 180: 0.5 × 180 = $90 worst-case cap admits 18 lines
+#     × $10 (fit_grids = 2×90/10) with zero density loss, and even the
+#     base tier (0.25 × 180 = $45 → per-line floored to $10) funds
+#     worst ≈ $80 ≤ $90 without the density-first re-fit.
+#   • Binance slot sized to GIGGLE's actual needs: 10–12 lines × $10 →
+#     worst ≈ $50–60 → $120 slot = $60 cap covers full density.
+#   • Total worst-case at full re-deploy: 4 × $90 (HL) + $60 (BN) = $420
+#     ≤ deployable ceiling 600 × 0.85 = $510 ✓ (headroom $90 = one more
+#     dynamic HL slot at the floor).
+#   • Sleeves 480 + 120 = 600 = total_usd: for dynamic HL the
+#     min_slot_usd floor dominates the sleeve split (480/4 = 120 < 180),
+#     which is the documented dynamic-mode design — capital, not the
+#     sleeve, is the binding constraint, enforced per-deploy by the
+#     committed-vs-ceiling guardrail.
+#   • NO guardrail weakened: max_alloc_per_slot stays 0.50 (hard worst-
+#     case cap per slot), cash_buffer_pct stays 0.15, the 8 fail-closed
+#     guardrail checks and the never-close-at-a-loss rule are untouched.
 portfolio:
   total_usd: 600.0
   venues:
-    hyperliquid: { balance_usd: 400.0, market: perps, grids: [Long, Short, Neutral] }
-    binance:     { balance_usd: 200.0, market: spot,  grids: [Long, Neutral] }  # spot-like sleeve: NO Short (kept even on the futures paper stand-in)
+    hyperliquid: { balance_usd: 480.0, market: perps, grids: [Long, Short, Neutral] }
+    binance:     { balance_usd: 120.0, market: spot,  grids: [Long, Neutral] }  # spot-like sleeve: NO Short (kept even on the futures paper stand-in)
   slots_min: 3
-  slots_max: 6                  # slot-count ceiling for FIXED venues only
+  slots_max: 5                  # slot-count ceiling for FIXED venues only
                                 # (everything not in dynamic_slot_venues)
-  slots_hard_max: 16            # absolute runaway guard for DYNAMIC venues
+  slots_hard_max: 9             # absolute runaway guard for DYNAMIC venues
                                 # — the real ceiling there is capital
+                                # (5 planned slots + dynamic-open headroom;
+                                # each new slot needs its $ worst-case in
+                                # spare deployable capital anyway)
   dynamic_slot_venues: [hyperliquid]
                                 # DEFAULT DYNAMIC MODE: HL slots open as long
                                 # as there is a profitable opportunity
                                 # (score ≥ screen.open_slot_min_score) AND
                                 # enough spare deployable capital. Capital is
                                 # the ceiling, not a slot count.
-  min_slot_usd: 100.0           # per-slot budget floor for dynamic opens —
-                                # the exchange $10/line floor needs ≥$100/
-                                # slot for a 50%-worst-case grid, so the
-                                # sleeve (400) funds 4 × $100; further slots
-                                # draw from portfolio spare capital
+  min_slot_usd: 180.0           # per-slot budget floor for dynamic opens —
+                                # unlocks the $80–90 worst-case band the
+                                # CASHCAT-class tokens need at the $10/line
+                                # exchange floor (see derivation above)
   slots_default: 4
   max_alloc_per_slot: 0.5      # worst-case commitment ≤ 50% of slot
+                                # (UNCHANGED — no guardrail weakened)
   cash_buffer_pct: 0.15        # portfolio deployable ceiling = 85% of 600
+                                # (UNCHANGED): total worst-case 420 ≤ 510 ✓
 
 screen:
   presets: [grid-neutral, grid-directional]
@@ -92,7 +128,11 @@ grid_defaults:                 # passed through to grid_config.py
   # the slot recycled. WT's native takeProfit field is accepted but NOT
   # enforced server-side for grid bots yet — the daemon owns the exit.
   # 0 disables. Never closes a losing line (see the loss-veto rule).
-  take_profit_pct: 0.10
+  # 0.10 × $100 slot = $10/bot was never reached (max cumulative PnL in
+  # 11.5 h: $0.58 — ~50 days to target, zero profit-exits ever fired);
+  # 0.04 × $180 = $7.2 recycles a winning bot in ~15–20 days at current
+  # fill rates while keeping the all-lines-≥0 refinement (audit §d).
+  take_profit_pct: 0.04
 
 llm:
   chain: [cf, nvidia, openrouter]   # GRID_LLM_CHAIN env overrides order
@@ -122,6 +162,19 @@ reliability:                   # Phase G gates before any live scale-up
 watch:                         # daemon health-poll loop (Phase 4)
   interval_s: 60               # observe_all poll cadence
   adjust_steps_threshold: 2.0  # in-place adjust once price drifts >2 grid steps from mid
+  adjust_cooldown_h: 2.0       # per-bot grid-edit rate limit (was hardcoded
+                               # 6 h — audit: a Δ+205.75% recenter rec sat
+                               # ~4 h behind the window). Shared window:
+                               # manual recenters AND position-optimizer
+                               # applies write the same last_adjust clock.
+                               # Verified 2026-09-06 from journal evidence:
+                               # WT applies NO server-side edit rate limit
+                               # (successful same-bot edits observed 3.8 h
+                               # and 4.2 h apart: GRAM 03:24→07:13→11:24Z)
+                               # — this daemon-side window is the ONLY edit
+                               # limiter. Failed edits are retried after a
+                               # 10-min backoff, not treated as applied.
+  pnl_snapshot_interval_s: 300 # fleet PnL journal cadence (0 = off)
   browser_cdp: http://127.0.0.1:9222      # CloakBrowser CDP probe (WT session-API transport)
   browser_restart_cooldown_s: 600         # watchdog relaunch at most every 10 min
   # The WT cookie session lives in the minimal-mjs browser profile — relaunch
@@ -177,3 +230,31 @@ guardrails:                    # ALL must pass or deployment is refused (fail-cl
 server:
   tvcli: http://127.0.0.1:8765
   daemon_port: 8799
+
+position_optimizer:           # slow-loop position revaluation (position_optimizer.py)
+                               # — ADVISORY by default: apply: false means recs are
+                               # journaled/persisted but never auto-edit WunderTrading
+  enabled: true
+  interval_min: 15             # manage-loop cadence for cycle() (min 1)
+  cooldown_min: 60            # per-bot re-analysis cooldown
+  min_improvement_pct: 2.0    # journal/persist gate on expected_delta —
+                               # AND the daemon-side apply gate
+  apply: true                  # edit-type GEOMETRY recs only (recenter/
+                               # widen/narrow/resize/revalue-grid): applied
+                               # via the existing grid-edit path when the
+                               # improvement gate, the shared 2 h adjust
+                               # rate limit and the daily cap allow. Exit
+                               # recs (add-take-profit/add-trailing/add-
+                               # stop-loss) stay advisory + journal-only,
+                               # never auto-applied, and exit keys are
+                               # stripped from applied geometry payloads.
+  max_apply_per_day: 4        # daemon-side auto-edits per calendar day
+  stop_loss_enabled: false     # grids are mean-reversion: off by default
+  take_profit_pct: 0.04        # × slot balance = USD profit-exit target
+                               # (mirrors grid_defaults.take_profit_pct)
+  trailing_activation_pct: 5.0   # cumulative PnL % of slot to arm trail
+  trailing_execute_pct: 2.0      # give-back % that executes the trail
+  positions_trailing: true       # per-position trailing preference
+  band_atr: 3.0                # ATR multiples each side of price
+  drift_steps: 2.0             # recenter after N × step_pct drift
+  atr_change_pct: 15.0         # widen/narrow after N% channel-width change

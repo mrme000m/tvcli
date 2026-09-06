@@ -93,3 +93,13 @@ tools/stealth-browser-mcp/
 
 # Firecrawl research scrape artifacts (one-off, not source)
 .firecrawl/
+
+# grid-autonomy watchdog runtime state (source docs are tracked; these are artifacts)
+agents/grid-autonomy/watchdog/LEDGER.jsonl
+agents/grid-autonomy/watchdog/STATE.md
+agents/grid-autonomy/watchdog/LAST_FOREIGN_CHECK
+agents/grid-autonomy/watchdog/snapshots/
+agents/grid-autonomy/watchdog/reviews/
+
+# console UI screenshots (session artifacts)
+console-*.png

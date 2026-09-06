@@ -445,7 +445,7 @@ a { color: var(--teal-deep); }
 .slot-metrics {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 8px;
+  gap: 8px 12px;
   padding: 12px 14px 4px;
 }
 
@@ -1283,4 +1283,163 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
   .slot-metrics { grid-template-columns: repeat(2, 1fr); }
   .field { grid-template-columns: 1fr 110px; }
   .field .f-range { display: none; }
+}
+
+
+/* ── fleet PnL header (true net / realized split / capital / demo cap) ── */
+
+.pnl-header { padding: 16px 18px; }
+
+.pnl-header-grid {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.1fr) minmax(320px, 2.2fr) minmax(280px, 1.4fr);
+  gap: 18px;
+  align-items: stretch;
+}
+
+.pnl-hero {
+  border-right: 1.5px solid var(--rule);
+  padding-right: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+}
+
+.pnl-hero-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.pnl-hero-note { color: var(--ink-faint); text-transform: none; letter-spacing: 0; }
+
+.pnl-hero-value {
+  font-family: var(--font-mono);
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.pnl-cells {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 10px 18px;
+  align-content: center;
+}
+
+.pnl-cell { min-width: 0; }
+
+.pnl-sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+  margin-top: 2px;
+}
+
+.pnl-sub--faint { color: var(--ink-faint); font-style: italic; }
+
+.pnl-pct { color: var(--ink-faint); font-weight: 400; font-size: 12px; }
+
+.cap-meter .m-value, .cap-meter .m-label { margin-bottom: 1px; }
+
+.cap-bar {
+  height: 8px;
+  border-radius: 4px;
+  background: var(--panel-deep);
+  border: 1px solid var(--rule);
+  overflow: hidden;
+  margin: 3px 0;
+}
+
+.cap-fill {
+  height: 100%;
+  background: var(--teal);
+  transition: width 0.4s ease;
+}
+
+.cap-meter--full .cap-fill { background: var(--crimson); }
+
+.cap-label {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--ink-soft);
+}
+
+.cap-meter--full .cap-label { color: var(--crimson); }
+
+.pnl-chart {
+  border-left: 1.5px solid var(--rule);
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pnl-chart canvas { display: block; max-width: 100%; }
+
+/* ── veto / system-health strip ───────────────────────────────────── */
+
+.veto-strip { padding: 8px 14px; }
+
+.veto-cells {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.veto-chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 10px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--ink-soft);
+  white-space: nowrap;
+}
+
+.veto-chip b { color: var(--ink); }
+
+.veto-chip--warn {
+  border-color: var(--amber);
+  background: var(--amber-wash);
+  color: var(--amber);
+}
+
+.veto-chip--warn b { color: var(--amber); }
+
+.veto-chip--dim { color: var(--ink-faint); }
+
+/* ── slot-card PnL sub-lines ──────────────────────────────────────── */
+
+.m-sub {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  color: var(--ink-soft);
+  margin-top: 1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.m-sub-inline { font-size: 10px; color: var(--ink-faint); font-weight: 400; }
+
+.banner--warn { border-color: var(--amber); background: var(--amber-wash); }
+
+/* ── responsive ────────────────────────────────────────────────────── */
+
+@media (max-width: 1180px) {
+  .pnl-header-grid { grid-template-columns: 1fr; }
+  .pnl-hero { border-right: none; border-bottom: 1.5px solid var(--rule);
+    padding: 0 0 12px; }
+  .pnl-chart { border-left: none; border-top: 1.5px solid var(--rule);
+    padding: 12px 0 0; }
 }

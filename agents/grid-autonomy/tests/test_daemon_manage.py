@@ -573,6 +573,44 @@ class ManageTestCase(ManageHarness):
         self.assertEqual(edits, [("edit", "B1", False)])
         self.assertIn("1", d.state["last_adjust"])
 
+    def test_adjust_uses_stored_exchange_code_not_static_default(self):
+        # regression (2026-09-06 12:50:57Z live 400): a binance-venue bot on
+        # the BINANCE_FUTURES paper profile must edit with gridMarket=
+        # derivative — the stored deploy upsert's exchangeCode decides, not
+        # the static venue default (BINANCE → spot → missing investmentRef)
+        d = self.make_daemon()
+        self._seed_adjust_bot(d)
+        d.state["active_bots"]["1"]["venue"] = "binance"
+        d.state["active_bots"]["1"]["upsert"]["exchangeCode"] = "BINANCE_FUTURES"
+        seen = {}
+
+        def capture(symbol, venue, price, atr_pct, step_pct, grids, amount,
+                    grid_type, profile_code, pair_code, exchange_code=None):
+            seen["exchange_code"] = exchange_code
+            return make_payloads(pair=pair_code)["upsert"]
+
+        with mock.patch("daemon.grid_adapter.compute_upsert", capture), \
+                mock.patch("daemon.log"):
+            d.adjust_bot("1", dry_run=False)
+        self.assertEqual(seen.get("exchange_code"), "BINANCE_FUTURES")
+
+    def test_adjust_skip_journaled_at_most_hourly(self):
+        d = self.make_daemon()
+        self._seed_adjust_bot(d)
+        d.adjust_bot("1", dry_run=False)  # real edit
+        d.adjust_bot("1", dry_run=False)  # rate limited — journal #1
+        d.adjust_bot("1", dry_run=False)  # rate limited — suppressed
+        d.adjust_bot("1", dry_run=False)  # rate limited — suppressed
+        skips = [j for j in d.state["journal"]
+                 if j.get("kind") == "adjust-skip"]
+        self.assertEqual(len(skips), 1)
+        # one hour later the skip journals again (visibility)
+        d._adjust_skip_logged["1"] -= 3601
+        d.adjust_bot("1", dry_run=False)
+        skips = [j for j in d.state["journal"]
+                 if j.get("kind") == "adjust-skip"]
+        self.assertEqual(len(skips), 2)
+
     def test_adjust_skip_without_bot_code(self):
         d = self.make_daemon()
         self._seed_adjust_bot(d)
@@ -581,6 +619,52 @@ class ManageTestCase(ManageHarness):
         self.assertEqual([op for op in self.ops if op[0] == "edit"], [])
 
     # ── first-run adoption ───────────────────────────────────────────────
+    def test_adopt_sets_committed_and_clears_tracker(self):
+        d = self.make_daemon()
+        # stale tracker from a previous occupant of the adopt slot
+        d.state.setdefault("optimizer", {})["trackers"] = {
+            "3": {"last_fills": 5, "last_increase_at": 1.0}}
+        self.grid_status_ret = [{"code": "ADOPT2", "paperTrading": True,
+                                 "status": "active", "exchange": "BINANCE",
+                                 "pair": "BTCUSDT"}]
+        d.adopt_existing(dry_run=True)
+        slot_key = next(k for k, v in d.state["active_bots"].items()
+                        if v.get("bot_code") == "ADOPT2")
+        self.assertIn(slot_key, d.state["committed"])  # worst-case claimed
+        self.assertNotIn(slot_key, d.state["optimizer"]["trackers"])
+
+    def test_reconcile_heals_tracker_predating_bot_deploy(self):
+        import time as _t
+        from datetime import datetime, timezone
+        d = self.make_daemon()
+        now = _t.time()
+        d.state["active_bots"]["1"] = {
+            "venue": "hyperliquid", "symbol": "NEW",
+            "since": datetime.fromtimestamp(now, timezone.utc)
+            .isoformat()}
+        trackers = d.state.setdefault("optimizer", {})["trackers"] = {
+            # stale: counter older than the bot's deploy
+            "1": {"last_fills": 3, "last_increase_at": now - 272 * 60},
+            # fresh: counter newer than the bot's deploy — must stay
+            "2": {"last_fills": 1, "last_increase_at": now + 60}}
+        d.state["active_bots"]["2"] = {
+            "venue": "hyperliquid", "symbol": "OLD",
+            "since": datetime.fromtimestamp(now, timezone.utc)
+            .isoformat()}
+        d.reconcile_slots()
+        self.assertNotIn("1", trackers)   # stale inheritance cleared
+        self.assertIn("2", trackers)      # genuine tracker kept
+
+    def test_reconcile_heals_missing_committed_for_active_bots(self):
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "venue": "hyperliquid", "symbol": "CHIP", "bot_code": "X"}
+        d.state["committed"] = {}  # adopted bot never committed
+        d.reconcile_slots()
+        mc = next(s.get("max_commitment") for s in d.state["slots"]
+                  if str(s["slot"]) == "1")
+        self.assertEqual(d.state["committed"].get("1"), mc)
+
     def test_adopt_existing_paper_bot(self):
         d = self.make_daemon()
         self.grid_status_ret = [{"code": "ADOPT1", "paperTrading": True,

@@ -23,12 +23,22 @@ API (all JSON):
     GET  /api/journal?limit=  journal tail (newest last, as stored)
     GET  /api/decisions?limit=decisions.jsonl tail (newest first)
     GET  /api/reliability     archetype ledger + sizing-tier computation
+    GET  /api/recommendations?limit=  position-optimizer recommendations
+                              (PocketBase records, newest first)
     GET  /api/screen          latest rescreen run card extract
     GET  /api/reports         run-card index
     GET  /api/reports/<stem>  one run card {json, md}
     GET  /api/logs?lines=&grep=  daemon.log tail
     GET  /api/config          parsed config.yaml + editable whitelist
-    GET  /api/observe         proxy of the daemon ctl /observe
+    GET  /api/observe         proxy of the daemon ctl /observe (5s cache,
+                              fail-soft: {"error": ...} + 200 when down)
+    GET  /api/status          proxy of the daemon ctl /status  (5s cache,
+                              fail-soft: {"error": ...} + 200 when down)
+    GET  /api/pnl             PnL history — PocketBase `journal` records of
+                              kind "pnl-snapshot" (authed via .pocketbase/
+                              pb.env when public read is empty), falling
+                              back to state.json's journal array
+                              → {points: [{at, fleet{…}}]} newest-first
     GET  /api/meta            ports, paths, versions
     POST /api/ctl/rescreen    queue an immediate rescreen     {confirm}
     POST /api/ctl/reliability queue a reliability refresh     {confirm}
@@ -294,6 +304,119 @@ def _ctl(path, method="GET", body=None):
     return _http_json(f"http://127.0.0.1:{_ctl_port()}{path}", 3.0, method, body)
 
 
+# ── ctl-plane proxy cache (≤5s: several panels share one /status) ──────
+
+_CTL_TTL = 5.0
+_CTL_CACHE: dict = {}
+
+
+def _ctl_cached(path):
+    """GET a ctl resource with a ≤5s cache so parallel console panels
+    (overview, fleet header, status proxy) reuse one daemon round-trip."""
+    now = time.time()
+    hit = _CTL_CACHE.get(path)
+    if hit and hit[0] > now:
+        return hit[1], hit[2]
+    ok, body = _ctl(path)
+    _CTL_CACHE[path] = (now + _CTL_TTL, ok, body)
+    return ok, body
+
+
+# ── PocketBase side-channel access (journal `pnl-snapshot` history) ────
+
+PB_ENV_PATH = os.path.join(GRID_HOME, ".pocketbase", "pb.env")
+
+
+def _pb_env() -> dict:
+    """Parse the local PB sidecar env file into {KEY: value} ({} if absent).
+
+    Values are used for Authorization only and are never returned by any
+    console endpoint."""
+    env = {}
+    try:
+        with open(PB_ENV_PATH) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, val = line.removeprefix("export ").partition("=")
+                key = key.strip()
+                val = val.strip().strip('"').strip("'")
+                if key:
+                    env[key] = val
+    except OSError:
+        pass
+    return env
+
+
+def _pb_get(url, timeout=2.5, token=None):
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", token)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return True, json.loads(resp.read() or b"{}")
+    except Exception as exc:
+        return False, {"error": str(exc)[:200]}
+
+
+def _pnl_points(items) -> list:
+    """Normalize journal records/events of kind pnl-snapshot into
+    [{at, fleet}] — tolerant of the payload living at the top level, in
+    `extra` (the PB journal collection's free field), or being absent
+    entirely (pre-restart daemon)."""
+    pts = []
+    for r in items or []:
+        if not isinstance(r, dict):
+            continue
+        fleet = r.get("fleet")
+        bots = r.get("bots")
+        extra = r.get("extra")
+        if isinstance(extra, str):
+            try:
+                extra = json.loads(extra)
+            except Exception:
+                extra = None
+        if not isinstance(fleet, dict) and isinstance(extra, dict):
+            fleet = extra.get("fleet")
+            bots = bots or extra.get("bots")
+        pts.append({"at": r.get("at"),
+                    "fleet": fleet if isinstance(fleet, dict) else None,
+                    "bots": bots if isinstance(bots, dict) else None})
+    pts.sort(key=lambda p: p.get("at") or "", reverse=True)
+    return pts[:200]
+
+
+def pnl_payload() -> dict:
+    """PnL history for the timeline: newest-first pnl-snapshot points.
+
+    Primary source: the PB `journal` collection (filter kind='pnl-snapshot',
+    sort=-at, perPage=200) — public read first, then authed via the local
+    .pocketbase/pb.env sidecar when the public read comes back empty.
+    Fallback: state.json's journal array (the daemon keeps the last 200
+    events in-process). Missing kind entirely → empty points list, which is
+    a valid response (daemon pre-restart)."""
+    from urllib.parse import quote
+    flt = quote("(kind='pnl-snapshot')")
+    url = (f"{PB_URL}/api/collections/journal/records"
+           f"?perPage=200&sort=-at&filter={flt}")
+    ok, body = _pb_get(url)
+    items = (body or {}).get("items") if ok and isinstance(body, dict) else None
+    if not items:
+        token = _pb_env().get("PB_TOKEN")
+        if token:
+            ok, body = _pb_get(url, token=token)
+            items = (body or {}).get("items") if ok and isinstance(body, dict) else None
+    if isinstance(items, list) and items:
+        return {"points": _pnl_points(items), "source": "pocketbase",
+                "total": (body or {}).get("totalItems")}
+    st = _load_state()
+    evs = [e for e in (st.get("journal") or [])
+           if isinstance(e, dict) and e.get("kind") == "pnl-snapshot"]
+    return {"points": _pnl_points(evs), "source": "state",
+                "total": len(evs)}
+
+
 # ── daemon lifecycle helpers ───────────────────────────────────────────
 
 def _pid() -> int | None:
@@ -411,14 +534,30 @@ def _tier(stats: dict) -> str:
 
 
 def reliability_payload() -> dict:
-    ledger = _read_json(os.path.join(STATE_DIR, "reliability.json"), {}) or {}
+    path = os.path.join(STATE_DIR, "reliability.json")
+    ledger = _read_json(path, {}) or {}
+    age_h = None
+    try:
+        age_h = round((time.time() - os.path.getmtime(path)) / 3600.0, 1)
+    except OSError:
+        pass
     archs = {}
     for arch, st in ledger.items():
         if isinstance(st, dict):
             st = dict(st)
             st["tier"] = _tier(st)
+            # real (lived) samples vs synthetic/seeded backfill — the
+            # aggregates still include both, so the UI flags pollution.
+            synth = st.get("synthetic_samples")
+            st["real_samples"] = (max(0, (st.get("samples") or 0)
+                                      - synth) if isinstance(synth, (int, float))
+                                  else st.get("samples"))
             archs[arch] = st
-    return {"ladder": LADDER, "archetypes": archs}
+    # the ledger is a snapshot refreshed by the daemon's health cycle;
+    # past the 24h refresh cadence (+grace) it is stale evidence.
+    return {"ladder": LADDER, "archetypes": archs,
+            "ledger_age_h": age_h, "stale": bool(age_h is not None and age_h > 26),
+            "refresh_cadence_h": 24}
 
 
 def _enriched_bots(st: dict) -> list[dict]:
@@ -496,6 +635,43 @@ def decisions_payload(limit: int) -> list[dict]:
             continue
     rows.sort(key=lambda r: r.get("at") or "", reverse=True)
     return rows[:max(1, min(limit, 1000))]
+
+
+def recommendations_payload(limit: int) -> dict:
+    """Position-optimizer recommendations from the PocketBase side channel
+    (newest first). Non-fatal: an empty list when PB is down or the
+    collection does not exist yet. Sorted by the engine's ISO `at` field —
+    PB 0.40 has no auto `created` system field, so `sort=-created` 400s."""
+    limit = max(1, min(limit, 500))
+    ok, body = _http_json(
+        f"{PB_URL}/api/collections/recommendations/records"
+        f"?perPage={limit}&sort=-at", 2.0)
+    items = (body or {}).get("items") if ok and isinstance(body, dict) else None
+    items = [dict(r) for r in items if isinstance(r, dict)] \
+        if isinstance(items, list) else []
+
+    # Enrich each record with the apply-gate verdict so the UI can say WHY
+    # a recommendation is sitting unapplied: config `apply: false` (advisory
+    # mode), the persisted-per-day cap, or already applied.
+    cfg = (config_payload().get("config") or {}).get("position_optimizer") or {}
+    apply_enabled = bool(cfg.get("apply"))
+    max_day = cfg.get("max_apply_per_day") or 4
+    today = utcnow()[:10]
+    persisted_today = sum(1 for r in items
+                          if str(r.get("at") or "").startswith(today))
+    for r in items:
+        r.setdefault("applied", False)
+        r.setdefault("applied_at", None)
+        if r.get("applied"):
+            r["blocked_by"] = "applied"
+        elif not apply_enabled:
+            r["blocked_by"] = "apply disabled"
+        elif persisted_today >= max_day:
+            r["blocked_by"] = "rate limit"
+        else:
+            r["blocked_by"] = ""
+    return {"recommendations": items, "apply": apply_enabled,
+            "max_apply_per_day": max_day, "persisted_today": persisted_today}
 
 
 def reports_index() -> list[dict]:
@@ -841,7 +1017,7 @@ def validate_llm() -> tuple[int, dict]:
 
 def overview_payload() -> dict:
     st = _load_state()
-    ok_status, ctl_status = _ctl("/status")
+    ok_status, ctl_status = _ctl_cached("/status")
     daemon = daemon_info()
     pb_ok, _pb_body = _http_json(f"{PB_URL}/api/health", 1.5)
     committed = st.get("committed") or {}
@@ -1119,12 +1295,23 @@ class Handler(BaseHTTPRequestHandler):
                              decisions_payload(int(q1("limit", 100)))})
         elif route == "/api/reliability":
             self._json(200, reliability_payload())
+        elif route == "/api/recommendations":
+            self._json(200, recommendations_payload(
+                int(q1("limit", 100))))
         elif route == "/api/screen":
             self._json(200, {"screen": screen_payload()})
         elif route == "/api/observe":
-            ok, body = _ctl("/observe")
-            self._json(200 if ok else 502, body if ok else
+            ok, body = _ctl_cached("/observe")
+            # fail-soft: degrade with a 200 + {"error": ...} so the UI can
+            # keep rendering last-persisted state when the daemon is down
+            self._json(200, body if ok else
                        {"error": "ctl unreachable", "detail": body})
+        elif route == "/api/status":
+            ok, body = _ctl_cached("/status")
+            self._json(200, body if ok else
+                       {"error": "ctl unreachable", "detail": body})
+        elif route == "/api/pnl":
+            self._json(200, pnl_payload())
         elif route == "/api/reports":
             self._json(200, {"reports": reports_index()})
         elif route.startswith("/api/reports/"):
@@ -1291,10 +1478,13 @@ def main():
     # SuccessfulExit=false) does not treat a stop as a crash and restart it.
     import signal
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
-    srv = ThreadingHTTPServer(("127.0.0.1", CONSOLE_PORT), Handler)
+    # Bind host is env-overridable for containers (docker -p needs 0.0.0.0
+    # inside the container; the local default stays loopback-only).
+    _bind_host = os.environ.get("GRID_BIND_HOST", "127.0.0.1")
+    srv = ThreadingHTTPServer((_bind_host, CONSOLE_PORT), Handler)
     SERVER = srv
     srv.started = utcnow()
-    print(f"grid-autonomy console on http://127.0.0.1:{CONSOLE_PORT} "
+    print(f"grid-autonomy console on http://{_bind_host}:{CONSOLE_PORT} "
           f"(ctl :{_ctl_port()}, state {STATE_DIR})", flush=True)
     try:
         srv.serve_forever()

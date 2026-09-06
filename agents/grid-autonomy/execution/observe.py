@@ -246,13 +246,21 @@ def _ts_epoch(value):
             return None
 
 
+# statuses that close a round-trip with REAL PnL — WT closes
+# stop_and_close_all leftovers as "panic_exited" and their profitLoss must
+# count toward realized_pnl (verified live 2026-09-06: reachable-history
+# vocabulary is exactly {completed, panic_exited}). Same set as
+# reliability_grid.CLOSED_STATUSES — keep the two in sync.
+CLOSED_STATUSES = ("completed", "panic_exited")
+
+
 def _closed_round_trips(history):
-    """Completed round-trip resources with a UTC close time, newest first."""
+    """Closed round-trip resources with a UTC close time, newest first."""
     trips = []
     for res in history:
         if not isinstance(res, dict):
             continue
-        if res.get("status") != "completed":
+        if res.get("status") not in CLOSED_STATUSES:
             continue
         close = _ts_epoch(res.get("exitedAt") or res.get("updatedAt")
                           or res.get("enteredAt"))
@@ -335,7 +343,14 @@ def _ladder_full(bot, res, open_positions):
 def observe_all(active_bots):
     """`{slot: {status, price, fills_24h, realized_ratio, unrealized_pnl,
                  ladder_full, dd_vs_atr_band, open_lines, open_losing,
-                 error?}}` for active bots.
+                 realized_pnl, trips_completed, trips_panic,
+                 realized_pnl_completed, realized_pnl_panic, error?}}`
+    for active bots.
+
+    `trips_completed` / `trips_panic` and `realized_pnl_completed` /
+    `realized_pnl_panic` split the closed-trip history by close status:
+    clean grid round-trips (`completed`) vs stop/close-all exits
+    (`panic_exited`). `realized_pnl` stays the TOTAL (completed+panic).
 
     `open_lines` / `open_losing`: count of open grid lines and how many of
     them would realize a NET loss if closed at the current mark (per-line
@@ -369,7 +384,9 @@ def _observe_one(bot, by_code, list_ok=True):
         return {"error": "no bot_code", "status": "unknown", "price": None,
                 "fills_24h": 0, "realized_ratio": 0.0, "unrealized_pnl": None,
                 "ladder_full": False, "dd_vs_atr_band": 0.0,
-                "open_lines": 0, "open_losing": 0}
+                "open_lines": 0, "open_losing": 0, "realized_pnl": 0.0,
+                "trips_completed": 0, "trips_panic": 0,
+                "realized_pnl_completed": 0.0, "realized_pnl_panic": 0.0}
     res = by_code.get(bot_code) or {}
     status = res.get("status") or "unknown"
 
@@ -409,6 +426,10 @@ def _observe_one(bot, by_code, list_ok=True):
     fills_24h = 0
     now = time.time()
     realized_pnl = 0.0
+    trips_completed = 0
+    trips_panic = 0
+    realized_completed = 0.0
+    realized_panic = 0.0
     for trip in _closed_round_trips(history):
         age = now - trip["close"]
         if 0 <= age <= FILLS_WINDOW_S:
@@ -416,8 +437,21 @@ def _observe_one(bot, by_code, list_ok=True):
         # realized USD over the bot's WHOLE life (positions-history
         # profitLoss is PNL-scaled by 10000 — verified live); with the mark
         # PnL this is the cumulative Total PnL the profit-exit targets
-        realized_pnl += _number(trip["res"].get("profitLoss")) / 10000.0
+        pnl = _number(trip["res"].get("profitLoss")) / 10000.0
+        realized_pnl += pnl
+        # split by close status so the console/ledger can show how much of
+        # the realized total came from clean grid round-trips vs
+        # stop/close-all (panic_exited) exits — the two behave differently
+        # for reliability accounting (audit-20260906)
+        if trip["res"].get("status") == "panic_exited":
+            trips_panic += 1
+            realized_panic += pnl
+        else:
+            trips_completed += 1
+            realized_completed += pnl
     realized_pnl = round(realized_pnl, 4)
+    realized_pnl_completed = round(realized_completed, 4)
+    realized_pnl_panic = round(realized_panic, 4)
 
     policy = bot.get("stagnation_policy") or {}
     expected = _number(policy.get("expected_fills_per_24h"), 0.0)
@@ -452,6 +486,10 @@ def _observe_one(bot, by_code, list_ok=True):
         "open_lines": open_lines,
         "open_losing": open_losing,
         "realized_pnl": realized_pnl,
+        "trips_completed": trips_completed,
+        "trips_panic": trips_panic,
+        "realized_pnl_completed": realized_pnl_completed,
+        "realized_pnl_panic": realized_pnl_panic,
     }
     if not res:
         obs["error"] = ("grid status list unavailable (browser/session down)"

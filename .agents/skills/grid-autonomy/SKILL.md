@@ -63,6 +63,28 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
   deployable challenger nudge a rescreen (capital opens stay there).
   Journal kinds: `optimizer-idle/swap/refill/error`; status via
   `GET /optimizer`, force a cycle with `POST /optimize`.
+- **Position optimizer (15m + on entry):** `position_optimizer.py` — the
+  slow, ADVISORY position-revaluation lane. On every grid position ENTRY
+  (post-deploy hook in `commit_deploy`) and every
+  `position_optimizer.interval_min` (15 m) manage-loop tick, each active
+  bot is re-analyzed on fresh 1h candles: `revalue_grid` re-derives the
+  ATR-band channel/step/grids/sizing vs the deployed geometry,
+  `evaluate_exits` scores TP/SL/trailing profiles (SL only as a wide
+  opt-in ≥15%-of-slot risk cap — the never-close-at-a-loss rule holds),
+  and `make_recommendation` classifies keep/recenter/widen/narrow/
+  resize/revalue-grid/add-take-profit/add-trailing/add-stop-loss with an
+  expected-profit delta + confidence. Recs with expected improvement ≥
+  `min_improvement_pct` (2%) are journaled (`position-optimizer` kind)
+  and persisted to the PocketBase `recommendations` collection —
+  queryable from the console via `GET /api/recommendations` (:8798).
+  `apply: false` by default — recs NEVER auto-edit WunderTrading.
+  Fail-soft hooks journal `position-optimizer-error`; per-bot
+  `cooldown_min` (60) bounds re-analysis. Research on when TP/SL/trailing
+  raise profit (fills × (step − fee) EV model, per-exit regime analysis,
+  wt-backtest validation method): `docs/position_optimizer.md`;
+  `grid_adapter.compute_upsert` accepts the corresponding optional
+  kwargs (take_profit_usd/stop_loss_usd/trailing_activation_pct/
+  trailing_execute_pct/positions_trailing/positions_stop_loss_ratio).
 - **Rotate:** stagnant incumbent + challenger Δscore ≥ 5 + cooldown expired
   → stop → verify → delete → cooldown → deploy.
 - **Reflect:** `state/decisions.jsonl` + run cards
@@ -179,17 +201,25 @@ re-login in the browser window (or vault `wundertrading-session` →
   `demo-cap`/`demo-cap-veto` (WunderTrading's demo/paper grid-bot cap — 5
   on the free plan, learned from the create-400 because no API exposes it;
   at the cap, new deploys + dynamic slot opens are skipped, rotations still
-  work), `rescreen-queued` (manual rescreen feedback), `loss-veto`
+  work; `demo-cap-relearn` — health_cycle raises the learned cap when the
+  live active-bot count exceeds it, so a stale low cap can't veto deploys
+  forever; the create-400 stays the strict downward teacher),
+  `rescreen-queued` (manual rescreen feedback), `loss-veto`
   (hard user rule — NEVER close a position at a loss to reallocate: any
   rotation/swap of an incumbent whose mark PnL is negative (or unknown
   because the observe errored) is vetoed, the incumbent keeps running and
   works its channel back toward break-even; the optimizer marks such bots
   non-idle so no arbiter call is spent), `profit-exit` (daemon-side
-  take-profit — WT's native takeProfit/stopLoss/trailing fields are
-  accepted but NOT enforced server-side for grid bots yet: when cumulative
+  take-profit — WT's native takeProfit/stopLoss/trailingStop ARE
+  enforced server-side on cumulative Total PnL (verified, see
+  `docs/position_optimizer.md`), and the daemon exit adds the
+  all-lines-≥0 refinement the server lacks: when cumulative
   total PnL, realized + mark, reaches `grid_defaults.take_profit_pct` ×
   slot budget AND every open line is ≥ 0, the bot is stopped at profit
   and the slot recycled; a per-line-blind book fails closed),
+  `position-optimizer` (slow-lane position revaluation — advisory rec
+  journaled when expected improvement ≥ `min_improvement_pct`),
+  `position-optimizer-error` (fail-soft hook errors),
   `recenter` (out-of-channel bot with losing lines is re-centered on the
   current price — verified live to leave open positions untouched — so it
   keeps trading back; `stopOnOutOfGrid` is now false everywhere, WT no
@@ -211,6 +241,7 @@ re-login in the browser window (or vault `wundertrading-session` →
 |------|------|
 | `daemon.py` | Scheduler + orchestrator (Daemon class, the manage loop). |
 | `optimizer.py` | Slot optimizer — fast 2–5 min loop: idle-slot detection, challenger hunt (tvcli 15m), Mistral arbiter, swaps via `execute_rotation`. |
+| `position_optimizer.py` | Position optimizer — slow 15 min + post-deploy lane: per-bot revaluation (channel/step/grids/sizing vs deployed), TP/SL/trailing exit scoring, advisory recs journaled + persisted to PB `recommendations` (never auto-edits WT). |
 | `config_lite.py` | Stdlib-only YAML-subset parser. |
 | `ctl_http.py` | HTTP ctl plane on :8799 (health/status/rotate/kill). |
 | `console/` | Mission console on :8798 — web UI (fleet/ladder cards, decision ledger, run cards, reliability, config editor, logs) + JSON API over the same state; whitelisted config.yaml edits and confirm-gated daemon lifecycle ops (`console/README.md`). |

@@ -167,6 +167,18 @@ except Exception:
     HAS_OPTIMIZER = False
     _SlotOptimizer = None
 
+# ── Position optimizer (slow-loop position revaluation, defensive) ──────
+# position_optimizer.py revalues open grid positions against live candles
+# and proposes ADVISORY exit-profile / channel edits (apply stays False by
+# default — nothing ever auto-edits WunderTrading unless configured to).
+# Fail-soft import so the daemon runs without it.
+try:
+    from position_optimizer import PositionOptimizer as _PositionOptimizer  # noqa: E402
+    HAS_POSITION_OPTIMIZER = True
+except Exception:
+    HAS_POSITION_OPTIMIZER = False
+    _PositionOptimizer = None
+
 # ── PocketBase write-through side channel (defensive) ─────────────────
 # PocketBase is an optional, best-effort projection: the file layer stays the
 # system of record, and this mirrors journal/decisions/reliability/bots/slots
@@ -406,6 +418,13 @@ DEFAULT_CONFIG = {
                # score (and only with spare deployable capital)
                "open_slot_min_score": 40.0},
     "watch": {"interval_s": 60, "adjust_steps_threshold": 2.0,
+              # per-bot in-place grid-edit rate limit in hours (audit
+              # 2026-09-06: the old hardcoded 6 h left a 0.85-confidence
+              # recenter rec sitting ~4 h past its window). Shared by the
+              # manual recenter path and the position-optimizer apply path.
+              "adjust_cooldown_h": 2.0,
+              # fleet PnL journal cadence in seconds (0 = off)
+              "pnl_snapshot_interval_s": 300,
               # browser watchdog: every WunderTrading session-API call rides
               # the headful CloakBrowser on CDP — when it dies the daemon is
               # blind and deploy/rotate fail. Probed each health pass.
@@ -626,6 +645,21 @@ def grid_status_safe():
         except Exception:
             return []
     return []
+
+
+# retry backoff after a FAILED grid edit (WT error), per slot — a failed
+# edit must NOT burn the 2 h adjust cooldown nor mutate bot bookkeeping
+# for geometry WT never accepted (live incident 2026-09-06: a WT HTTP 500
+# was journaled as "position-optimizer-applied")
+ADJUST_FAILED_RETRY_S = 600
+
+
+def _edit_error_summary(res):
+    """One-line summary of a failed grid_edit_safe result (journal msg)."""
+    err = (res or {}).get("error")
+    if not err:
+        err = " ".join(str((res or {}).get("stdout") or "").split())[:120]
+    return str(err)
 
 
 def grid_edit_safe(bot_code, upsert, dry_run=True):
@@ -915,6 +949,7 @@ class Daemon:
             "resolve": HAS_RESOLVE, "observe": HAS_OBSERVE,
             "reliability": HAS_RELIABILITY, "reflect": HAS_REFLECT,
             "optimizer": HAS_OPTIMIZER,
+            "position_optimizer": HAS_POSITION_OPTIMIZER,
         }
         self._lock = threading.Lock()
         self._rescreen_flag = False
@@ -923,6 +958,14 @@ class Daemon:
         # fast-loop engine (None when optimizer.py failed to import)
         self.optimizer = _SlotOptimizer(self, journal_fn=log) \
             if _SlotOptimizer else None
+        # position revaluation engine (None when position_optimizer.py
+        # failed to import); journal_fn adapts the engine's 1-arg
+        # journal_fn(event) contract to daemon's log(state, event)
+        self.position_optimizer = _PositionOptimizer(
+            self.config.get("position_optimizer"),
+            journal_fn=lambda event: log(self.state, event),
+            persist_fn=self._pb_recommendation_persist) \
+            if _PositionOptimizer else None
         self._browser_down_since = None
         self._last_browser_restart = 0.0
         self._migrate_archetype_keys()
@@ -1043,7 +1086,36 @@ class Daemon:
         }
 
     # ctl hook
-    def queue_rescreen(self):
+    def queue_rescreen(self, force=False):
+        """Queue an out-of-band rescreen (ctl /rescreen, /rotate, or the
+        optimizer's free-slot refill nudge).
+
+        AUTO nudges (force=False — the optimizer's refill path) are skipped
+        while the fleet is at the learned demo (paper) grid-bot cap: every
+        refill deploy would be vetoed at the cap, so the nudge only burns a
+        full screen (22 futile nudged rescreens in the 2026-09-06 audit
+        window). The skip is journaled only on TRANSITION (cap reached /
+        headroom back), never per cycle. Manual ctl requests pass
+        force=True — a human rescreen is always honored.
+        """
+        if not force:
+            cap = self.state.get("demo_bot_cap")
+            active = self.state.get("active_bots") or {}
+            if cap and len(active) >= int(cap):
+                if not getattr(self, "_refill_skip_active", False):
+                    self._refill_skip_active = True
+                    log(self.state, {
+                        "kind": "demo-cap-nudge-skip",
+                        "msg": f"fleet at the demo (paper) grid-bot cap "
+                               f"{len(active)}/{int(cap)} — refill rescreen "
+                               f"nudges skipped until headroom returns"})
+                return False
+            if getattr(self, "_refill_skip_active", False):
+                self._refill_skip_active = False
+                log(self.state, {
+                    "kind": "demo-cap-nudge-skip",
+                    "msg": "demo-bot headroom back — refill rescreen "
+                           "nudges re-enabled"})
         with self._lock:
             self._rescreen_flag = True
         # immediate feedback: a forced rescreen otherwise looks like nothing
@@ -1054,6 +1126,7 @@ class Daemon:
                                 "within ~10 s (screen + deploy decisions "
                                 "take ~2-4 min)"})
         save_state(self.state)
+        return True
 
     def consume_rescreen(self):
         with self._lock:
@@ -1101,6 +1174,32 @@ class Daemon:
         except (TypeError, ValueError):
             minutes = 3.0
         return max(2.0, min(5.0, minutes)) * 60
+
+    def position_optimizer_interval_s(self):
+        """Position-revaluation cadence in seconds — position_optimizer.
+        interval_min (0 = disabled: engine missing or enabled: false)."""
+        if not getattr(self, "position_optimizer", None):
+            return 0
+        cfg = (self.config.get("position_optimizer") or {})
+        if not cfg.get("enabled", True):
+            return 0
+        try:
+            minutes = float(cfg.get("interval_min", 15))
+        except (TypeError, ValueError):
+            minutes = 15.0
+        return max(1.0, minutes) * 60
+
+    def _pb_recommendation_persist(self, rec):
+        """Persist an applied position-optimizer recommendation into the
+        PocketBase side channel. Non-fatal: None (id-less) when PB is off
+        or the write fails — the rec then lives in the journal only."""
+        pb = _pb()
+        if pb is None:
+            return None
+        try:
+            return (pb.recommendation(rec) or {}).get("id")
+        except Exception:
+            return None
 
     def optimizer_status(self):
         """Snapshot for GET /optimizer (never raises)."""
@@ -1488,9 +1587,40 @@ class Daemon:
                 "decision_id": action.get("decision_id"),
                 "size_multiplier": action.get("size_multiplier"),
                 # cumulative-total-PnL target for the daemon-side profit
-                # exit (WT's native takeProfit is not enforced server-side)
+                # exit (WT DOES enforce server-side takeProfit/stopLoss/
+                # trailingStop on cumulative Total PnL — see
+                # execution/grid_adapter.py compute_upsert kwargs +
+                # docs/position_optimizer.md; the daemon exit stays as the
+                # all-lines-≥0 refinement on top)
                 "take_profit_usd": self._default_take_profit(slot["slot"]),
             }
+            # a fresh bot starts with a fresh idle clock: the per-slot
+            # fill tracker in state["optimizer"]["trackers"] carries the
+            # PREVIOUS occupant's last_increase_at, which flagged new
+            # bots idle minutes after deploy (2026-09-05: XVG flagged at
+            # age 21m, inheriting a 272m-old counter; same stale counter
+            # drove the premature ROBO swap). Clearing it makes
+            # update_tracker re-seed last_increase_at=now on the next
+            # observe fold (last is None → bumped → now).
+            self.state.setdefault("optimizer", {}) \
+                .setdefault("trackers", {}).pop(str(slot["slot"]), None)
+            # position revaluation on entry (advisory: apply stays False
+            # unless configured otherwise; journaled even on keep)
+            if self.position_optimizer:
+                try:
+                    _po_bot = self.state["active_bots"][str(slot["slot"])]
+                    _po_rec = self.position_optimizer.post_deploy(
+                        _po_bot, str(slot["slot"]), dry_run=dry_run)
+                    if _po_rec and _po_rec.get("recommendation") != "keep":
+                        _po_bot["position_optimizer"] = \
+                            _po_bot.get("position_optimizer") or {}
+                        _po_bot["position_optimizer"]["last_recommendation"] = \
+                            _po_rec["recommendation"]
+                except Exception as _po_exc:
+                    log(self.state, {
+                        "kind": "position-optimizer-error",
+                        "msg": f"post-deploy analysis failed: "
+                               f"{str(_po_exc)[:160]}"})
             self.state["committed"][str(slot["slot"])] =                 payloads["guard_ctx"]["total_commitment"]
             spec = build_spec(cand["symbol"], cand["tv_symbol"],
                               payloads["upsert"]["midPrice"],
@@ -1646,11 +1776,18 @@ class Daemon:
         # stopped (rotations are fine: stop+delete frees the slot first)
         demo_cap = self.state.get("demo_bot_cap")
         if demo_cap and len(self.state["active_bots"]) >= demo_cap:
-            log(self.state, {
-                "kind": "demo-cap-veto",
-                "msg": f"fleet at the demo (paper) grid-bot cap "
-                       f"{len(self.state['active_bots'])}/{demo_cap} — "
-                       f"new deploys skipped, rotations still allowed"})
+            # journal the cap-veto on TRANSITION only (entering the capped
+            # state) — 44 hourly demo-cap-veto lines in one audit window
+            # buried real events while carrying no new information
+            if not getattr(self, "_demo_cap_veto_active", False):
+                self._demo_cap_veto_active = True
+                log(self.state, {
+                    "kind": "demo-cap-veto",
+                    "msg": f"fleet at the demo (paper) grid-bot cap "
+                           f"{len(self.state['active_bots'])}/{demo_cap} — "
+                           f"new deploys skipped, rotations still allowed"})
+        else:
+            self._demo_cap_veto_active = False
         plan = self.plan_slots()
         if not self.state["slots"]:
             self.state["slots"] = plan["slots"]
@@ -2019,7 +2156,8 @@ class Daemon:
                             or (losing is not None and losing)):
                         last_adj = (self.state.get("last_adjust") or {}) \
                             .get(slot_key) or 0
-                        if time.time() - float(last_adj) >= 6 * 3600:
+                        if time.time() - float(last_adj) \
+                                >= self._adjust_cooldown_s():
                             log(self.state, {
                                 "kind": "recenter", "slot": slot_key,
                                 "msg": f"{bot.get('venue')}:"
@@ -2074,6 +2212,26 @@ class Daemon:
                                             f"(watchdog should be restarting it)"})
             else:
                 self.state["observe_error_sweeps"] = 0
+        # demo-cap relearn (upward): the create-400 teacher only ratchets
+        # the learned demo (paper) grid-bot cap DOWN. When live bots exceed
+        # it (manual UI deploys, plan change, cap reset) the stale cap
+        # would veto every new deploy forever — the platform demonstrably
+        # allows this many bots, so the cap follows reality upward.
+        try:
+            demo_cap = self.state.get("demo_bot_cap")
+            if demo_cap:
+                live = sum(
+                    1 for b in (grid_status_safe() or [])
+                    if (b.get("status") or "").lower() not in STOPPED_STATES)
+                if live > demo_cap:
+                    self.state["demo_bot_cap"] = live
+                    log(self.state, {
+                        "kind": "demo-cap-relearn",
+                        "msg": f"{live} live demo (paper) grid bots above "
+                               f"the learned cap {demo_cap} — cap raised "
+                               f"to {live}, deploy veto lifted"})
+        except Exception:
+            pass
         save_state(self.state)
 
     def adjust_bot(self, slot_key, dry_run=True):
@@ -2082,9 +2240,26 @@ class Daemon:
             return
         last = self.state.get("last_adjust", {}).get(slot_key)
         now = time.time()
-        if last and now - last < 6 * 3600:
-            log(self.state, {"kind": "adjust-skip", "slot": slot_key,
-                             "msg": f"rate limit (1 edit/6h) for {bot.get('symbol')}"})
+        cooldown_s = self._adjust_cooldown_s()
+        if last and now - last < cooldown_s:
+            # the fast optimizer re-proposes the same rate-limited
+            # recenter every pass (~1 line/72s), which would evict the
+            # whole 200-entry rolling journal within the cooldown window —
+            # journal the skip at most once per hour per slot
+            skips = getattr(self, "_adjust_skip_logged", {})
+            if now - skips.get(slot_key, 0) >= 3600:
+                skips[slot_key] = now
+                self._adjust_skip_logged = skips
+                log(self.state, {"kind": "adjust-skip", "slot": slot_key,
+                                 "msg": f"rate limit (1 edit/"
+                                        f"{cooldown_s / 3600:g}h) for "
+                                        f"{bot.get('symbol')}"})
+            return
+        # failed-edit backoff — a WT-side edit error retries after the
+        # short window, not the full cooldown; silent because the failure
+        # was already journaled (don't spam, don't even fetch candles)
+        if now - self.state.get("last_adjust_failed", {}).get(
+                slot_key, 0) < ADJUST_FAILED_RETRY_S:
             return
         venue, symbol = bot["venue"], bot["symbol"]
         try:
@@ -2105,15 +2280,35 @@ class Daemon:
         grid_type = (bot.get("ticket") or {}).get("grid_type", "neutral")
         profile_code = bot.get("profile_code")
         pair_code = bot.get("pair_code") or upsert_old.get("pairCode")
+        # the bot's stored deploy payload knows its REAL exchange (e.g.
+        # BINANCE_FUTURES paper profile — gridMarket=derivative), which the
+        # static venue default (binance→BINANCE→spot) gets wrong: a spot
+        # market edit on a futures bot 400s on missing investmentRef/
+        # investmentBase (live 2026-09-06 12:50:57Z, slot 3 GIGGLE)
+        exchange_code = upsert_old.get("exchangeCode")
         try:
             new_upsert = grid_adapter.compute_upsert(
                 symbol, venue, price, atr_pct, step_pct, grids, amount,
-                grid_type, profile_code, pair_code)
+                grid_type, profile_code, pair_code,
+                exchange_code=exchange_code)
         except Exception as exc:
             log(self.state, {"kind": "adjust-error", "slot": slot_key,
                              "msg": f"compute_upsert failed: {exc}"})
             return
         res = grid_edit_safe(bot["bot_code"], new_upsert, dry_run=dry_run)
+        if not (res or {}).get("ok"):
+            # WT rejected the edit (HTTP 500, validation, session loss) —
+            # not applied: no cooldown burn, no bookkeeping mutation, no
+            # "adjust" journal entry; retry allowed after the backoff above
+            self.state.setdefault("last_adjust_failed", {})[slot_key] = now
+            log(self.state, {
+                "kind": "adjust-error", "slot": slot_key,
+                "msg": "grid edit FAILED — not applied, retry allowed in "
+                       f"<={ADJUST_FAILED_RETRY_S // 60} min: "
+                       f"{_edit_error_summary(res)}",
+                "result": res})
+            return
+        self.state.get("last_adjust_failed", {}).pop(slot_key, None)
         self.state.setdefault("last_adjust", {})[slot_key] = now
         bot["last_adjust"] = now
         bot["upsert"] = new_upsert
@@ -2141,6 +2336,291 @@ class Daemon:
         if pct <= 0:
             return None
         return round(float(slot["balance"]) * pct, 2)
+
+    def _adjust_cooldown_s(self):
+        """Per-bot in-place grid-edit rate limit in seconds —
+        watch.adjust_cooldown_h (default 2 h; was a hardcoded 6 h — audit
+        2026-09-06: a Δ+205.75% recenter rec sat ~4 h behind the window).
+        One window covers BOTH the manual recenter path (adjust_bot /
+        health_cycle) and the position-optimizer apply path: they share
+        state["last_adjust"], so a manual edit throttles applies and vice
+        versa."""
+        try:
+            h = float((self.config.get("watch") or {})
+                      .get("adjust_cooldown_h", 2.0))
+        except (TypeError, ValueError):
+            h = 2.0
+        return max(0.0, h) * 3600.0
+
+    def _pnl_snapshot_interval_s(self):
+        """Fleet PnL journal cadence in seconds (watch.pnl_snapshot_interval_s,
+        default 300; 0 = off)."""
+        try:
+            s = float((self.config.get("watch") or {})
+                      .get("pnl_snapshot_interval_s", 300))
+        except (TypeError, ValueError):
+            s = 300.0
+        return max(0.0, s)
+
+    def pnl_snapshot(self):
+        """Fleet PnL block computed from the LATEST observe fold (pure
+        state read — no network, never raises). Realized/unrealized are
+        per-bot sums of the observe data; idle_usd = portfolio total minus
+        the committed worst-case claims."""
+        bots = {}
+        realized = unrealized = fills = 0.0
+        for slot_key, bot in (self.state.get("active_bots") or {}).items():
+            obs = (bot or {}).get("observed") or {}
+            try:
+                r = round(float(obs.get("realized_pnl") or 0.0), 4)
+                u = round(float(obs.get("unrealized_pnl") or 0.0), 4)
+                f = float(obs.get("fills_24h") or 0)
+            except (TypeError, ValueError):
+                r = u = 0.0
+                f = 0.0
+            bots[str(slot_key)] = {"symbol": (bot or {}).get("symbol"),
+                                   "realized": r, "unrealized": u,
+                                   "fills_24h": f}
+            realized += r
+            unrealized += u
+            fills += f
+        committed = round(sum(float(v or 0)
+                              for v in (self.state.get("committed")
+                                        or {}).values()), 2)
+        try:
+            total = float((self.config.get("portfolio") or {})
+                          .get("total_usd") or 0)
+        except (TypeError, ValueError):
+            total = 0.0
+        realized = round(realized, 4)
+        unrealized = round(unrealized, 4)
+        return {"fleet": {
+                    "realized": realized,
+                    "unrealized": unrealized,
+                    "net": round(realized + unrealized, 4),
+                    "committed_usd": committed,
+                    "idle_usd": round(max(total - committed, 0.0), 2),
+                    "fills_24h": round(fills, 1)},
+                "bots": bots}
+
+    def _journal_pnl_snapshot(self):
+        """One 'pnl-snapshot' journal event per watch.pnl_snapshot_interval_s
+        in the manage loop — flows into the PocketBase journal
+        write-through via log() and lands in state.json's ring. Pure
+        observability: fail-soft, never crashes the loop."""
+        snap = self.pnl_snapshot()
+        f = snap["fleet"]
+        log(self.state, {
+            "kind": "pnl-snapshot",
+            "msg": (f"fleet net ${f['net']:+.4f} (realized "
+                    f"{f['realized']:+.4f}, unrealized "
+                    f"{f['unrealized']:+.4f}) — committed "
+                    f"${f['committed_usd']:.2f}, idle ${f['idle_usd']:.2f}, "
+                    f"fills {f['fills_24h']:.0f}/24h"),
+            **snap})
+
+    # ── position-optimizer apply path (audit 2026-09-06 fix #2) ──────
+    # Only edit-type GEOMETRY recs are ever eligible: recenter / widen /
+    # narrow / resize / revalue-grid. Exit recs (add-take-profit /
+    # add-trailing / add-stop-loss) stay advisory + journal-only even with
+    # apply:true, and the exit payload keys are stripped from applied
+    # geometry edits too — nothing that closes or arms an exit rides the
+    # auto-apply path. An edit leaves open lines and their entry prices
+    # untouched (verified live 2026-09-06 on GRAM).
+    PO_GEOMETRY_RECS = ("recenter", "widen", "narrow", "resize",
+                        "revalue-grid")
+    PO_EXIT_PAYLOAD_KEYS = ("takeProfitUsd", "stopLossUsd",
+                            "trailingActivationPct", "trailingExecutePct",
+                            "positionsTrailing")
+    PO_GEOMETRY_KEYS = ("lowPrice", "midPrice", "highPrice",
+                        "gridPercentStep", "gridLevels", "amountPerTrade")
+
+    def apply_position_optimizer_recs(self, recs, dry_run=True):
+        """Daemon-side applier for the position-optimizer cycle output.
+
+        With position_optimizer.apply: true, an edit-type GEOMETRY rec is
+        applied through the existing grid-edit path when ALL of:
+          * expected_delta_pct ≥ position_optimizer.min_improvement_pct
+          * the bot is active and NOT stopped / in error
+          * the shared per-bot adjust rate limit
+            (watch.adjust_cooldown_h, default 2 h — last_adjust is written
+            so the window covers manual recenters AND applies) allows
+          * the daily apply cap (position_optimizer.max_apply_per_day)
+            allows
+        Every veto journals once (rate-limit skips share adjust_bot's
+        1/hour throttle); a successful apply journals
+        "position-optimizer-applied" and flips the rec's applied/applied_at
+        (mirrored to the persisted PB recommendations record). Never
+        raises — fail-soft by contract."""
+        try:
+            cfg = self.config.get("position_optimizer") or {}
+            if not cfg.get("apply", False) or not recs:
+                return []
+            min_imp = float(cfg.get("min_improvement_pct", 2.0) or 0.0)
+            max_day = int(cfg.get("max_apply_per_day", 4) or 0)
+            cooldown_s = self._adjust_cooldown_s()
+            now = time.time()
+            book = self.state.setdefault("position_optimizer_applies", {})
+            if book.get("day") != utcnow()[:10]:
+                book.update({"day": utcnow()[:10], "count": 0,
+                             "cap_logged": False})
+            applied = []
+            for rec in (recs or []):
+                try:
+                    if not isinstance(rec, dict):
+                        continue
+                    slot_key = str(rec.get("slot"))
+                    rec_name = rec.get("recommendation")
+                    # 1. edit-type GEOMETRY recs only — exit recs are
+                    #    advisory by design, never auto-applied
+                    if rec_name not in self.PO_GEOMETRY_RECS:
+                        continue
+                    # 2. improvement gate (the same threshold the engine
+                    #    journals/persists on)
+                    try:
+                        delta = float(rec.get("expected_delta_pct") or 0.0)
+                    except (TypeError, ValueError):
+                        delta = 0.0
+                    if delta < min_imp:
+                        continue
+                    # 3. never apply on missing / rotated-out / stale recs
+                    bot = (self.state.get("active_bots") or {}).get(slot_key)
+                    if not bot or not bot.get("bot_code"):
+                        continue
+                    if rec.get("bot_code") and \
+                            rec["bot_code"] != bot.get("bot_code"):
+                        continue
+                    # 4. never apply on error/stopped bots
+                    status = ((bot.get("observed") or {})
+                              .get("status") or "active").lower()
+                    if status in STOPPED_STATES or status == "error":
+                        log(self.state, {
+                            "kind": "position-optimizer-skip",
+                            "slot": slot_key,
+                            "msg": f"{rec_name} {bot.get('symbol')} skipped "
+                                   f"— bot status '{status}' (never edit a "
+                                   f"stopped/errored bot)"})
+                        continue
+                    # 5. shared per-bot adjust rate limit
+                    last = (self.state.get("last_adjust") or {}) \
+                        .get(slot_key)
+                    if last and now - float(last) < cooldown_s:
+                        skips = getattr(self, "_adjust_skip_logged", {})
+                        if now - skips.get(slot_key, 0) >= 3600:
+                            skips[slot_key] = now
+                            self._adjust_skip_logged = skips
+                            log(self.state, {
+                                "kind": "position-optimizer-skip",
+                                "slot": slot_key,
+                                "msg": f"{rec_name} {bot.get('symbol')} "
+                                       f"skipped — adjust rate limit "
+                                       f"(1 edit/{cooldown_s / 3600:g}h, "
+                                       f"shared with manual recenters)"})
+                        continue
+                    # 5b. failed-edit backoff — a WT-side edit error is
+                    #     retried at most once per 10 min (silent: the
+                    #     failure was already journaled)
+                    failed_at = (self.state.get("last_adjust_failed")
+                                 or {}).get(slot_key, 0)
+                    if now - failed_at < ADJUST_FAILED_RETRY_S:
+                        continue
+                    # 6. daily apply cap
+                    if int(book.get("count") or 0) >= max_day:
+                        if not book.get("cap_logged"):
+                            book["cap_logged"] = True
+                            log(self.state, {
+                                "kind": "position-optimizer-skip",
+                                "msg": f"daily position-optimizer apply cap "
+                                       f"{max_day} reached — further recs "
+                                       f"advisory until tomorrow"})
+                        continue
+                    # 7. apply through the existing edit path — GEOMETRY
+                    #    ONLY: strip any exit keys the advisory payload
+                    #    embedded (hard safety, belt + braces)
+                    payload = dict(((rec.get("action") or {})
+                                    .get("payload")) or {})
+                    for k in self.PO_EXIT_PAYLOAD_KEYS:
+                        payload.pop(k, None)
+                    if not all(payload.get(k) is not None
+                               for k in self.PO_GEOMETRY_KEYS):
+                        continue  # incomplete geometry — nothing to edit
+                    res = grid_edit_safe(bot["bot_code"], payload,
+                                         dry_run=dry_run)
+                    if not (res or {}).get("ok"):
+                        # WT rejected the edit — NOT applied (live
+                        # incident 2026-09-06: an HTTP 500 was journaled
+                        # as applied): no cooldown burn, no count, no
+                        # applied/applied_at flip, no PB update; retry
+                        # allowed after the 5b backoff above
+                        self.state.setdefault(
+                            "last_adjust_failed", {})[slot_key] = now
+                        log(self.state, {
+                            "kind": "position-optimizer-error",
+                            "slot": slot_key,
+                            "symbol": bot.get("symbol"),
+                            "recommendation": rec_name,
+                            "msg": f"{rec_name} apply FAILED on WT — not "
+                                   f"applied, retry allowed in "
+                                   f"<={ADJUST_FAILED_RETRY_S // 60} min: "
+                                   f"{_edit_error_summary(res)}",
+                            "result": res})
+                        continue
+                    self.state.get("last_adjust_failed", {}).pop(slot_key,
+                                                                 None)
+                    self.state.setdefault("last_adjust", {})[slot_key] = now
+                    bot["last_adjust"] = now
+                    bot["upsert"] = {**(bot.get("upsert") or {}), **payload}
+                    ch = bot.get("channel") or {}
+                    bot["channel"] = {
+                        "low": payload["lowPrice"],
+                        "mid": payload["midPrice"],
+                        "high": payload["highPrice"],
+                        "step_pct": payload["gridPercentStep"] * 100.0,
+                        "atr_pct": ch.get("atr_pct"),
+                        "grids": payload["gridLevels"],
+                    }
+                    if not dry_run:
+                        book["count"] = int(book.get("count") or 0) + 1
+                    rec["applied"] = True
+                    rec["applied_at"] = utcnow()
+                    log(self.state, {
+                        "kind": "position-optimizer-applied",
+                        "slot": slot_key, "symbol": bot.get("symbol"),
+                        "recommendation": rec_name,
+                        "expected_delta_pct": delta,
+                        "dry_run": bool(dry_run),
+                        "msg": f"{rec_name} applied to "
+                               f"{bot.get('venue')}:{bot.get('symbol')} "
+                               f"(Δ{delta:+.2f}%, "
+                               f"{int(book.get('count') or 0)}/{max_day} "
+                               f"today)",
+                        "result": res})
+                    self._pb_recommendation_update(rec)
+                    applied.append(rec)
+                except Exception as exc:
+                    log(self.state, {
+                        "kind": "position-optimizer-error",
+                        "msg": f"rec apply failed: {str(exc)[:160]}"})
+            return applied
+        except Exception as exc:
+            log(self.state, {"kind": "position-optimizer-error",
+                             "msg": f"apply pass failed: {str(exc)[:160]}"})
+            return []
+
+    def _pb_recommendation_update(self, rec):
+        """Flip applied/applied_at on the persisted PB recommendations
+        record (matched on the engine's recommendation uuid). Non-fatal:
+        None when PB is off, the rec was never persisted, or the write
+        fails — the apply already lives in the journal."""
+        pb = _pb()
+        if pb is None or not rec.get("id"):
+            return None
+        try:
+            return pb.recommendation_update(
+                rec["id"], {"applied": bool(rec.get("applied")),
+                            "applied_at": rec.get("applied_at")})
+        except Exception:
+            return None
 
     # ── rotation ───────────────────────────────────────────────────────
     def execute_rotation(self, slot_key, challenger, dry_run=True):
@@ -2438,6 +2918,17 @@ class Daemon:
                 "profile_code": None, "pair_code": b.get("pairCode"),
                 "upsert": None, "decision_id": decision_id,
             }
+            # adopted bots consume their slot's worst-case budget too —
+            # without a committed entry open_slot's spare-capital math
+            # over-deploys (CHIP 2026-09-05 was $50 invisible), and a
+            # fresh occupancy must not inherit the previous occupant's
+            # fill tracker (same staleness commit_deploy now clears)
+            max_c = slot.get("max_commitment")
+            if max_c:
+                self.state.setdefault("committed", {})[str(slot["slot"])] = \
+                    float(max_c)
+            self.state.setdefault("optimizer", {}) \
+                .setdefault("trackers", {}).pop(str(slot["slot"]), None)
             log(self.state, {"kind": "adopted", "slot": slot["slot"],
                              "msg": f"{venue}:{symbol} bot {b.get('code')} "
                                     f"adopted into slot {slot['slot']}"})
@@ -2488,6 +2979,43 @@ class Daemon:
                          "msg": f"reloaded ({len(self.reliability)} keys)"})
         save_state(self.state)
 
+    def _prune_unfillable_slots(self, slots, active):
+        """Drop EMPTY slots that can never host a bot. Mutates `slots`
+        in place, returns [(slot, venue, reason), …]. Fail-closed: a slot
+        is only dropped on a POSITIVE blocker —
+          * the fleet is at the learned demo (paper) grid-bot cap (no new
+            bot can be created on ANY venue until one stops), or
+          * the slot's venue is at its plan tier cap (e.g. binance free
+            tier: 1 active grid bot — the venue is rotation-only).
+        Occupied slots are never candidates; unknown capacity data prunes
+        nothing; headroom on any path keeps the slot.
+        """
+        pruned = []
+        try:
+            cap = self.state.get("demo_bot_cap")
+            at_demo_cap = bool(cap) and len(active or {}) >= int(cap)
+            for s in list(slots):
+                if str(s.get("slot")) in (active or set()):
+                    continue  # live bot — never touched
+                reason = None
+                if at_demo_cap:
+                    reason = (f"demo-bot cap {len(active)}/{int(cap)}")
+                else:
+                    try:
+                        blocked = self.venue_capacity_block(
+                            {"venue": s.get("venue"), "symbol": ""},
+                            self.state.get("capacity"))
+                    except Exception:
+                        blocked = None
+                    if blocked and str(blocked).startswith("plan cap"):
+                        reason = str(blocked)
+                if reason:
+                    slots.remove(s)
+                    pruned.append((s.get("slot"), s.get("venue"), reason))
+        except Exception:
+            pass
+        return pruned
+
     def reconcile_slots(self):
         """Re-normalize persisted slot budgets to the CURRENT config.
 
@@ -2502,6 +3030,22 @@ class Daemon:
         floor at portfolio.min_slot_usd — a dynamic slot opened beyond the
         sleeve must not be shrunk back below the exchange floor on restart).
         Never raises.
+
+        Two 2026-09-06 audit heals ride along:
+          * config-consolidation prune — EMPTY slots that can never host a
+            bot (venue at its plan tier cap, or the fleet at the learned
+            demo-bot cap) are dropped: they reserve worst-case capital
+            against the deployable ceiling and keep the optimizer nudging
+            futile refill rescreens ($200 of the $600 fund sat in phantom
+            slots 4/6/8/9 for 27+ slot-hours). Occupied slots are NEVER
+            touched — live bots never lose their slot id — and open_slot
+            can always recreate capacity later (ids continue from the max).
+          * committed clamp — an ACTIVE bot's worst-case claim is clamped
+            to its slot's new max_commitment when a config SHRINK lowers
+            the cap (otherwise a phantom claim eats the deployable
+            ceiling); it is never raised on growth — the deployed grid
+            still runs at its old sizing until the next deploy into the
+            slot re-commits the honest worst case.
         """
         try:
             p = self.config["portfolio"]
@@ -2512,6 +3056,9 @@ class Daemon:
             slots = self.state.get("slots") or []
             if not slots or total <= 0 or vsum <= 0:
                 return
+            active = {str(k) for k in (self.state.get("active_bots")
+                                      or {})}
+            pruned = self._prune_unfillable_slots(slots, active)
             scale = total / vsum
             dynamic = set(p.get("dynamic_slot_venues") or [])
             min_slot_usd = float(p.get("min_slot_usd", 100.0))
@@ -2538,7 +3085,72 @@ class Daemon:
                 s["venue_slots"] = n
                 s["balance"] = balance
                 s["max_commitment"] = commitment
-            if changed:
+            # committed-capital heal: an ACTIVE bot must hold a worst-case
+            # claim in state["committed"] or open_slot's spare math
+            # over-deploys — adopted bots never wrote one (CHIP, adopted
+            # 2026-09-05, was $50 invisible to the deploy ceiling).
+            # Conservative fallback: the slot's max_commitment (fail-closed:
+            # spare shrinks, never grows).
+            healed = []
+            clamped = []
+            for s in slots:
+                sk = str(s["slot"])
+                committed = self.state.setdefault("committed", {})
+                if sk in active and sk not in committed \
+                        and s.get("max_commitment"):
+                    committed[sk] = float(s["max_commitment"])
+                    healed.append(f"slot {sk} ${s['max_commitment']}")
+                elif sk in active and committed.get(sk) is not None \
+                        and s.get("max_commitment") is not None \
+                        and float(committed[sk]) > float(s["max_commitment"]) + 1e-9:
+                    clamped.append(f"slot {sk} ${committed[sk]}→"
+                                   f"${s['max_commitment']}")
+                    committed[sk] = float(s["max_commitment"])
+            if healed:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": "committed-capital heal (adopted "
+                                        "bots): " + "; ".join(healed)[:200]})
+            if clamped:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": "committed claims clamped to the "
+                                        "shrunk slot caps: "
+                                        + "; ".join(clamped)[:200]})
+            # fill-tracker heal: a tracker whose last_increase_at predates
+            # the occupying bot's deploy is inherited staleness — it flags
+            # fresh bots idle minutes after deploy (XVG 2026-09-05: flagged
+            # at age 21m off a 272m-old counter). Clear it; the next observe
+            # fold re-seeds the idle clock at now (fail-closed vs churn).
+            # Trackers newer than the bot's deploy are genuine and stay.
+            trackers = self.state.setdefault("optimizer", {}) \
+                .setdefault("trackers", {})
+            thealed = []
+            for slot_key, bot in (self.state.get("active_bots")
+                                  or {}).items():
+                tr = trackers.get(slot_key)
+                if not tr or not tr.get("last_increase_at"):
+                    continue
+                try:
+                    since = datetime.fromisoformat(
+                        bot.get("since") or "").timestamp()
+                except (ValueError, TypeError):
+                    continue
+                if since and float(tr["last_increase_at"]) < since:
+                    trackers.pop(slot_key, None)
+                    thealed.append(str(slot_key))
+            if thealed:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": "fill-tracker heal (stale "
+                                        "inheritance): slots "
+                                        + ", ".join(thealed)})
+            if pruned:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": "pruned unfillable empty slots "
+                                        "(cap-blocked, capital reserved for "
+                                        "nothing): "
+                                        + "; ".join(f"slot {sid} ({v}: {r})"
+                                                    for sid, v, r in pruned
+                                                    )[:300]})
+            if changed or pruned or clamped:
                 log(self.state, {"kind": "slots-reconciled",
                                  "msg": f"slot budgets re-normalized to "
                                         f"config (total ${total:.0f}): "
@@ -2580,6 +3192,17 @@ class Daemon:
             except Exception as exc:
                 log(self.state, {"kind": "health-error", "msg": str(exc)[:200],
                              "tb": traceback.format_exc(limit=6)[-1200:]})
+            # one position-revaluation pass (edit-geometry recs auto-applied
+            # when position_optimizer.apply is on; exit recs never —
+            # apply_position_optimizer_recs is fail-soft)
+            if self.position_optimizer:
+                try:
+                    _recs = self.position_optimizer.cycle(
+                        self.state["active_bots"], dry_run=dry_run)
+                    self.apply_position_optimizer_recs(_recs, dry_run=dry_run)
+                except Exception as exc:
+                    log(self.state, {"kind": "position-optimizer-error",
+                                     "msg": str(exc)[:200]})
             self.state["last_cycle"] = utcnow()
             save_state(self.state)
             return actions
@@ -2592,6 +3215,10 @@ class Daemon:
         next_rescreen = time.time() + rescreen_s
         next_reliability = time.time() + reliability_s
         next_optimize = time.time() + (optimize_s or interval_s)
+        po_s = self.position_optimizer_interval_s()
+        next_po = time.time() + po_s
+        pnl_s = self._pnl_snapshot_interval_s()
+        next_pnl = time.time() + (pnl_s or 0)
         while True:
             if os.path.exists(os.path.join(HERE, "KILL")):
                 log(self.state, {"kind": "kill", "msg": "KILL file — halting"})
@@ -2637,6 +3264,29 @@ class Daemon:
                 next_optimize = time.time() + optimize_s
             elif not optimize_s:
                 self.consume_optimize()  # drain stale requests when disabled
+            # slow loop: position revaluation — edit-geometry recs are
+            # auto-applied when position_optimizer.apply is on (exit recs
+            # never); the whole path is fail-soft
+            if po_s and now >= next_po:
+                try:
+                    _recs = self.position_optimizer.cycle(
+                        self.state["active_bots"], dry_run=dry_run)
+                    self.apply_position_optimizer_recs(_recs, dry_run=dry_run)
+                except Exception as exc:
+                    log(self.state, {"kind": "position-optimizer-error",
+                                     "msg": str(exc)[:200],
+                                     "tb": traceback.format_exc(limit=6)[-800:]})
+                next_po = now + po_s
+            # observability: fleet PnL snapshot on its own cadence
+            # (0 = off); fail-soft — never blocks the manage loop
+            if pnl_s and now >= next_pnl:
+                try:
+                    self._journal_pnl_snapshot()
+                except Exception as exc:
+                    log(self.state, {"kind": "health-warn",
+                                     "msg": f"pnl snapshot failed: "
+                                            f"{str(exc)[:120]}"})
+                next_pnl = now + pnl_s
             if now >= next_rescreen:
                 try:
                     self.rescreen_cycle(dry_run=dry_run,
@@ -2649,7 +3299,9 @@ class Daemon:
             self.state["last_cycle"] = utcnow()
             save_state(self.state)
             nxt = min(next_health, next_rescreen, next_reliability,
-                      next_optimize if optimize_s else next_health)
+                      next_optimize if optimize_s else next_health,
+                      next_po if po_s else next_health,
+                      next_pnl if pnl_s else next_health)
             time.sleep(max(1.0, min(10.0, nxt - time.time())))
 
 

@@ -59,9 +59,10 @@ if [ ! -x "$BIN" ]; then
     x86_64|amd64)  PB_ARCH="amd64" ;;
     *) echo "ERROR: unsupported arch $ARCH" >&2; exit 1 ;;
   esac
-  ZIP="pocketbase_${PB_VERSION}_darwin_${PB_ARCH}.zip"
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ZIP="pocketbase_${PB_VERSION}_${OS}_${PB_ARCH}.zip"
   URL="https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/${ZIP}"
-  echo "Downloading PocketBase v${PB_VERSION} (darwin-${PB_ARCH})…"
+  echo "Downloading PocketBase v${PB_VERSION} (${OS}-${PB_ARCH})…"
   curl -fsSL "$URL" -o "$PB_DIR/$ZIP"
   unzip -o -q "$PB_DIR/$ZIP" -d "$PB_DIR"
   rm -f "$PB_DIR/$ZIP"

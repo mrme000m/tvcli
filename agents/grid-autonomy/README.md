@@ -176,6 +176,24 @@ Accuracy note: every fact below is verified against the code at
    down → numeric gate stands (`llm_degraded` caveat). Status:
    `GET /optimizer`, `POST /optimize` on :8799; report in
    `state.optimizer.last_report` + per-cycle run cards (`optimizer` kind).
+   **Slow lane — position revaluation (15m, `position_optimizer.py`).**
+   A second, advisory engine between watches: on every grid position
+   ENTRY (post-deploy hook in `commit_deploy`) and every
+   `position_optimizer.interval_min` (15 m) manage-loop tick, each active
+   bot is re-analyzed against fresh 1h candles — `revalue_grid`
+   re-derives the ATR-band channel/step/line-count/sizing vs the deployed
+   geometry, `evaluate_exits` scores TP/SL/trailing profiles, and
+   `make_recommendation` classifies into `keep / recenter / widen /
+   narrow / resize / revalue-grid / add-take-profit / add-trailing /
+   add-stop-loss` with an expected-profit delta (fill-rate EV model) and
+   a confidence score. When the expected improvement ≥
+   `min_improvement_pct` (2%), the rec is journaled (`position-optimizer`
+   kind) AND persisted to the PocketBase `recommendations` collection
+   (queryable via `GET /api/recommendations` on the console) — `apply`
+   stays `false` by default: recs never auto-edit WunderTrading.
+   Every hook fail-softs (`position-optimizer-error`); per-bot
+   `cooldown_min` (60) bounds re-analysis churn. Research on when TP/SL/
+   trailing increase profit: `docs/position_optimizer.md`.
 7. **Rotate (60m, on rescreen).** A stagnant incumbent — or one flagged
    out-of-channel/stopped — with an eligible challenger (stagnant
    incumbents additionally need Δscore ≥ 5 hysteresis; the min-hold floor
@@ -240,6 +258,7 @@ Accuracy note: every fact below is verified against the code at
 | `dev` | **The single dev script** — start/stop/restart/status/reset/reset-wt/clean/logs for the whole local stack (daemon + console + PocketBase + tvcli serve check). |
 | `daemon.py` | Scheduler + orchestrator + state/journal (the Daemon class). |
 | `optimizer.py` | **Slot optimizer** — the fast 2–5 min loop: idle-slot detection (token-relative), challenger hunt (live re-score + tvcli 15m structure), Mistral-pinned arbiter, swaps via `execute_rotation`, capital/refill nudges. |
+| `position_optimizer.py` | **Position optimizer** — the slow 15 min loop: post-deploy + periodic revaluation of each active grid bot (fresh 1h candles → `revalue_grid` channel/step/grids/sizing vs deployed, `evaluate_exits` TP/SL/trailing scoring, `make_recommendation`), advisory recs journaled + persisted to the PB `recommendations` collection (`apply: false` — never auto-edits WT). |
 | `config_lite.py` | Stdlib-only YAML-subset parser (`load_yaml`, `deep_merge`). |
 | `ctl_http.py` | HTTP control plane on :8799 (endpoints below). |
 | `console/` | **Mission console** — web UI + additive API on :8798 for observing the fleet (channel-ladder slot cards, decision ledger, run cards, reliability, logs), editing config.yaml (whitelisted, comment-preserving), the LLM-providers panel (set/choose/validate NVIDIA + OpenRouter, order the fallback chain, per-agent provider routing), and dev control (rescreen/rotate/KILL/start/stop/restart). See `console/README.md`. |
@@ -317,6 +336,17 @@ whether the daemon actually reads it:
 | `optimizer.screen_cache_fresh_min` | Candidate board older than `120` min → wait for rescreen. | yes |
 | `optimizer.refill_nudge_min` | Empty-slot rescreen-nudge rate limit (`10`). | yes |
 | `optimizer.llm_provider` | Arbiter pinned to `mistral` (falls back to the global chain without `MISTRAL_API_KEY`). | yes |
+| `position_optimizer.enabled` | Slow revaluation loop on/off (`true`). | yes |
+| `position_optimizer.interval_min` | Manage-loop cadence for `cycle()` (`15`). | yes |
+| `position_optimizer.cooldown_min` | Per-bot re-analysis cooldown (`60`). | yes (engine `position_optimizer.last_analyzed_at`) |
+| `position_optimizer.min_improvement_pct` | Journal/persist gate on `expected_delta_pct` (`2.0`). | yes |
+| `position_optimizer.apply` | `false` — advisory: recs never auto-edit WunderTrading. | yes |
+| `position_optimizer.max_apply_per_day` | Persisted recs per calendar day (`4`). | yes |
+| `position_optimizer.stop_loss_enabled` | `false` — SL only as a wide opt-in risk cap (≥ 15% of slot), honoring the never-close-at-a-loss rule. | yes |
+| `position_optimizer.take_profit_pct` | × slot balance = USD profit-exit target (`0.10`). | yes |
+| `position_optimizer.trailing_activation_pct` / `trailing_execute_pct` | Cumulative-PnL trailing arm/give-back (`5.0` / `2.0`). | yes |
+| `position_optimizer.positions_trailing` | Per-position trailing preference for mean-reversion regimes (`true`). | yes |
+| `position_optimizer.band_atr` / `drift_steps` / `atr_change_pct` | Revaluation geometry: ATR multiples each side (`3.0`), recenter threshold in steps (`2.0`), widen/narrow channel-width change (`15.0`). | yes |
 | `grid_defaults.band_atr` | ATR-band width `3.0`. | doc only (`grid_args` default) |
 | `grid_defaults.step_factor` | ATR→step multiplier `0.5`. | doc only (`grid_args` default) |
 | `grid_defaults.step_min` / `step_max` | Profit-per-grid clamp `0.1`–`2.0`. | doc only (`grid_args` default) |

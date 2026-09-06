@@ -40,6 +40,48 @@ def _cache_age(st):
         return None
 
 
+def status_payload(daemon):
+    """Assemble the GET /status body from daemon state.
+
+    PnL and demo-cap observability blocks are computed here (fail-soft —
+    observability must never break /status):
+      pnl       {realized, unrealized, net, committed_usd, idle_usd} from
+                the daemon's latest observe fold (daemon.pnl_snapshot)
+      demo_cap  {cap, active, headroom} — the learned WT demo (paper)
+                grid-bot cap vs the live fleet
+    """
+    st = daemon.state
+    pnl = {}
+    try:
+        if hasattr(daemon, "pnl_snapshot"):
+            pnl = (daemon.pnl_snapshot() or {}).get("fleet") or {}
+    except Exception:
+        pnl = {}
+    cap = st.get("demo_bot_cap")
+    active_n = len(st.get("active_bots") or {})
+    try:
+        headroom = int(cap) - active_n if cap is not None else None
+    except (TypeError, ValueError):
+        headroom = None
+    return {
+        "slots": st["slots"],
+        "active_bots": st["active_bots"],
+        "committed": st["committed"],
+        "live_allow": st["live_allow"],
+        "profiles": st.get("profiles", []),
+        "capacity": st.get("capacity", {}),
+        "account_limits": st.get("account_limits", {}),
+        "capabilities": getattr(daemon, "capabilities", {}),
+        # dependency readiness (presence booleans only)
+        "env": getattr(daemon, "env_status", lambda: {})(),
+        "last_cycle": st.get("last_cycle"),
+        "journal_tail": st["journal"][-10:],
+        "pnl": pnl,
+        "demo_cap": {"cap": cap, "active": active_n,
+                     "headroom": headroom},
+    }
+
+
 class Ctl(BaseHTTPRequestHandler):
     daemon = None
 
@@ -57,19 +99,7 @@ class Ctl(BaseHTTPRequestHandler):
             self._json(200, {"status": "ok", "at": _utcnow(),
                              "kill": os.path.exists(os.path.join(HERE, "KILL"))})
         elif self.path == "/status":
-            self._json(200, {"slots": st["slots"], "active_bots": st["active_bots"],
-                             "committed": st["committed"],
-                             "live_allow": st["live_allow"],
-                             "profiles": st.get("profiles", []),
-                             "capacity": st.get("capacity", {}),
-                             "account_limits": st.get("account_limits", {}),
-                             "capabilities": getattr(
-                                 self.daemon, "capabilities", {}),
-                             # dependency readiness (presence booleans only)
-                             "env": getattr(self.daemon, "env_status",
-                                            lambda: {})(),
-                             "last_cycle": st.get("last_cycle"),
-                             "journal_tail": st["journal"][-10:]})
+            self._json(200, status_payload(self.daemon))
         elif self.path == "/reliability":
             self._json(200, {"reliability": st["reliability"]})
         elif self.path == "/observe":
@@ -89,7 +119,8 @@ class Ctl(BaseHTTPRequestHandler):
             open(os.path.join(HERE, "KILL"), "w").write(_utcnow())
             self._json(200, {"killed": True})
         elif self.path == "/rescreen":
-            self.daemon.queue_rescreen()
+            # manual: always honored, even at the demo-bot cap
+            self.daemon.queue_rescreen(force=True)
             self._json(200, {"queued": True})
         elif self.path == "/reliability":
             self.daemon.queue_reliability()
@@ -114,7 +145,8 @@ class Ctl(BaseHTTPRequestHandler):
                 self._json(404, {"error": f"no active bot in slot {slot}"})
                 return
             bot["force_rotate"] = True
-            self.daemon.queue_rescreen()  # rotation is evaluated on rescreen
+            # manual: rotations are allowed at the demo-bot cap
+            self.daemon.queue_rescreen(force=True)  # rotation evaluated on rescreen
             self._json(200, {"queued": True, "slot": slot,
                              "symbol": bot.get("symbol")})
         else:
@@ -126,13 +158,16 @@ class Ctl(BaseHTTPRequestHandler):
 
 def serve_ctl(daemon, port):
     Ctl.daemon = daemon
+    # Bind host is env-overridable for containers (docker -p needs 0.0.0.0
+    # inside the container; the local default stays loopback-only).
+    _bind_host = os.environ.get("GRID_BIND_HOST", "127.0.0.1")
     try:
-        HTTPServer(("127.0.0.1", port), Ctl).serve_forever()
+        HTTPServer((_bind_host, port), Ctl).serve_forever()
     except OSError as exc:
         # e.g. EADDRINUSE when a stray `daemon.py --once` holds the port —
         # this thread used to die silently, leaving the daemon trading with
         # no control plane. Surface it loudly (stdout + state journal).
-        msg = f"ctl plane failed to bind 127.0.0.1:{port}: {exc}"
+        msg = f"ctl plane failed to bind {_bind_host}:{port}: {exc}"
         print(msg, flush=True)
         try:
             daemon.state.setdefault("journal", []).append(

@@ -35,6 +35,10 @@ function fmtPrice(p) {
 }
 const fmtUsd = (v) => (v === null || v === undefined || isNaN(v))
   ? "—" : `$${Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const fmtSignedUsd = (v) => (v === null || v === undefined || isNaN(v))
+  ? "—" : `${Number(v) >= 0 ? "+" : "−"}$${Math.abs(Number(v)).toLocaleString("en-US", { maximumFractionDigits: 2 })}`;
+const isNum = (v) => typeof v === "number" && isFinite(v) ||
+  (typeof v === "string" && v !== "" && !isNaN(Number(v)));
 const fmtNum = (v, d = 2) => (v === null || v === undefined || isNaN(v))
   ? "—" : Number(v).toFixed(d);
 const fmtPct = (v) => (v === null || v === undefined || isNaN(v))
@@ -110,7 +114,7 @@ function confirmDialog({ title, body, label = "Confirm", danger = false, checkbo
 
 /* ── tabs ─────────────────────────────────────────────────────────── */
 
-const VIEWS = ["fleet", "decisions", "reports", "reliability", "config", "logs"];
+const VIEWS = ["fleet", "decisions", "reports", "optimizer", "reliability", "config", "logs"];
 let activeView = "fleet";
 
 function selectView(name) {
@@ -123,6 +127,7 @@ function selectView(name) {
   if (name === "fleet") loadOverview(); // immediate render, don't wait for the poll tick
   if (name === "decisions") loadDecisions();
   if (name === "reports") loadReports();
+  if (name === "optimizer") loadOptimizer();
   if (name === "reliability") loadReliability();
   if (name === "config") { loadConfig(); loadLlm(); }
   if (name === "logs") loadLogs(true);
@@ -133,6 +138,8 @@ for (const v of VIEWS) $(`#tab-${v}`).addEventListener("click", () => selectView
 /* ── overview / statusbar / fleet ─────────────────────────────────── */
 
 let lastOverview = null;
+let lastStatus = null;       // proxied daemon /status (fail-soft: null when down)
+let lastPnlPoints = null;   // /api/pnl points (newest-first)
 
 async function loadOverview() {
   let ov;
@@ -143,13 +150,22 @@ async function loadOverview() {
     return;
   }
   lastOverview = ov;
+  let st = null;
+  try {
+    st = await api("/api/status");   // fail-soft proxy — 200 + {"error"} when down
+  } catch (e) { st = null; }
+  if (!st || st.error) st = null;
+  lastStatus = st;
   renderStatusbar(ov);
   if (activeView === "fleet") {
     renderReadiness(ov);
-    renderFleet(ov);
+    renderFleet(ov, st);
+    renderFleetHeader(ov, st);
+    renderVetoStrip(ov, st);
     renderFeed(ov.journal_tail || []);
     renderScreen(ov.screen);
     renderSummary(ov);
+    drawPnlChart(lastPnlPoints || []);
   }
 }
 
@@ -221,10 +237,17 @@ function ladderHTML(bot) {
 
 function slotCard(bot) {
   const obs = bot.observed || {};
-  const pnl = obs.unrealized_pnl;
+  const unrl = obs.unrealized_pnl;
+  const real = obs.realized_pnl;
+  const realC = obs.realized_pnl_completed;
+  const realP = obs.realized_pnl_panic;
+  const net = (isNum(real) ? real : 0) + (isNum(unrl) ? unrl : 0);
+  const hasNet = isNum(real) || isNum(unrl);
   const status = (obs.status || "unknown").toLowerCase();
   const dead = status !== "active" && status !== "unknown";
   const stagIf = (bot.stagnation_policy || {}).stagnant_if || {};
+  const dd = obs.dd_vs_atr_band;
+  const outsideBand = isNum(dd) && dd > 1;
   const card = el("article", {
     class: `card slot-card${dead ? " slot-card--dead" : ""}`,
     "data-slot": String(bot.slot),
@@ -235,7 +258,19 @@ function slotCard(bot) {
   if (bot.stagnant) flags.push(`<span class="badge badge--warn">stagnant</span>`);
   if (bot.needs_reanalysis) flags.push(`<span class="badge badge--warn">re-analysis</span>`);
   if (bot.force_rotate) flags.push(`<span class="badge badge--violet">rotate queued</span>`);
+  if (obs.loss_veto) flags.push(`<span class="badge badge--bad">loss veto</span>`);
+  if (obs.exit_queued) flags.push(`<span class="badge badge--violet">exit queued</span>`);
+  if (outsideBand) flags.push(`<span class="badge badge--bad" title="drawdown ${fmtNum(dd, 2)}× the ATR band — price is outside the channel the grid was built for">outside band</span>`);
   if (dead) flags.push(`<span class="badge badge--bad">${esc(status)}</span>`);
+
+  const realizedCell = isNum(real)
+    ? `<div class="m-value ${real > 0 ? "m-value--good" : real < 0 ? "m-value--bad" : "m-value--dim"}">${fmtSignedUsd(real)}</div>
+       ${(isNum(realC) || isNum(realP)) ? `<div class="m-sub">${isNum(realC) ? `comp ${fmtUsd(realC)}` : ""}${isNum(realC) && isNum(realP) ? " · " : ""}${isNum(realP) ? `panic ${fmtUsd(realP)}` : ""}</div>` : ""}`
+    : `<div class="m-value m-value--dim" title="realized PnL not reported by this daemon build yet">—</div>`;
+
+  const trips = (isNum(obs.trips_completed) || isNum(obs.trips_panic))
+    ? `${obs.trips_completed ?? 0}<span class="m-sub-inline">${isNum(obs.trips_panic) ? ` (${obs.trips_panic} panic)` : ""}</span>`
+    : `<span class="m-value--dim" title="trip counters not reported yet">—</span>`;
 
   card.innerHTML = `
     <div class="slot-head">
@@ -252,9 +287,17 @@ function slotCard(bot) {
       <div class="metric"><div class="m-label">price</div><div class="m-value">${fmtPrice(obs.price)}</div></div>
       <div class="metric"><div class="m-label">fills 24h</div>
         <div class="m-value ${bot.stagnant ? "m-value--warn" : ""}">${esc(obs.fills_24h ?? "—")}<span style="color:var(--ink-faint);font-weight:400"> /${esc(stagIf.min_fills_24h ?? "?")}</span></div></div>
-      <div class="metric"><div class="m-label">unreal. pnl</div>
-        <div class="m-value ${pnl > 0 ? "m-value--good" : pnl < 0 ? "m-value--bad" : "m-value--dim"}">${pnl === null || pnl === undefined ? "—" : fmtUsd(pnl)}</div></div>
-      <div class="metric"><div class="m-label">committed</div><div class="m-value">${fmtUsd(bot.committed)}</div></div>
+      <div class="metric"><div class="m-label">realized</div>${realizedCell}</div>
+      <div class="metric"><div class="m-label">unrealized</div>
+        <div class="m-value ${unrl > 0 ? "m-value--good" : unrl < 0 ? "m-value--bad" : "m-value--dim"}">${isNum(unrl) ? fmtSignedUsd(unrl) : "—"}</div></div>
+      <div class="metric"><div class="m-label">net pnl</div>
+        <div class="m-value ${hasNet ? (net > 0 ? "m-value--good" : net < 0 ? "m-value--bad" : "m-value--dim") : "m-value--dim"}">${hasNet ? fmtSignedUsd(net) : "—"}</div></div>
+      <div class="metric"><div class="m-label">trips</div><div class="m-value">${trips}</div></div>
+      <div class="metric"><div class="m-label">open lines</div>
+        <div class="m-value ${isNum(obs.open_losing) && obs.open_losing > 0 ? "m-value--warn" : ""}" title="${isNum(obs.open_losing) ? `${obs.open_losing} of ${obs.open_lines ?? "?"} lines losing` : ""}">${esc(obs.open_lines ?? "—")}<span style="color:var(--ink-faint);font-weight:400"> (${esc(obs.open_losing ?? "?")} losing)</span></div></div>
+      <div class="metric"><div class="m-label">dd vs band</div>
+        <div class="m-value ${outsideBand ? "m-value--bad" : ""}">${isNum(dd) ? `${fmtNum(dd, 2)}×` : "—"}</div></div>
+      <div class="metric"><div class="m-label">budget</div><div class="m-value">${fmtUsd(bot.committed)}</div></div>
     </div>
     <div class="slot-foot">
       <span class="slot-since">held ${esc(heldFor(bot.since) ?? "—")}</span>
@@ -354,10 +397,17 @@ function renderReadiness(ov) {
   el0.hidden = false;
 }
 
-function renderFleet(ov) {
+function renderFleet(ov, st) {
   const board = $("#slot-board");
   board.innerHTML = "";
-  const bySlot = new Map((ov.bots || []).map((b) => [String(b.slot), b]));
+  // prefer the live ctl /status observations over state.json's last snapshot
+  const liveObs = (st && st.active_bots) || {};
+  const bots = (ov.bots || []).map((b) => {
+    const lo = liveObs[String(b.slot)];
+    return (lo && lo.observed && Object.keys(lo.observed).length)
+      ? { ...b, observed: { ...b.observed, ...lo.observed } } : b;
+  });
+  const bySlot = new Map(bots.map((b) => [String(b.slot), b]));
   const slots = (ov.slots || []).length
     ? ov.slots
     : [...bySlot.keys()].map((s) => ({ slot: s, venue: (bySlot.get(s) || {}).venue || "" }));
@@ -446,6 +496,229 @@ function renderSummary(ov) {
     <div class="row"><span class="k">Health poll</span><span class="v">${esc(cd.watch_interval_s ?? "—")} s</span></div>
     <div class="row"><span class="k">Archetypes tracked</span><span class="v">${Object.keys((ov.reliability || {}).archetypes || {}).length}</span></div>
     ${capRow}`;
+}
+
+/* ── fleet PnL header + veto strip + pnl timeline ─────────────────── */
+
+function fleetPnlData(ov, st) {
+  /* True PnL per the audit contract: daemon /status "pnl" block when the
+     restarted daemon provides it, otherwise derived from per-bot observed
+     fields (realized incl. panic + unrealized). Every field degrades to
+     null when the running daemon predates the field. */
+  const out = { source: null, realized: null, unrealized: null, net: null,
+    completed: null, panic: null, fills: null,
+    committed: null, idle: null, total: null };
+  const ab = (st && st.active_bots) || {};
+  const obsList = Object.values(ab).map((b) => (b && b.observed) || {});
+  const has = (f) => obsList.some((o) => isNum(o[f]));
+  const sum = (f) => obsList.reduce((a, o) => a + (isNum(o[f]) ? Number(o[f]) : 0), 0);
+  const p = (st && typeof st.pnl === "object" && st.pnl) || null;
+  if (p && (isNum(p.realized) || isNum(p.net))) out.source = "ctl pnl block";
+  else if (obsList.length && (has("realized_pnl") || has("unrealized_pnl"))) out.source = "derived from bots";
+  out.realized = p && isNum(p.realized) ? p.realized : (has("realized_pnl") ? sum("realized_pnl") : null);
+  out.unrealized = p && isNum(p.unrealized) ? p.unrealized : (has("unrealized_pnl") ? sum("unrealized_pnl") : null);
+  out.completed = has("realized_pnl_completed") ? sum("realized_pnl_completed") : null;
+  out.panic = has("realized_pnl_panic") ? sum("realized_pnl_panic") : null;
+  out.net = p && isNum(p.net) ? p.net
+    : (out.realized !== null || out.unrealized !== null)
+      ? (out.realized || 0) + (out.unrealized || 0) : null;
+  out.fills = p && isNum(p.fills_24h) ? p.fills_24h : (has("fills_24h") ? sum("fills_24h") : null);
+  const committedMap = (st && st.committed) || {};
+  out.committed = p && isNum(p.committed_usd) ? p.committed_usd
+    : Object.values(committedMap).reduce((a, v) => a + (isNum(v) ? Number(v) : 0), 0) || null;
+  out.total = (ov.config_digest || {}).total_usd;
+  if (out.total != null && isNum(out.total)) out.total = Number(out.total);
+  out.idle = p && isNum(p.idle_usd) ? p.idle_usd
+    : (out.total != null && out.committed != null) ? Number(out.total) - out.committed : null;
+  return out;
+}
+
+function demoCapData(st, ov) {
+  /* daemon demo_cap block, else parsed from the demo-cap-veto journal
+     message ("cap 5/5"), else counted actives with unknown cap. */
+  const d = (st && typeof st.demo_cap === "object" && st.demo_cap) || null;
+  if (d && isNum(d.active)) {
+    return { active: Number(d.active),
+      cap: isNum(d.cap) ? Number(d.cap) : null,
+      headroom: isNum(d.headroom) ? Number(d.headroom) : null };
+  }
+  const active = Object.keys((st && st.active_bots) || {}).length;
+  const tail = (st && st.journal_tail) || (ov && ov.journal_tail) || [];
+  for (let i = tail.length - 1; i >= 0; i--) {
+    const e = tail[i] || {};
+    if (e.kind === "demo-cap-veto") {
+      const m = /(\d+)\s*\/\s*(\d+)/.exec(String(e.msg || ""));
+      if (m) return { active: Number(m[1]), cap: Number(m[2]), headroom: Number(m[2]) - Number(m[1]), vetoed: true };
+    }
+  }
+  return { active, cap: null, headroom: null, vetoed: false };
+}
+
+function renderFleetHeader(ov, st) {
+  const box = $("#pnl-header");
+  if (!box) return;
+  const p = fleetPnlData(ov, st);
+  const cap = demoCapData(st, ov);
+  const nBots = Object.keys((st && st.active_bots) || {}).length || (ov.bots || []).length;
+
+  const netCls = p.net == null ? "m-value--dim" : p.net > 0 ? "m-value--good" : p.net < 0 ? "m-value--bad" : "m-value--dim";
+  const idlePct = (p.idle == null || !p.total) ? null : (p.idle / p.total) * 100;
+
+  let realizedSub;
+  if (p.completed != null || p.panic != null) {
+    realizedSub = `<div class="pnl-sub">${p.completed != null ? `completed ${fmtUsd(p.completed)}` : ""}${p.completed != null && p.panic != null ? " \u00b7 " : ""}${p.panic != null ? `panic ${fmtUsd(p.panic)}` : ""}</div>`;
+  } else {
+    realizedSub = `<div class="pnl-sub pnl-sub--faint" title="per-bot completed/panic split arrives with the daemon restart">split (completed/panic) not reported \u2014 daemon pre-restart</div>`;
+  }
+
+  // demo-cap meter: 5/5 means every new deploy is vetoed at the platform cap
+  let capCell;
+  if (cap.cap != null && cap.cap > 0) {
+    const full = cap.active >= cap.cap;
+    const w = Math.min(100, (cap.active / cap.cap) * 100);
+    capCell = `<div class="pnl-cell cap-meter${full ? " cap-meter--full" : ""}" title="paper/demo grid-bot platform cap${cap.headroom != null ? ` \u00b7 headroom ${cap.headroom}` : ""}">
+      <div class="m-label">demo cap</div>
+      <div class="cap-bar"><div class="cap-fill" style="width:${w.toFixed(1)}%"></div></div>
+      <div class="cap-label">${full ? `<b>demo bots ${cap.active}/${cap.cap} \u2014 deploys blocked</b>` : `demo bots ${cap.active}/${cap.cap}`}</div>
+    </div>`;
+  } else {
+    capCell = `<div class="pnl-cell" title="cap not reported by this daemon build">
+      <div class="m-label">demo cap</div>
+      <div class="m-value m-value--dim">${cap.active} paper bots \u00b7 cap unknown</div>
+      <div class="pnl-sub pnl-sub--faint">demo_cap block arrives with the daemon restart</div></div>`;
+  }
+
+  box.innerHTML = `
+    <div class="pnl-header-grid">
+      <div class="pnl-hero">
+        <div class="pnl-hero-label">TRUE NET PnL <span class="pnl-hero-note" title="realized (incl. panic exits) + unrealized mark">${p.source ? `\u00b7 ${esc(p.source)}` : "\u00b7 no pnl fields yet"}</span></div>
+        <div class="pnl-hero-value ${netCls}">${p.net == null ? "\u2014" : fmtSignedUsd(p.net)}</div>
+      </div>
+      <div class="pnl-cells">
+        <div class="pnl-cell"><div class="m-label">realized</div>
+          <div class="m-value ${p.realized > 0 ? "m-value--good" : p.realized < 0 ? "m-value--bad" : "m-value--dim"}">${p.realized == null ? "\u2014" : fmtSignedUsd(p.realized)}</div>
+          ${realizedSub}</div>
+        <div class="pnl-cell"><div class="m-label">unrealized</div>
+          <div class="m-value ${p.unrealized > 0 ? "m-value--good" : p.unrealized < 0 ? "m-value--bad" : "m-value--dim"}">${p.unrealized == null ? "\u2014" : fmtSignedUsd(p.unrealized)}</div></div>
+        <div class="pnl-cell"><div class="m-label">committed / idle</div>
+          <div class="m-value">${fmtUsd(p.committed)} <span class="pnl-pct">(${idlePct == null ? "?" : idlePct.toFixed(0) + "% idle"})</span></div>
+          <div class="pnl-sub">${fmtUsd(p.idle)} idle of ${fmtUsd(p.total)} fund${idlePct != null ? ` \u00b7 ${(100 - idlePct).toFixed(0)}% committed` : ""}</div></div>
+        <div class="pnl-cell"><div class="m-label">fills 24h</div>
+          <div class="m-value">${p.fills == null ? "\u2014" : p.fills}</div>
+          <div class="pnl-sub">${nBots} active bot${nBots === 1 ? "" : "s"}</div></div>
+        ${capCell}
+      </div>
+      <div class="pnl-chart">
+        <div class="m-label">net \u00b7 realized \u2014 <span id="pnl-chart-meta">no history yet</span></div>
+        <canvas id="pnl-canvas" width="360" height="96" role="img" aria-label="fleet PnL timeline"></canvas>
+      </div>
+    </div>`;
+  drawPnlChart(lastPnlPoints || []);
+}
+
+function renderVetoStrip(ov, st) {
+  const box = $("#veto-strip");
+  if (!box) return;
+  const tail = (st && st.journal_tail) || ov.journal_tail || [];
+  const count = (kind) => tail.filter((e) => e && e.kind === kind).length;
+  const demo = count("demo-cap-veto"), guard = count("guard-veto"), capac = count("capacity-veto");
+  const top = (ov.screen && ov.screen.top && ov.screen.top[0]) || null;
+  const last = tail.length ? tail[tail.length - 1] : null;
+  const chips = [];
+  const vetoTotal = demo + guard + capac;
+  chips.push(`<span class="veto-chip${vetoTotal ? " veto-chip--warn" : ""}" title="vetoes in the current journal tail (\u2248 last few hours)">vetoes <b>${vetoTotal}</b></span>`);
+  if (demo) chips.push(`<span class="veto-chip veto-chip--warn" title="new deploys skipped at the paper grid-bot platform cap">demo-cap ${demo}</span>`);
+  if (guard) chips.push(`<span class="veto-chip veto-chip--warn" title="a guardrail refused a candidate">guard ${guard}</span>`);
+  if (capac) chips.push(`<span class="veto-chip veto-chip--warn" title="plan/venue capacity refused a deploy">capacity ${capac}</span>`);
+  chips.push(`<span class="veto-chip" title="top of the last screen board">screen top <b>${top ? `${esc(top.venue)}:${esc(top.symbol)} ${fmtNum(top.score_final, 1)}` : "\u2014"}</b></span>`);
+  chips.push(`<span class="veto-chip veto-chip--dim" title="last journal event">last ${esc(relTime(last && last.at))} \u00b7 ${esc((last && last.kind) || "\u2014")}</span>`);
+  box.innerHTML = `<div class="veto-cells">${chips.join("")}</div>`;
+}
+
+/* PnL timeline — inline canvas (no CDN, works offline). Two series:
+   net (solid + area) and realized (thin), zero line, newest on the right. */
+function drawPnlChart(points) {
+  const canvas = document.getElementById("pnl-canvas");
+  const meta = document.getElementById("pnl-chart-meta");
+  if (!canvas) return;
+  const pts = (points || []).slice().reverse().filter((p) => p && p.at); // oldest → newest
+  if (meta) meta.textContent = pts.length
+    ? `${pts.length} snapshot${pts.length === 1 ? "" : "s"} \u00b7 ${relTime(pts[pts.length - 1].at)}`
+    : "no history yet";
+  const ctx = canvas.getContext && canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = 360, H = 96;
+  if (canvas.width !== W * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
+  canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (pts.length < 1) {
+    ctx.fillStyle = "#7C8B83";
+    ctx.font = "11px 'IBM Plex Mono', monospace";
+    ctx.fillText("no pnl-snapshot history (daemon pre-restart?)", 8, H / 2);
+    return;
+  }
+  const val = (p, k) => {
+    const f = p.fleet || {};
+    return isNum(f[k]) ? Number(f[k]) : null;
+  };
+  const series = [
+    { key: "net", color: "#0A7E6D", fill: "rgba(10,126,109,0.10)", width: 2 },
+    { key: "realized", color: "#9A5B04", fill: null, width: 1.25 },
+  ];
+  const vals = [];
+  for (const p of pts) for (const s of series) { const v = val(p, s.key); if (v !== null) vals.push(v); }
+  if (!vals.length) {
+    ctx.fillStyle = "#7C8B83";
+    ctx.font = "11px 'IBM Plex Mono', monospace";
+    ctx.fillText("snapshots present but no fleet values", 8, H / 2);
+    return;
+  }
+  let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
+  if (max - min < 1e-9) { max += 0.5; min -= 0.5; }
+  const pad = (max - min) * 0.12;
+  min -= pad; max += pad;
+  const padL = 8, padR = 8, padT = 6, padB = 6;
+  const X = (i) => padL + (pts.length === 1 ? (W - padL - padR) / 2
+    : (i / (pts.length - 1)) * (W - padL - padR));
+  const Y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
+  // zero line
+  if (min < 0 && max > 0) {
+    ctx.strokeStyle = "rgba(24,36,32,0.25)";
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  for (const s of series) {
+    const xy = [];
+    pts.forEach((p, i) => { const v = val(p, s.key); if (v !== null) xy.push([X(i), Y(v)]); });
+    if (!xy.length) continue;
+    if (s.fill) {
+      ctx.beginPath();
+      ctx.moveTo(xy[0][0], H - padB);
+      for (const [x, y] of xy) ctx.lineTo(x, y);
+      ctx.lineTo(xy[xy.length - 1][0], H - padB);
+      ctx.closePath();
+      ctx.fillStyle = s.fill; ctx.fill();
+    }
+    ctx.beginPath();
+    xy.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.strokeStyle = s.color; ctx.lineWidth = s.width;
+    ctx.lineJoin = "round"; ctx.lineCap = "round";
+    ctx.stroke();
+    const lastPt = xy[xy.length - 1];
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(lastPt[0], lastPt[1], 2.4, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+async function loadPnlTimeline() {
+  let data;
+  try { data = await api("/api/pnl"); }
+  catch (e) { lastPnlPoints = null; drawPnlChart([]); return; }
+  lastPnlPoints = (data && data.points) || [];
+  drawPnlChart(lastPnlPoints);
 }
 
 /* ── decisions ────────────────────────────────────────────────────── */
@@ -563,6 +836,71 @@ function renderMarkdown(md) {
   return out.join("").replace(/<\/ul><ul>/g, "");
 }
 
+/* ── position optimizer (advisory recommendations + apply gate) ─────── */
+
+let optimizerData = null;
+
+async function loadOptimizer() {
+  let d;
+  try { d = await api("/api/recommendations?limit=200"); }
+  catch (e) { toast(`optimizer: ${e.message}`, true); return; }
+  optimizerData = d;
+  renderOptimizer(d);
+}
+
+function blockedByBadge(b) {
+  if (b === "applied") return `<span class="badge badge--ok">applied</span>`;
+  if (b === "apply disabled") return `<span class="badge badge--dim" title="position_optimizer.apply is false in config.yaml — advisory mode, recs never auto-edit WunderTrading">apply disabled</span>`;
+  if (b === "rate limit") return `<span class="badge badge--warn" title="max_apply_per_day persisted recommendations for today already reached">rate limit</span>`;
+  return `<span class="badge badge--violet" title="would apply on its next eligibility check">eligible</span>`;
+}
+
+function renderOptimizer(d) {
+  const recs = (d && d.recommendations) || [];
+  const applyEnabled = !!(d && d.apply);
+  const maxDay = (d && d.max_apply_per_day) ?? "?";
+  const persistedToday = (d && d.persisted_today) ?? "?";
+
+  const bn = $("#opt-banner");
+  if (bn) {
+    if (applyEnabled) {
+      bn.innerHTML = `<div class="banner banner--info"><div>
+        <div class="banner-title">Autonomous apply enabled</div>
+        position_optimizer.apply is true — the daemon may edit WunderTrading grids directly. ${persistedToday}/${maxDay} recommendations persisted today.</div></div>`;
+    } else {
+      bn.innerHTML = `<div class="banner banner--warn"><div>
+        <div class="banner-title">Advisory mode — recommendations are NOT applied</div>
+        position_optimizer.apply is false in config.yaml. Every recommendation below is journaled/persisted only; nothing auto-edits WunderTrading. ${persistedToday}/${maxDay} persisted today (cap: max_apply_per_day).</div></div>`;
+    }
+  }
+
+  const pending = recs.filter((r) => !r.applied);
+  const applied = recs.filter((r) => !!r.applied);
+  $("#opt-pending-count").textContent = `${pending.length} pending \u00b7 ${applied.length} applied`;
+  $("#opt-applied-count").textContent = `${applied.length} applied`;
+
+  const row = (r, appliedMode) => {
+    const delta = r.expected_delta_pct;
+    const at = appliedMode ? (r.applied_at || r.at) : r.at;
+    return `<tr>
+      <td class="td-mono" title="${esc(r.at || "")}">${esc(String(at || "").replace("T", " ").slice(5, 16))}</td>
+      <td class="td-mono">${esc(r.slot ?? "\u2014")}</td>
+      <td class="td-mono">${esc(r.venue || "")}:${esc(r.symbol || "?")}</td>
+      <td><span class="badge badge--violet">${esc(r.recommendation || "?")}</span></td>
+      <td class="td-mono ${(delta || 0) >= 0 ? "m-value--good" : "m-value--bad"}" title="expected 24h profit improvement">${delta == null ? "\u2014" : `${delta >= 0 ? "+" : ""}${fmtNum(delta, 2)}%`}</td>
+      <td class="td-mono">${r.confidence == null ? "\u2014" : fmtNum(r.confidence, 2)}</td>
+      <td class="td-mono">${esc(r.trigger || "\u2014")}</td>
+      ${appliedMode ? "" : `<td>${blockedByBadge(r.blocked_by)}</td>`}
+      <td><div class="rationale" title="${esc(r.rationale || "")}">${esc(r.rationale || "\u2014")}</div></td>
+    </tr>`;
+  };
+
+  $("#opt-pending-body").innerHTML = pending.map((r) => row(r, false)).join("") ||
+    `<tr><td colspan="9"><div class="empty-note">No pending recommendations \u2014 the position optimizer emits one when a bot\u2019s grid is off-price by more than the drift threshold (15 min cadence).</div></td></tr>`;
+  $("#opt-applied-body").innerHTML = applied.map((r) => row(r, true)).join("") ||
+    `<tr><td colspan="8"><div class="empty-note">Nothing applied yet${applyEnabled ? "" : " \u2014 apply is disabled in config (advisory mode)"}.</div></td></tr>`;
+}
+
 /* ── reliability ──────────────────────────────────────────────────── */
 
 async function loadReliability() {
@@ -572,6 +910,26 @@ async function loadReliability() {
   const ladder = rel.ladder || {};
   const archs = Object.entries(rel.archetypes || {}).sort((a, b) =>
     (b[1].samples || 0) - (a[1].samples || 0));
+
+  // snapshot-staleness note: the ledger is a file snapshot refreshed by the
+  // daemon's 24h health cycle — past that (+grace) it is stale evidence.
+  const noteBox = $("#rel-note");
+  if (noteBox) {
+    const age = rel.ledger_age_h;
+    const notes = [];
+    if (rel.stale) {
+      notes.push(`<div class="banner banner--warn"><div><div class="banner-title">Reliability ledger is a stale snapshot (${fmtNum(age, 1)}h old)</div>
+        The 24h refresh cadence has been missed — the daemon may be down or its health cycle has not run. Treat every aggregate below as last-known, not live.</div></div>`);
+    } else if (age != null) {
+      notes.push(`<div class="banner banner--info"><div>Ledger snapshot age: <b>${fmtNum(age, 1)}h</b> (refresh cadence ${esc(rel.refresh_cadence_h ?? 24)}h).</div></div>`);
+    }
+    const anySynth = archs.some(([, s]) => (s.synthetic_samples || 0) > 0);
+    if (anySynth) {
+      notes.push(`<div class="banner banner--bad"><div><div class="banner-title">Synthetic/seeded samples pollute the ledger</div>
+        Archetypes below carry seeded or backfilled samples (see the “real / synth” column). Expectancy and profit factor include them — they are not evidence from live round-trips.</div></div>`);
+    }
+    noteBox.innerHTML = notes.join("");
+  }
   $("#rel-body").innerHTML = archs.map(([name, s]) => {
     const full = ladder.full_samples || 30, probe = ladder.probe_samples || 10;
     const pctFull = Math.min(100, ((s.samples || 0) / full) * 100);
@@ -579,21 +937,30 @@ async function loadReliability() {
       base: "badge--dim", probe: "badge--violet",
       full: "badge--ok", killed: "badge--bad",
     }[s.tier] || "badge--dim";
+    const synth = s.synthetic_samples || 0;
+    const real = s.real_samples ?? s.samples ?? 0;
+    const synthCell = synth > 0
+      ? `<span class="m-value--bad" title="${synth} synthetic/seeded samples pollute the aggregates">${real} / <b>${synth}</b></span>`
+      : `${real} / 0`;
+    const pfReal = s.profit_factor_real ?? s.profit_factor;
+    const recentReal = s.recent_pf_real ?? s.recent_pf;
+    const expReal = s.expectancy_usd_real ?? s.expectancy_usd;
     return `<tr>
       <td><b>${esc(name)}</b></td>
       <td class="td-mono">${esc(s.samples ?? 0)}</td>
+      <td class="td-mono">${synthCell}</td>
       <td><div class="tier-track" title="${esc(s.samples)} / ${full} samples to full">
         <div class="fill${s.tier === "killed" ? " fill--killed" : ""}" style="width:${pctFull.toFixed(1)}%"></div>
         <div class="mark" style="left:${(probe / full * 100).toFixed(1)}%" title="probe @${probe}"></div>
       </div></td>
-      <td class="td-mono ${(s.profit_factor || 0) >= (ladder.pf_pass || 1.3) ? "m-value--good" : ""}">${esc(fmtNum(s.profit_factor, 2))}</td>
-      <td class="td-mono ${(s.recent_pf || 0) < (ladder.pf_kill || 1.0) ? "m-value--bad" : ""}">${esc(fmtNum(s.recent_pf, 2))}</td>
+      <td class="td-mono ${(pfReal || 0) >= (ladder.pf_pass || 1.3) ? "m-value--good" : ""}"${synth ? ` title="includes ${synth} synthetic samples"` : ""}>${esc(fmtNum(pfReal, 2))}${synth ? "†" : ""}</td>
+      <td class="td-mono ${(recentReal || 0) < (ladder.pf_kill || 1.0) ? "m-value--bad" : ""}">${esc(fmtNum(recentReal, 2))}</td>
       <td class="td-mono">${esc(fmtPct(s.win_rate))}</td>
-      <td class="td-mono">${fmtUsd(s.expectancy_usd)}</td>
+      <td class="td-mono">${fmtUsd(expReal)}${synth ? "†" : ""}</td>
       <td class="td-mono">${fmtUsd(s.max_dd_usd)}</td>
       <td><span class="badge ${tierBadge}">${esc(s.tier)}</span></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="9"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
+  }).join("") || `<tr><td colspan="10"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
 }
 
 /* ── config ───────────────────────────────────────────────────────── */
@@ -1102,6 +1469,8 @@ setInterval(() => {
   if (document.hidden) return;
   tick++;
   loadOverview(); // cheap local reads; keeps the statusbar honest everywhere
+  if (tick % 6 === 0) loadPnlTimeline(); // PnL history (PB query) — every 30s
+  if (activeView === "optimizer" && tick % 4 === 0) loadOptimizer();
   if (activeView === "decisions" && tick % 4 === 0) loadDecisions();
   if (activeView === "logs" && tick % 2 === 0) loadLogs();
 }, 5000);
@@ -1110,6 +1479,7 @@ async function boot() {
   const hash = (location.hash || "#fleet").slice(1);
   selectView(VIEWS.includes(hash) ? hash : "fleet");
   loadOverview();
+  loadPnlTimeline();
   try {
     const meta = await api("/api/meta");
     $("#footnote").textContent =

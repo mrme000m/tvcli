@@ -302,8 +302,20 @@ class PB:
     # ── write-through mirrors of the daemon's file sinks ─────────────────
     def journal(self, event: dict) -> dict | None:
         """Mirror daemon.log(): one journal record. `event` should already
-        carry kind/msg; `at` is added by the caller's log() before this."""
-        return self.create("journal", event)
+        carry kind/msg; `at` is added by the caller's log() before this.
+        Schema-fixed keys (kind/msg/at/slot/cycle) go to their columns;
+        every OTHER key in the event (e.g. the pnl-snapshot fleet/bots
+        payload) is packed into the free `extra` JSON column so structured
+        data survives the write-through (the console's /api/pnl reads it)."""
+        data = dict(event)
+        known = {"kind", "msg", "at", "slot", "cycle"}
+        extra = {}
+        for key in list(data.keys()):
+            if key not in known:
+                extra[key] = data.pop(key)
+        if extra:
+            data["extra"] = json.dumps(extra)
+        return self.create("journal", data)
 
     def decision(self, line: dict) -> dict | None:
         """Mirror reflect.record_decision(): one decisions record.
@@ -314,6 +326,35 @@ class PB:
         if "id" in data and "decision_id" not in data:
             data["decision_id"] = data.pop("id")
         return self.create("decisions", data)
+
+    def recommendation(self, rec: dict) -> dict | None:
+        """Mirror position_optimizer persistence: one recommendations record.
+        The engine's rec carries its own uuid in `id`; PocketBase reserves
+        `id` for its auto-generated record id, so rename -> recommendation_id
+        (same shape as decision() above)."""
+        data = dict(rec)
+        if "id" in data and "recommendation_id" not in data:
+            data["recommendation_id"] = data.pop("id")
+        return self.create("recommendations", data)
+
+    def recommendation_update(self, recommendation_id: str,
+                              patch: dict) -> dict | None:
+        """Patch a recommendations record by the ENGINE's recommendation
+        uuid (PocketBase mints its own record id, so match on the renamed
+        recommendation_id field — same shape as decision_outcome). Used by
+        the daemon's position-optimizer apply path to flip
+        applied/applied_at on a persisted rec. Returns None when PB is off,
+        the record is missing, or the write fails (non-fatal)."""
+        if not self._guard() or not recommendation_id:
+            return None
+        rows = self.list(
+            "recommendations",
+            filter=f'recommendation_id = "{recommendation_id}"',
+            per_page=1,
+        )
+        if not rows:
+            return None
+        return self.update("recommendations", rows[0]["id"], patch)
 
     def decision_outcome(self, decision_id: str, final: dict) -> dict | None:
         """Mirror reflect.record_outcome(): attach outcome by decision id.

@@ -1012,8 +1012,24 @@ class TestDaemonWiring(ManageHarness):
                                    "candidates": [_cand(
                                        "hyperliquid", "SOL", 90)]}
         self.grid_status_ret = [{"code": "OLDBOT", "status": "stopped"}]
+
+        class _HermeticHunter:
+            """Identity refresh, no tvcli enrichment: the swap margin is
+            fully deterministic (challenger SOL 90 vs incumbent PUMP 50,
+            Δ+40 ≥ arbiter band 5). The default FastHunter binds LIVE
+            market data — with fresh-vs-fresh margins (the incumbent's
+            score is re-hunted every cycle) a strong PUMP tape made the
+            test flake on Δscore < band (live repro 2026-09-06 13:27Z:
+            fresh PUMP ~98.6 > SOL 90 − 5 → veto)."""
+            def refresh_one(self, cand):
+                return dict(cand)
+
+            def apply_structure(self, cands, skills, timeframe, bars):
+                return cands, {}
+
         with mock.patch.object(optimizer, "HAS_LLM", False):
-            rep = d.optimizer.run_cycle(dry_run=False)
+            rep = d.optimizer.run_cycle(dry_run=False,
+                                        hunter=_HermeticHunter())
         # execute_rotation → plan_candidate → build → stop/verify → delete
         # → create: the challenger bot was actually created through the
         # stubbed grid_adapter

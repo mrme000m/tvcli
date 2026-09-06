@@ -28,6 +28,7 @@
     <button class="tab" role="tab" id="tab-fleet" aria-selected="true" aria-controls="view-fleet">Fleet</button>
     <button class="tab" role="tab" id="tab-decisions" aria-selected="false" aria-controls="view-decisions">Decisions</button>
     <button class="tab" role="tab" id="tab-reports" aria-selected="false" aria-controls="view-reports">Run cards</button>
+    <button class="tab" role="tab" id="tab-optimizer" aria-selected="false" aria-controls="view-optimizer">Optimizer</button>
     <button class="tab" role="tab" id="tab-reliability" aria-selected="false" aria-controls="view-reliability">Reliability</button>
     <button class="tab" role="tab" id="tab-config" aria-selected="false" aria-controls="view-config">Config</button>
     <button class="tab" role="tab" id="tab-logs" aria-selected="false" aria-controls="view-logs">Logs</button>
@@ -39,6 +40,10 @@
   <!-- ══ FLEET ══ -->
   <section class="view" id="view-fleet" role="tabpanel" aria-labelledby="tab-fleet">
     <div id="fleet-banner"></div>
+    <div class="card pnl-header" id="pnl-header" aria-live="polite">
+      <div class="pnl-header-skel">fleet PnL header loading…</div>
+    </div>
+    <div class="card veto-strip" id="veto-strip" aria-live="polite"></div>
     <div class="readiness card" id="readiness" aria-live="polite"></div>
     <div class="fleet-layout">
       <div class="fleet-grid" id="slot-board"></div>
@@ -130,16 +135,54 @@
     </div>
   </section>
 
+  <!-- ══ POSITION OPTIMIZER ══ -->
+  <section class="view" id="view-optimizer" role="tabpanel" aria-labelledby="tab-optimizer" hidden>
+    <div class="view-head">
+      <h2>Position optimizer</h2>
+      <span class="sub">Slow-loop recommendations (fresh-candle grid revaluation, TP/SL/trailing exit scoring) — advisory by default, each with its apply-gate verdict.</span>
+    </div>
+    <div id="opt-banner"></div>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Pending · unapplied</span>
+        <span class="spacer"></span><span class="mono" id="opt-pending-count" style="font-size:11px;color:var(--ink-faint)"></span></div>
+      <div class="card-body--tight table-wrap">
+        <table class="ledger">
+          <thead><tr>
+            <th>at</th><th>slot</th><th>market</th><th>rec</th><th>Δ expected</th>
+            <th>confidence</th><th>trigger</th><th>blocked by</th><th>rationale</th>
+          </tr></thead>
+          <tbody id="opt-pending-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <p></p>
+    <div class="card">
+      <div class="card-head"><span class="card-title">Applied</span>
+        <span class="spacer"></span><span class="mono" id="opt-applied-count" style="font-size:11px;color:var(--ink-faint)"></span></div>
+      <div class="card-body--tight table-wrap">
+        <table class="ledger">
+          <thead><tr>
+            <th>applied at</th><th>slot</th><th>market</th><th>rec</th><th>Δ expected</th>
+            <th>confidence</th><th>trigger</th><th>rationale</th>
+          </tr></thead>
+          <tbody id="opt-applied-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- ══ RELIABILITY ══ -->
   <section class="view" id="view-reliability" role="tabpanel" aria-labelledby="tab-reliability" hidden>
     <div class="view-head">
       <h2>Reliability ledger</h2>
       <span class="sub">Closed round-trips per regime archetype gate the sizing ladder: base &lt;10 samples → probe ≥10 → full ≥30 &amp; PF ≥1.3; recent PF &lt;1.0 kills the archetype.</span>
     </div>
+    <div class="view-head"><span class="sub">Aggregates come from the daemon’s snapshot ledger (24h refresh). Synthetic/seeded samples are counted out of the real-sample column; expectancies and PF are only trustworthy when the synthetic count is zero.</span></div>
+    <div id="rel-note"></div>
     <div class="card"><div class="card-body--tight table-wrap">
       <table class="ledger">
         <thead><tr>
-          <th>archetype</th><th>samples</th><th>progress → full</th><th>profit factor</th>
+          <th>archetype</th><th>samples</th><th>real / synth</th><th>progress → full</th><th>profit factor</th>
           <th>recent PF</th><th>win rate</th><th>expectancy</th><th>max DD</th><th>tier</th>
         </tr></thead>
         <tbody id="rel-body"></tbody>
