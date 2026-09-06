@@ -25,20 +25,26 @@ MODE="${GRID_MODE:-dry-run}"
 
 [ -f "$ENV_FILE" ] || { echo "vps-run: missing env file $ENV_FILE" >&2; exit 1; }
 
+# docker needs sudo when the ssh user is not in the docker group
+DOCKER="${DOCKER_CMD:-}"
+if [ -z "$DOCKER" ]; then
+  if docker info >/dev/null 2>&1; then DOCKER=docker; else DOCKER="sudo docker"; fi
+fi
+
 for v in grid-state grid-pb grid-profile grid-secrets grid-bwcli; do
-  docker volume create "$v" >/dev/null
+  $DOCKER volume create "$v" >/dev/null
 done
 
 # graceful replace: SIGTERM + up to 60s settle (entrypoint traps and shuts
 # down PB/serve/browser/daemon cleanly), then force-remove the leftovers
-if docker inspect "$NAME" >/dev/null 2>&1; then
+if $DOCKER inspect "$NAME" >/dev/null 2>&1; then
   echo "vps-run: stopping old $NAME (graceful, up to 60s)…"
-  docker stop -t 60 "$NAME" >/dev/null 2>&1 || true
-  docker rm -f "$NAME" >/dev/null 2>&1 || true
+  $DOCKER stop -t 60 "$NAME" >/dev/null 2>&1 || true
+  $DOCKER rm -f "$NAME" >/dev/null 2>&1 || true
 fi
 
 echo "vps-run: starting $NAME from $IMAGE (GRID_MODE=$MODE)…"
-docker run -d --name "$NAME" \
+$DOCKER run -d --name "$NAME" \
   --restart unless-stopped \
   --stop-timeout 60 \
   --env-file "$ENV_FILE" \
