@@ -222,12 +222,15 @@ async function main() {
     }
     console.log(`wt-login: submitted via ${via} — waiting for session…`);
 
-    // (c) poll up to ~45s; the invisible reCAPTCHA executes on submit and
-    //     Cloudflare interstitials can add seconds. Probe in place first,
-    //     then confirm on grid_bots.
+    // (c) poll up to ~75s; the invisible reCAPTCHA executes on submit and
+    //     Cloudflare interstitials can add a LOT of seconds on datacenter
+    //     IPs (az00: a login took ~4 min wall-clock behind "Just a
+    //     moment…" pages — the entrypoint's `timeout 300` is the real
+    //     ceiling; cfChallenge pages keep this loop waiting). Probe in
+    //     place first, then confirm on grid_bots.
     let last = probe;
     let errors = [];
-    for (let i = 0; i < 9; i++) {
+    for (let i = 0; i < 25; i++) {
       await sleep(3000);
       if (i === 0) errors = await formErrors(page);
       ({ authed, probe } = await probeAuth(page));

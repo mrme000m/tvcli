@@ -241,7 +241,7 @@ if has browser; then
   if [ "$ok" = "1" ]; then
     log "CloakBrowser CDP ready on :9222"
     # WT session restore / page assert — non-fatal on failure.
-    if timeout 120 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" \
+    if timeout 300 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" \
         node "$APP/browser-debug/wt.mjs" >>"$GRID/state/wt-restore.log" 2>&1; then
       log "WunderTrading session restored (wt.mjs OK)"
     else
@@ -258,10 +258,10 @@ if has browser; then
       warn "WT auth probe: AUTH FAIL (stale session?)"
       if [ -n "${WT_EMAIL:-}" ] && [ -n "${WT_PASSWORD:-}" ]; then
         log "attempting credential login (wt-login.mjs)…"
-        if timeout 120 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" WT_EMAIL="$WT_EMAIL" WT_PASSWORD="$WT_PASSWORD" \
+        if timeout 300 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" WT_EMAIL="$WT_EMAIL" WT_PASSWORD="$WT_PASSWORD" \
             node "$APP/browser-debug/wt-login.mjs" >>"$GRID/state/wt-restore.log" 2>&1; then
           log "WT credential login OK — re-running session restore"
-          timeout 120 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" \
+          timeout 300 env CB_PROFILE="$CB_PROFILE" DISPLAY="${DISPLAY}" \
             node "$APP/browser-debug/wt.mjs" >>"$GRID/state/wt-restore.log" 2>&1 \
             && log "WT session re-restored (wt.mjs OK)" \
             || warn "wt.mjs re-restore failed (see $GRID/state/wt-restore.log)"
@@ -310,11 +310,11 @@ if has browser && has daemon; then
           >>"$GRID/state/wt-keeper.log" 2>&1; then
         echo "[wt-keeper] auth probe FAILED — $(date -u +%H:%M:%SZ)"
         if [ -n "${WT_EMAIL:-}" ] && [ -n "${WT_PASSWORD:-}" ]; then
-          if timeout 120 env CB_PROFILE="${CB_PROFILE}" DISPLAY="${DISPLAY}" \
+          if timeout 300 env CB_PROFILE="${CB_PROFILE}" DISPLAY="${DISPLAY}" \
               WT_EMAIL="${WT_EMAIL}" WT_PASSWORD="${WT_PASSWORD}" \
               node "$APP/browser-debug/wt-login.mjs" >>"$GRID/state/wt-keeper.log" 2>&1; then
             echo "[wt-keeper] credential re-login OK — re-asserting WT page"
-            timeout 120 env CB_PROFILE="${CB_PROFILE}" DISPLAY="${DISPLAY}" \
+            timeout 300 env CB_PROFILE="${CB_PROFILE}" DISPLAY="${DISPLAY}" \
               node "$APP/browser-debug/wt.mjs" >>"$GRID/state/wt-keeper.log" 2>&1 \
               && echo "[wt-keeper] page re-asserted" \
               || echo "[wt-keeper] WARN: wt.mjs re-assert failed"
