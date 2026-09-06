@@ -35,6 +35,12 @@ for v in grid-state grid-pb grid-profile grid-secrets grid-bwcli; do
   $DOCKER volume create "$v" >/dev/null
 done
 
+# grid-net carries the public traffic: the cloudflared connector container
+# joins it and reaches the grid-autonomy container's ports by docker DNS
+# (http://grid-autonomy:PORT) — no host port publishing needed for the
+# tunnel. Kept idempotent: created when missing, rejoined on every redeploy.
+$DOCKER network create grid-net >/dev/null 2>&1 || true
+
 # graceful replace: SIGTERM + up to 60s settle (entrypoint traps and shuts
 # down PB/serve/browser/daemon cleanly), then force-remove the leftovers
 if $DOCKER inspect "$NAME" >/dev/null 2>&1; then
@@ -47,8 +53,10 @@ echo "vps-run: starting $NAME from $IMAGE (GRID_MODE=$MODE)…"
 $DOCKER run -d --name "$NAME" \
   --restart unless-stopped \
   --stop-timeout 60 \
+  --network grid-net \
   --env-file "$ENV_FILE" \
   -e GRID_MODE="$MODE" \
+  -e PB_HOST=0.0.0.0 \
   -p 127.0.0.1:8798:8798 \
   -p 127.0.0.1:8799:8799 \
   -v grid-state:/app/agents/grid-autonomy/state \
@@ -59,6 +67,25 @@ $DOCKER run -d --name "$NAME" \
   "$IMAGE"
 
 echo "vps-run: container up — boot (vault load → browser → WT auth → daemon) takes 1-4 min"
+
+# ── cloudflared connector (public hostnames on the CF tunnel) ───────────────
+# GRID_TUNNEL_TOKEN in the env file = connector token of the remotely-managed
+# 'grid-autonomy' tunnel (ingress + DNS live in Cloudflare; see
+# .agents/skills/cf). Ensured on every redeploy so the stack is self-healing
+# after host reboots too. Without it, this whole block is a no-op.
+TUNNEL_TOKEN="$(grep -E '^GRID_TUNNEL_TOKEN=' "$ENV_FILE" 2>/dev/null | head -1 | cut -d= -f2-)"
+if [ -n "$TUNNEL_TOKEN" ]; then
+  if $DOCKER inspect grid-cloudflared >/dev/null 2>&1; then
+    echo "vps-run: cloudflared connector already present (grid-cloudflared)"
+  else
+    echo "vps-run: starting cloudflared connector (grid-cloudflared)…"
+    $DOCKER run -d --name grid-cloudflared --restart unless-stopped \
+      --network grid-net \
+      cloudflare/cloudflared:latest tunnel --no-autoupdate run --token "$TUNNEL_TOKEN"
+  fi
+else
+  echo "vps-run: no GRID_TUNNEL_TOKEN in $ENV_FILE — public tunnel not managed here"
+fi
 
 # each redeploy's `docker load` orphans the previous image version — clean it
 $DOCKER image prune -f >/dev/null || true

@@ -33,6 +33,8 @@ bin/cf.sh auth-status        # redacted only: id prefix, token lengths, source
 bin/cf.sh zones                              # find the indevs zone
 bin/cf.sh tunnel-list                        # existing tunnels
 bin/cf.sh connectors [TUNNEL_ID]             # connector health (all or one)
+bin/cf.sh tunnel-token TUNNEL_ID             # connector token for
+                                              # `cloudflared tunnel run --token …`
 
 # one-step expose: ensure tunnel + ingress + CNAME hostname → tunnel
 bin/cf.sh expose --tunnel codespace-web \
@@ -42,6 +44,41 @@ bin/cf.sh expose --tunnel codespace-web \
 bin/cf.sh cloudflared-ensure                 # installs cloudflared if missing
 cloudflared tunnel run codespace-web
 ```
+
+## Worked example — grid-autonomy on the az00 VPS
+
+Tunnel `grid-autonomy` publishes ALL four services through one connector
+running next to the stack on the `grid-net` docker network (ingress targets
+`http://grid-autonomy:PORT` — docker DNS, no host port publishing needed):
+
+```bash
+bin/cf.sh tunnel-create grid-autonomy
+bin/cf.sh tunnel-token <TUNNEL_ID>            # → connector token
+bin/cf.sh tunnel-config-put <TUNNEL_ID> --ingress \
+  'hostname=grid.00m.indevs.in,service=http://grid-autonomy:8798;hostname=grid-ctl.00m.indevs.in,service=http://grid-autonomy:8799;hostname=grid-pb.00m.indevs.in,service=http://grid-autonomy:8090;hostname=grid-api.00m.indevs.in,service=http://grid-autonomy:8765'
+for h in grid grid-ctl grid-pb grid-api; do
+  bin/cf.sh dns-route <ZONE_ID> "$h.00m.indevs.in" <TUNNEL_ID>
+done
+# connector (kept ensured by docker/vps-run.sh from GRID_TUNNEL_TOKEN):
+#   docker run -d --name grid-cloudflared --network grid-net \
+#     cloudflare/cloudflared:latest tunnel --no-autoupdate run --token <TOKEN>
+```
+
+Hostnames: `grid` = mission console :8798, `grid-ctl` = daemon ctl API
+:8799, `grid-pb` = PocketBase :8090, `grid-api` = tvcli serve :8765.
+
+## Where the tokens come from
+
+- **Mac / codespace:** vault fallback (`BW_SESSION` from
+  `browser-debug/secrets/bw-provision.sh`) or the env vars above — dsh agent
+  presets read repo skills from `.agents/skills/` and either path works.
+- **grid-autonomy docker image:** `docker/vault_loader.sh` exports
+  `CF_ACCOUNT_ID` + `CF_API_TOKEN_READ` / `CF_API_TOKEN_WRITE` from the
+  vault item at every boot into `/data/secrets/grid-vault.env` (sourced by
+  the entrypoint AND by interactive shells via the boot-time .bashrc hook),
+  so any agent or shell inside that container runs this skill with pure env
+  auth — in a `docker exec` script, run `. /data/secrets/grid-vault.env`
+  first. The skill is baked into the image at `/app/.agents/skills/cf/`.
 
 Granular commands: `tunnel-get/get/create/delete`, `tunnel-config-get/put`,
 `dns-route ZONE_ID HOSTNAME TUNNEL_ID`. Read commands use the read token,

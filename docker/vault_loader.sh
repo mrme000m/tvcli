@@ -175,6 +175,39 @@ for line in (i.get("notes") or "").splitlines():
   fi
 fi
 
+# ── cf-tunnels: cloudflare-tunnels (custom fields → cf skill env) ────────────
+# Exports the exact env names .agents/skills/cf/scripts/cf.py resolves first:
+# CF_ACCOUNT_ID + CF_API_TOKEN_READ / CF_API_TOKEN_WRITE. With these, agents
+# (dsh presets, operator shells, anything inside the container) can run the
+# cf skill with pure env auth — no vault unlock needed at call time.
+if want cf-tunnels; then
+  item="$(pick_item cloudflare-tunnels cloudflare)"
+  if [ -n "$item" ]; then
+    got="$(printf '%s' "$item" | python3 -c '
+import json, shlex, sys
+i = json.load(sys.stdin)
+want = {"account-id": "CF_ACCOUNT_ID", "read-all": "CF_API_TOKEN_READ",
+        "write-all": "CF_API_TOKEN_WRITE"}
+n = 0
+for f in (i.get("fields") or []):
+    k = want.get((f.get("name") or "").strip())
+    v = (f.get("value") or "").strip()
+    if k and v:
+        print(f"{k}\t{shlex.quote(v)}"); n += 1
+print(f"__COUNT\t{n}")')"
+    cnt=0
+    while IFS=$'\t' read -r k v; do
+      if [ "$k" = "__COUNT" ]; then cnt="$v"; continue; fi
+      env_append "$k" "$v"
+    done <<< "$got"
+    SUMMARY="${SUMMARY} cf-tunnels+${cnt},"
+    log "item 'cloudflare-tunnels' (folder cloudflare): ${cnt} tunnel credentials loaded (cf skill env)"
+  else
+    SUMMARY="${SUMMARY} cf-tunnels MISSING,"
+    warn "vault item 'cloudflare-tunnels' (folder cloudflare) not found"
+  fi
+fi
+
 # ── tv: tvcli-primary-env (notes KEY=VAL → /app/.env, mounted file wins) ────
 if want tv; then
   if [ -f "$TVCLI_ENV_OUT" ]; then

@@ -91,6 +91,13 @@ if [ -n "${BW_URL:-}" ] && [ -n "${BW_CLIENTID:-}" ] && [ -n "${BW_CLIENTSECRET:
     # shellcheck disable=SC1091
     . /data/secrets/grid-vault.env
     log "sourced /data/secrets/grid-vault.env"
+    # exec shells (agents, operators) don't inherit PID-1's env — give
+    # interactive bash the same secrets on login (guarded, never clobbers)
+    for rc in /root/.bashrc /root/.profile; do
+      if ! grep -q 'grid-vault.env' "$rc" 2>/dev/null; then
+        printf '\n# grid-autonomy: vault-resolved runtime secrets (CF tokens, LLM keys, …)\n[ -f /data/secrets/grid-vault.env ] && . /data/secrets/grid-vault.env\n' >> "$rc"
+      fi
+    done
   fi
 else
   log "vault disabled (no BW_* env) — using bind-mounted files"

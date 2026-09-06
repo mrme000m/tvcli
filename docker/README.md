@@ -8,7 +8,9 @@ The image itself is built by `docker/Dockerfile` + `docker/entrypoint.sh`
 
 ## CI/CD deploy (GitHub Actions → az00)
 
-`.github/workflows/grid-autonomy-deploy.yml` (manual `workflow_dispatch`)
+`.github/workflows/grid-autonomy-deploy.yml` (push to main on build-context
+paths — auto-deploys in dry-run — plus manual `workflow_dispatch` with a
+`mode` input)
 builds the image in CI, **streams** it to the VPS
 (`docker save | gzip | ssh … | sudo docker load` — no tarball ever lands
 on the host's small root disk), writes `/opt/grid-autonomy/.env` with the
@@ -33,6 +35,49 @@ ssh -L 8798:localhost:8798 -L 8799:localhost:8799 <host>
 One WunderTrading account must not run two live instances: the Mac's live
 daemon owns the account, so the VPS runs dry-run unless deliberately
 switched to `live-paper`.
+
+## Public hostnames (Cloudflare tunnel)
+
+All four services are published on the indevs domain through the
+remotely-managed `grid-autonomy` Cloudflare tunnel (managed with the
+[`cf` skill](../.agents/skills/cf/SKILL.md) — also baked into the image with
+its vault tokens, so agents can manage tunnels from inside the container):
+
+| hostname | service |
+|---|---|
+| `https://grid.00m.indevs.in` | mission console (UI) :8798 |
+| `https://grid-ctl.00m.indevs.in` | daemon ctl API :8799 |
+| `https://grid-pb.00m.indevs.in` | PocketBase :8090 |
+| `https://grid-api.00m.indevs.in` | tvcli serve :8765 |
+
+The `grid-cloudflared` connector runs beside the stack on the `grid-net`
+docker network (ingress targets `http://grid-autonomy:PORT` — no host port
+publishing involved). `vps-run.sh` keeps it ensured from `GRID_TUNNEL_TOKEN`
+in `/opt/grid-autonomy/.env` (GitHub repo secret, written by the deploy
+workflow), so it survives redeploys and host reboots. Health:
+`gh`-less check — `curl -fs https://grid-ctl.00m.indevs.in/health`.
+
+⚠️ The ctl API and PocketBase are **unauthenticated** on those public
+hostnames (the daemon's kill/config surface!). Consider a Cloudflare Access
+policy on `grid-ctl`/`grid-pb` if the deployment goes live-paper.
+
+## Updating the deployed code with GitHub
+
+Everything the image is built from lives in the repo, so a code update is:
+
+```sh
+git commit -m "grid-autonomy: <change>" && git push          # auto-deploys
+# — or —
+gh workflow run grid-autonomy-deploy.yml --ref main -f mode=dry-run   # manual
+gh run watch     # live progress (build ~4 min + stream + boot ≈ 10-12 min)
+```
+
+Pushes to `main` that touch the build context (`docker/`, `agents/grid-autonomy/`,
+`.agents/skills/`, `browser-debug/wt-login.mjs` + driver deps, Go sources)
+trigger the deploy automatically (dry-run). The workflow is idempotent:
+named volumes keep state across redeploys; the container is replaced with a
+graceful SIGTERM stop; the tunnel connector is untouched. To change the
+deployment mode deliberately, dispatch with `-f mode=live-paper`.
 
 
 grid-autonomy is an autonomous grid-trading daemon that runs the whole loop

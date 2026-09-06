@@ -20,11 +20,26 @@ name: grid-autonomy deploy (az00)
 # or stale it logs in with the vault creds via the CloakBrowser stealth
 # driver and persists fresh cookies to the grid-secrets volume.
 #
-# Manual dispatch only: this deploys a long-running trading daemon; an
-# accidental auto-deploy would clobber a live instance. Two instances on
-# one WunderTrading account must not both run live — the default mode is
-# dry-run (planning only); pass live-paper deliberately.
+# Deploying is deliberate-but-easy: pushes to main that touch the image's
+# build context (docker/, the daemon, the baked skills, the browser tools,
+# Go sources) redeploy automatically in dry-run — the safe default. Two
+# instances on one WunderTrading account must not both run live — use the
+# dispatch input to promote deliberately to live-paper.
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/**'
+      - 'agents/grid-autonomy/**'
+      - '.agents/skills/**'
+      - 'browser-debug/wt-login.mjs'
+      - 'browser-debug/package*.json'
+      - '.dockerignore'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'pkg/**'
+      - 'go.mod'
+      - 'go.sum'
   workflow_dispatch:
     inputs:
       mode:
@@ -71,16 +86,18 @@ jobs:
       - name: Write the vault env file on the host
         run: |
           $SSH_CMD "sudo mkdir -p $REMOTE_DIR && sudo chown ${{ secrets.SSH_USER }} $REMOTE_DIR && chmod 700 $REMOTE_DIR"
-          # BW_* machine-auth for the vault_loader (values are GitHub repo
-          # secrets; the file stays on the host for container restarts).
+          # BW_* machine-auth for the vault_loader + GRID_TUNNEL_TOKEN for
+          # the cloudflared connector (values are GitHub repo secrets; the
+          # file stays on the host for container restarts).
           $SSH_CMD "umask 177 && cat > $REMOTE_DIR/.env" <<'ENVEOF'
           BW_URL=${{ secrets.BW_URL }}
           BW_USERNAME=${{ secrets.BW_USERNAME }}
           BW_PASSWORD=${{ secrets.BW_PASSWORD }}
           BW_CLIENTID=${{ secrets.BW_CLIENTID }}
           BW_CLIENTSECRET=${{ secrets.BW_CLIENTSECRET }}
+          GRID_TUNNEL_TOKEN=${{ secrets.GRID_TUNNEL_TOKEN }}
           ENVEOF
-          $SSH_CMD "chmod 600 $REMOTE_DIR/.env && grep -c '^BW_' $REMOTE_DIR/.env"
+          $SSH_CMD "chmod 600 $REMOTE_DIR/.env && grep -c '^[A-Z]' $REMOTE_DIR/.env"
 
       - name: Ship the runner script
         run: |
@@ -90,7 +107,7 @@ jobs:
           $SSH_CMD "chmod +x $REMOTE_DIR/vps-run.sh"
 
       - name: (Re)start the container
-        run: $SSH_CMD "GRID_MODE='${{ inputs.mode }}' IMAGE='$IMAGE' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
+        run: $SSH_CMD "GRID_MODE='${{ inputs.mode || 'dry-run' }}' IMAGE='$IMAGE' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
 
       - name: Health gate (vault load + browser + WT auth can take minutes)
         run: |

@@ -204,6 +204,27 @@ def cmd_tunnel_delete(a) -> int:
     return 0
 
 
+def cmd_tunnel_token(a) -> int:
+    """Connector token for `cloudflared tunnel run --token <TOKEN>` on
+    remotely-managed tunnels. The endpoint returns the token as a bare JSON
+    string, not the usual success/result envelope. Never commit or log it."""
+    acct, _ = resolve_account_id()
+    tok = _tok(a, "read")
+    raw = api("GET", f"/accounts/{acct}/cfd_tunnel/{a.tunnel_id}/token", tok)
+    token = None
+    if isinstance(raw, str) and raw:
+        token = raw
+    elif isinstance(raw, dict):
+        r = raw.get("result")
+        if isinstance(r, str) and r:
+            token = r
+    if not token:
+        raise SystemExit(f"tunnel-token: unexpected response shape ({type(raw).__name__})")
+    print(json.dumps({"tunnel_id": a.tunnel_id, "token": token,
+                      "run": f"cloudflared tunnel run --token {token[:7]}…"}, indent=2))
+    return 0
+
+
 def cmd_connectors(a) -> int:
     # Connection health rides on the tunnel object itself (verified live);
     # there is no separate .../connectors endpoint on this API surface.
@@ -324,6 +345,8 @@ def build() -> argparse.ArgumentParser:
     d = sub.add_parser("tunnel-delete", help="delete tunnel (write)")
     d.add_argument("tunnel_id")
     d.add_argument("--cascade", action="store_true", help="also delete connections/config")
+    tk = sub.add_parser("tunnel-token", help="connector token for cloudflared run --token (remotely-managed)")
+    tk.add_argument("tunnel_id")
     k = sub.add_parser("connectors", help="connector status (all tunnels or one)")
     k.add_argument("tunnel_id", nargs="?")
     cg = sub.add_parser("tunnel-config-get", help="tunnel ingress config")
@@ -348,7 +371,8 @@ def main() -> int:
     a = build().parse_args()
     fn = {"auth-status": cmd_auth_status, "zones": cmd_zones, "tunnel-list": cmd_tunnel_list,
           "tunnel-get": cmd_tunnel_get, "tunnel-create": cmd_tunnel_create,
-          "tunnel-delete": cmd_tunnel_delete, "connectors": cmd_connectors,
+          "tunnel-delete": cmd_tunnel_delete, "tunnel-token": cmd_tunnel_token,
+          "connectors": cmd_connectors,
           "tunnel-config-get": cmd_tunnel_config_get, "tunnel-config-put": cmd_tunnel_config_put,
           "dns-route": cmd_dns_route, "expose": cmd_expose,
           "cloudflared-ensure": cmd_cloudflared_ensure}[a.cmd]

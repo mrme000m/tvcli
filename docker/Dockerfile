@@ -100,6 +100,7 @@ RUN set -eux; \
       -e "import {pathToFileURL} from 'node:url'; const m = await import(pathToFileURL('/app/browser-debug/node_modules/cloakbrowser/dist/human-puppeteer/index.js').href); const c = m.resolveConfig('default'); console.log('cloakbrowser driver OK (typing_delay=' + c.typing_delay + 'ms)');"
 
 COPY agents/grid-autonomy/ /app/agents/grid-autonomy/
+COPY .agents/skills/cf/ /app/.agents/skills/cf/
 COPY .agents/skills/wundertrading/scripts/ /app/.agents/skills/wundertrading/scripts/
 COPY .agents/skills/pocketbase/pb_hooks/ /app/.agents/skills/pocketbase/pb_hooks/
 COPY .agents/skills/pocketbase/pb_migrations/ /app/.agents/skills/pocketbase/pb_migrations/

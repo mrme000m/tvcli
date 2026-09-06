@@ -34,6 +34,8 @@
 # ── skill helpers imported by the daemon (load-bearing relative layout) ─────
 !.agents/
 !.agents/skills/
+!.agents/skills/cf/
+!.agents/skills/cf/**
 !.agents/skills/wundertrading/
 !.agents/skills/wundertrading/scripts/
 !.agents/skills/wundertrading/scripts/**
