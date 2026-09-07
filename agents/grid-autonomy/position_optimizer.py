@@ -15,10 +15,19 @@ Design contract (mirrors optimizer.py):
     expected_delta_for_channel / evaluate_exits / make_recommendation —
     take plain dicts + numbers, do zero I/O, and are unit-testable.
   * The PositionOptimizer class takes INJECTABLE dependencies
-    (journal_fn / persist_fn / fetch_candles_fn / now_fn) so tests never
-    touch network, WunderTrading or PocketBase. market_regime /
-    stagnation are imported lazily inside methods, never at import time —
-    this module imports standalone with zero side effects.
+    (journal_fn / persist_fn / fetch_candles_fn / now_fn / apply_fn) so
+    tests never touch network, WunderTrading or PocketBase.
+    market_regime / stagnation are imported lazily inside methods, never
+    at import time — this module imports standalone with zero side
+    effects.
+  * Exit AWARENESS: current_exits(bot) reads the bot's CURRENT exit
+    config (the enriched grid_list fields the observe layer projects), so
+    add-take-profit / add-trailing / add-stop-loss fire only when the
+    field is NOT already set (or is materially different).
+  * Opt-in APPLY: with cfg apply=true AND an injected apply_fn (the
+    daemon wires wt_library.grid_set_exits, exit-only live edit), an
+    exit-add rec is EXECUTED through it and the outcome recorded on the
+    rec. apply stays FALSE by default — advisory only, no WT mutation.
   * Never raises out of analyze_bot / cycle / post_deploy: on any fetch
     or metrics failure the bot is skipped (None / omitted) — fail-soft.
 
@@ -66,6 +75,20 @@ POSITION_OPTIMIZER_DEFAULTS = {
 TRAILING_REGIMES = ("neutral", "chop", "choppy", "range")
 
 STOP_LOSS_PCT_FLOOR = 0.15   # a SL must be >= 15% of slot (wide risk cap)
+
+# ── current-exit awareness (wtclient enriched grid_list fields) ────────
+# GridClient.list() returns these per bot (live-verified 2026-09-07); the
+# daemon projects them onto bot records (bot["exits"] /
+# bot["observed"]["exits"] / top-level on adopted grid_list records) so
+# the engine can see what the bot's exit config CURRENTLY is and never
+# re-recommend an exit that is already in place.
+EXIT_FIELDS = ("takeProfit", "stopLoss", "stopLossPnlCompareType",
+               "trailingStopActivation", "trailingStopExecute",
+               "trailingStopPnlCompareType", "strategyProfitCondition",
+               "strategyStopLossFixedPercentRatio", "pumpProtection",
+               "pumpProtectionOrderType")
+EXIT_APPLY_RECS = ("add-take-profit", "add-trailing", "add-stop-loss")
+EXIT_MATCH_TOL = 0.10   # "already set" = within 10% of the target value
 TP_TRIGGER_RATIO = 0.6      # TP when realized >= 60% of target
 TRAIL_REALIZED_RATIO = 0.3  # trail needs realized_ratio >= 0.3
 FILLS_HEALTHY_RATIO = 0.5   # healthy = fills_24h >= 0.5 × expected
@@ -210,15 +233,127 @@ def expected_delta_for_channel(deployed_width_pct, new_width_pct,
     return round((new_ev - old_ev) / old_ev * 100, 4)
 
 
+# ── pure: current-exit awareness ───────────────────────────────────────
+def current_exits(bot):
+    """CURRENT exit profile of a deployed bot record (pure, {} unknown).
+
+    Reads the enriched grid_list fields from wherever the daemon projects
+    them on the bot record — ``bot["exits"]`` (daemon health-cycle
+    projection), ``bot["observed"]["exits"]`` (observe._observe_one) or
+    the raw fields at the top level (a grid_list record) — so exit-add
+    recommendations are only made when the field is NOT already set.
+    """
+    if not isinstance(bot, dict):
+        return {}
+    for src in (bot.get("exits"),
+                (bot.get("observed") or {}).get("exits"),
+                bot.get("exit_profile_current")):
+        if isinstance(src, dict) and src:
+            return {k: src.get(k) for k in EXIT_FIELDS}
+    if any(bot.get(k) is not None for k in EXIT_FIELDS):
+        return {k: bot.get(k) for k in EXIT_FIELDS}
+    return {}
+
+
+def _num_close(cur, target, tol=EXIT_MATCH_TOL):
+    """True when cur ≈ target within the relative tolerance (both numeric)."""
+    try:
+        cur = float(cur)
+        target = float(target)
+    except (TypeError, ValueError):
+        return False
+    if target == 0:
+        return abs(cur) <= tol
+    return abs(cur - target) <= tol * abs(target)
+
+
+def _covered(kind, exits, current):
+    """True when the bot's CURRENT exit config already covers `kind`.
+
+    "Covers" = the corresponding field is set AND materially matches the
+    target profile (within EXIT_MATCH_TOL). A set-but-materially-different
+    value does NOT count — that escalates per the normal priority, so a
+    genuinely different exit target is still recommended.
+    """
+    if not isinstance(current, dict) or not current:
+        return False
+    if kind == "take_profit":
+        cur = current.get("takeProfit")
+        tgt = (exits or {}).get("take_profit_usd")
+        return cur is not None and tgt is not None \
+            and _num_close(cur, tgt)
+    if kind == "trailing":
+        cur = current.get("trailingStopActivation")
+        tgt = (exits or {}).get("trailing_activation_pct")
+        return cur is not None and tgt is not None \
+            and _num_close(cur, tgt)
+    if kind == "stop_loss":
+        # either the cumulative stopLoss field matches the risk cap, or a
+        # per-position SL ratio (strategyStopLossFixedPercentRatio) already
+        # contains the risk → no add-stop-loss needed
+        cur = current.get("stopLoss")
+        tgt = (exits or {}).get("stop_loss_usd")
+        if cur is not None and tgt is not None and _num_close(cur, abs(tgt)):
+            return True
+        return current.get("strategyStopLossFixedPercentRatio") is not None
+    return False
+
+
+def exit_edit_kwargs(exits, recommendation=None, current=None):
+    """wtclient ``GridClient.set_exits`` kwargs for an exit-add rec (pure).
+
+    Maps the engine's exit-profile targets onto the
+    ``wt_library.grid_set_exits`` kwarg shape. ``recommendation`` scopes
+    the kwargs to ONE rec kind (``add-take-profit`` / ``add-trailing`` /
+    ``add-stop-loss``); None builds from every computed target (used by
+    the advisory action payload). Conventions (same as
+    grid_adapter.compute_upsert): ``stop_loss`` is sent as a POSITIVE
+    magnitude (WT compares it against cumulative PnL), the wide risk cap
+    always compares on "total" PnL, and per-position trailing is only
+    included when the engine flagged it AND the bot is not already in
+    ``strategyProfitCondition: "trailing_stop"`` mode.
+    """
+    if not isinstance(exits, dict):
+        return {}
+    kind = recommendation
+    kw = {}
+    if (kind in (None, "add-take-profit")
+            and exits.get("take_profit_usd") is not None):
+        kw["take_profit"] = exits["take_profit_usd"]
+    if kind in (None, "add-trailing") \
+            and exits.get("trailing_activation_pct") is not None:
+        kw["trailing_activation"] = exits["trailing_activation_pct"]
+        kw["trailing_execute"] = exits.get("trailing_execute_pct")
+    if kind in (None, "add-stop-loss") \
+            and exits.get("stop_loss_usd") is not None:
+        kw["stop_loss"] = abs(exits["stop_loss_usd"])
+        kw["pnl_compare_type"] = "total"   # cumulative-PnL risk cap
+    if kind in (None, "add-trailing") \
+            and exits.get("positions_trailing") \
+            and not (isinstance(current, dict)
+                     and current.get("strategyProfitCondition")
+                     == "trailing_stop"):
+        kw["positions_trailing_stop"] = True
+    return kw
+
+
 # ── pure: exit profile ────────────────────────────────────────────────
-def evaluate_exits(bot, metrics, obs, cfg):
+def evaluate_exits(bot, metrics, obs, cfg, current=None):
     """Evaluate the exit profile for one deployed bot.
 
     Mean-reversion grids normally forbid closing at a loss:
     stop_loss_usd is ONLY set when cfg["stop_loss_enabled"] is True, and
     even then it is a wide risk cap at STOP_LOSS_PCT_FLOOR × slot balance.
+
+    ``current`` (keyword, default None → auto-extracted from the bot via
+    current_exits) adds exit AWARENESS: the targets are still computed,
+    but an ``out["covered"]`` map marks which kinds the bot's CURRENT
+    exit config already satisfies — make_recommendation then keeps
+    "keep" instead of recommending a redundant add-*.
     """
     obs = obs or {}
+    if current is None:
+        current = current_exits(bot)
     reasons = []
     out = {
         "take_profit_usd": None,
@@ -278,19 +413,51 @@ def evaluate_exits(bot, metrics, obs, cfg):
             f"{_f(fills_24h):.0f} >= {FILLS_HEALTHY_RATIO}× expected "
             f"{expected:.0f} in {regime} regime")
 
+    # current-exit awareness: which kinds the bot already has configured
+    # (targets stay computed — the suppression happens in
+    # make_recommendation, where the priority order lives)
+    covered = {
+        "take_profit": _covered("take_profit", out, current),
+        "trailing": _covered("trailing", out, current),
+        "stop_loss": _covered("stop_loss", out, current),
+    }
+    out["covered"] = covered
+    if isinstance(current, dict) and current:
+        out["current"] = {k: current.get(k) for k in EXIT_FIELDS}
+    for kind, label in (("take_profit", "take-profit"),
+                        ("trailing", "trailing"),
+                        ("stop_loss", "stop-loss")):
+        if covered.get(kind):
+            reasons.append(f"already configured: {label} present on the "
+                           f"bot — no add needed")
+
     return out
 
 
 # ── pure: recommendation ──────────────────────────────────────────────
 def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
-                        spread_pct=None, min_cost=None):
+                        spread_pct=None, min_cost=None, current=None):
     """Classify one revaluation into a recommendation record.
 
     Precedence (documented, deterministic): out-of-channel geometry
     (revalue-grid / recenter) > widen > narrow > resize > exit adds
     (take-profit > trailing > stop-loss) > keep.
+
+    Exit AWARENESS (``current`` keyword, default None → auto-extracted
+    from the bot via current_exits): an exit add fires only when the
+    corresponding field is NOT already set on the bot's CURRENT exit
+    profile (or is set but materially different from the target, within
+    EXIT_MATCH_TOL). When the current profile already covers it the rec
+    falls through to "keep" — the priority order above is unchanged.
     """
     obs = obs or {}
+    if current is None:
+        current = current_exits(bot)
+    covered = {
+        "take_profit": _covered("take_profit", exits, current),
+        "trailing": _covered("trailing", exits, current),
+        "stop_loss": _covered("stop_loss", exits, current),
+    }
     metrics = metrics or {}
     step_pct = _f(revalue.get("step_pct"))
     drift = _f(revalue.get("delta_drift_pct"))
@@ -339,15 +506,18 @@ def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
                   else f"amount_per_trade ${amount_per_trade:.2f} below "
                        f"per-line floor ${_f(min_cost):.2f}")
         reason = f"resize grid sizing: {detail}"
-    elif exits.get("take_profit_usd") is not None:
+    elif exits.get("take_profit_usd") is not None \
+            and not covered["take_profit"]:
         recommendation = "add-take-profit"
         reason = (f"profit exit ready at ${exits['take_profit_usd']:.2f} "
                   f"(realized ${realized:.2f})")
-    elif exits.get("trailing_activation_pct") is not None:
+    elif exits.get("trailing_activation_pct") is not None \
+            and not covered["trailing"]:
         recommendation = "add-trailing"
         reason = (f"trail armed at "
                   f"{exits['trailing_activation_pct']:g}% activation")
-    elif exits.get("stop_loss_usd") is not None:
+    elif exits.get("stop_loss_usd") is not None \
+            and not covered["stop_loss"]:
         recommendation = "add-stop-loss"
         reason = (f"risk cap ${exits['stop_loss_usd']:.2f} suggested")
 
@@ -395,10 +565,28 @@ def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
     if reason is None:
         reason = (f"channel aligned: drift {drift:+.2f}% within "
                   f"±{drift_thr:.2f}%, width change {width_chg_pct:+.1f}%")
+    covered_names = [label for kind, label in
+                     (("take_profit", "take-profit"),
+                      ("trailing", "trailing"),
+                      ("stop_loss", "stop-loss"))
+                     if covered.get(kind)]
+    if covered_names and recommendation == "keep":
+        reason = (f"{reason}; exits already configured: "
+                  f"{', '.join(covered_names)}")
     rationale = (f"{reason}. Expected 24h fills {expected:.0f} at "
                  f"~${profit_per_fill:.4f}/fill; current fills_24h "
                  f"{_f(obs_fills):.0f}.")
 
+    action = {
+        "type": "edit",
+        "payload": _edit_payload(bot, revalue, exits),
+        "apply": bool(cfg.get("apply", False)),
+    }
+    if recommendation in EXIT_APPLY_RECS:
+        # ready-to-run set_exits kwargs for the opt-in apply path (and for
+        # a human/console applying the advisory rec by hand)
+        action["exit_kwargs"] = exit_edit_kwargs(
+            exits, recommendation=recommendation, current=current)
     return {
         "slot": None,  # filled by analyze_bot
         "venue": (bot or {}).get("venue"),
@@ -418,11 +606,9 @@ def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
             "positions_trailing": bool(exits.get("positions_trailing")),
         },
         "recommendation": recommendation,
-        "action": {
-            "type": "edit",
-            "payload": _edit_payload(bot, revalue, exits),
-            "apply": bool(cfg.get("apply", False)),
-        },
+        "action": action,
+        "current_exits": ({k: current.get(k) for k in EXIT_FIELDS}
+                          if isinstance(current, dict) and current else {}),
         "expected_delta_pct": delta,
         "confidence": conf,
         "rationale": rationale,
@@ -482,7 +668,8 @@ class PositionOptimizer:
     SWEEP_JOURNAL_INTERVAL_S = 2 * 3600
 
     def __init__(self, cfg=None, journal_fn=None, persist_fn=None,
-                 fetch_candles_fn=None, hunt_fn=None, now_fn=None):
+                 fetch_candles_fn=None, hunt_fn=None, now_fn=None,
+                 apply_fn=None):
         merged = dict(POSITION_OPTIMIZER_DEFAULTS)
         if cfg:
             merged.update({k: v for k, v in cfg.items() if v is not None})
@@ -492,7 +679,19 @@ class PositionOptimizer:
         self.fetch_candles_fn = fetch_candles_fn or self._default_fetch
         self.hunt_fn = hunt_fn
         self.now_fn = now_fn or (lambda: time.time())
+        # opt-in exit-edit seam: apply_fn(code, exit_kwargs) -> envelope.
+        # Injected by the daemon (wt_library.grid_set_exits with the
+        # daemon's own dry-run gate baked in). None (or cfg apply=False,
+        # the DEFAULT) keeps everything advisory — exactly the
+        # pre-seam behavior. Never called for geometry recs.
+        self.apply_fn = apply_fn
         self._persisted_today = (self._day(), 0)
+        # per-day cap counter for EXECUTED exit edits (successful
+        # applications only — dry-run rehearsals do not burn the cap;
+        # separate from _persisted_today and from the daemon-side
+        # geometry-apply book, mirroring how each is capped at
+        # max_apply_per_day independently)
+        self._applied_today = (self._day(), 0)
         # sweep-journal frequency control: None = no sweep journaled yet
         # (the first cycle after process start always journals once)
         self._last_sweep_journal_at = None
@@ -624,6 +823,90 @@ class PositionOptimizer:
     def persist(self, rec):
         """Public persistence hook (daemon/console may call directly)."""
         return self._persist(rec)
+    def _apply_exit_rec(self, bot, rec, exits, current, now):
+        """Opt-in applier for exit-add recs through the set_exits seam.
+
+        Fires ONLY when ``cfg["apply"]`` is True AND an ``apply_fn`` was
+        injected, and only for ``add-take-profit`` / ``add-trailing`` /
+        ``add-stop-loss`` (geometry recs never come here). Calls
+        ``apply_fn(bot_code, exit_kwargs)`` with kwargs shaped for
+        ``wt_library.grid_set_exits`` and records the outcome on the rec
+        (``applied`` / ``apply_error`` / ``applied_at``), journaling one
+        ``position-optimizer-applied`` (success, existing convention) or
+        ``position-optimizer-error`` (failure) event with code + action +
+        outcome. ``max_apply_per_day`` is respected counting SUCCESSFUL
+        applications that actually EXECUTED (an ok dry-run envelope does
+        not burn the cap — the daemon's rehearsal mode stays free).
+        Never raises (fail-soft by contract, like everything here).
+        """
+        try:
+            if not self.cfg.get("apply", False) or self.apply_fn is None:
+                return
+            name = rec.get("recommendation")
+            if name not in EXIT_APPLY_RECS:
+                return
+            kwargs = exit_edit_kwargs(exits, recommendation=name,
+                                      current=current)
+            if not kwargs:
+                return
+            code = rec.get("bot_code")
+            if not code:
+                return
+            # per-day cap (separate from the persist cap; see __init__)
+            day = self._day(now)
+            if day != self._applied_today[0]:
+                self._applied_today = (day, 0)
+            if self._applied_today[1] >= int(self.cfg.get(
+                    "max_apply_per_day", 4)):
+                self._journal({"kind": "position-optimizer",
+                               "msg": "daily exit-apply cap reached — "
+                                      "rec stays advisory",
+                               "slot": rec.get("slot"),
+                               "symbol": rec.get("symbol"),
+                               "recommendation": name})
+                return
+            try:
+                res = self.apply_fn(code, kwargs)
+            except Exception as exc:
+                res = {"ok": False,
+                       "error": f"{type(exc).__name__}: {exc}"}
+            envelope = res if isinstance(res, dict) else {}
+            ok = bool(envelope.get("ok"))
+            rec["applied"] = ok
+            if ok:
+                rec["apply_error"] = None
+                rec["applied_at"] = datetime.fromtimestamp(
+                    now, tz=timezone.utc).isoformat(timespec="seconds")
+                if not envelope.get("dry_run"):  # executed, not rehearsed
+                    self._applied_today = (day, self._applied_today[1] + 1)
+            else:
+                rec["apply_error"] = str(envelope.get("error")
+                                         or "apply_fn returned no ok "
+                                            "envelope")[:200]
+            self._journal({
+                "kind": ("position-optimizer-applied" if ok
+                         else "position-optimizer-error"),
+                "slot": rec.get("slot"),
+                "symbol": rec.get("symbol"),
+                "bot_code": code,
+                "recommendation": name,
+                "exit_kwargs": kwargs,
+                "outcome": "applied" if ok else "failed",
+                "dry_run": bool(envelope.get("dry_run")),
+                "msg": (f"{name} exit edit "
+                        f"{'planned (dry-run)' if envelope.get('dry_run') else 'applied'}"
+                        f" to {bot.get('venue')}:{bot.get('symbol')} "
+                        f"({code})"
+                        if ok else
+                        f"{name} exit apply FAILED on {code}: "
+                        f"{rec['apply_error']}"),
+                "result": envelope,
+            })
+        except Exception as exc:
+            self._journal({"kind": "position-optimizer-error",
+                           "msg": f"exit apply failed: {str(exc)[:160]}",
+                           "slot": rec.get("slot"),
+                           "symbol": rec.get("symbol")})
 
     def _note_fetch_failure(self, bot, venue, symbol, detail):
         """Silent-failure visibility: an empty/invalid candle fetch used
@@ -776,11 +1059,15 @@ class PositionOptimizer:
             deployed_high=channel.get("high"))
         revalue.pop("grid_lines", None)  # schema keeps the summary only
 
-        # 4. exit profile + recommendation
-        exits = evaluate_exits(bot_view, metrics, obs, cfg)
+        # 4. exit profile + recommendation (exit-AWARE: the bot's CURRENT
+        # exit config, projected by the observe layer from the enriched
+        # grid_list fields, suppresses redundant add-* recs)
+        current = current_exits(bot)
+        exits = evaluate_exits(bot_view, metrics, obs, cfg, current=current)
         rec = make_recommendation(
             bot_view, revalue, metrics, obs, exits, cfg,
-            spread_pct=None, min_cost=bot.get("min_cost"))
+            spread_pct=None, min_cost=bot.get("min_cost"),
+            current=current)
         if self.hunt_fn is not None:
             try:
                 rec["tvcli_structure"] = self.hunt_fn(bot)
@@ -800,6 +1087,18 @@ class PositionOptimizer:
         rec["applied"] = False
         rec["applied_at"] = None
         rec["dry_run"] = bool(dry_run)
+
+        # 5b. OPT-IN exit-add apply path (add-take-profit / add-trailing /
+        # add-stop-loss ONLY — geometry recs never ride this seam; the
+        # daemon-side apply_position_optimizer_recs keeps owning those).
+        # Inert unless cfg apply=true AND an apply_fn was injected — the
+        # DEFAULT (apply=False) leaves this exactly as the advisory flow.
+        # The engine's cycle dry_run does NOT gate it (it only gates PB
+        # persistence, as before): the daemon-level dry-run gate lives in
+        # the injected apply_fn, which journals the planned set_exits
+        # envelope instead of executing it on a dry-run daemon.
+        if rec["recommendation"] in EXIT_APPLY_RECS:
+            self._apply_exit_rec(bot, rec, exits, current, now)
 
         # 6. journal + persist gates
         noteworthy = (rec["recommendation"] != "keep"
