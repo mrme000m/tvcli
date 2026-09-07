@@ -601,7 +601,22 @@ class PositionOptimizer:
             return None
         try:
             rid = self.persist_fn(rec)
-        except Exception:
+        except Exception as exc:
+            self._journal({"kind": "position-optimizer-error",
+                           "msg": f"persist failed (PB): {str(exc)[:160]}",
+                           "slot": rec.get("slot"),
+                           "symbol": rec.get("symbol")})
+            return None
+        if not rid:
+            # a failed write must NOT consume the daily cap — it used to
+            # (counter incremented on None), silently filling the cap with
+            # phantom persists while the PB collection stayed empty
+            self._journal({"kind": "position-optimizer-error",
+                           "msg": "persist returned no record id (PB down "
+                                  "or collection missing) — rec stays "
+                                  "journal-only",
+                           "slot": rec.get("slot"),
+                           "symbol": rec.get("symbol")})
             return None
         self._persisted_today = (day, self._persisted_today[1] + 1)
         return rid

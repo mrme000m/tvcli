@@ -45,9 +45,12 @@ name: grid-autonomy deploy (az00)
 #
 # Deploying is deliberate-but-easy: pushes to main that touch the image's
 # build context (docker/, the daemon, the baked skills, the browser tools,
-# Go sources) redeploy automatically in dry-run — the safe default. Two
-# instances on one WunderTrading account must not both run live — use the
-# dispatch input to promote deliberately to live-paper.
+# Go sources) redeploy automatically, PRESERVING the running container's
+# GRID_MODE (vps-run.sh default) — a push must never silently downgrade a
+# live-paper fleet to dry-run. A first deploy with no previous container
+# falls back to dry-run — the safe default. Two instances on one
+# WunderTrading account must not both run live — use the dispatch input to
+# set the mode deliberately (live-paper or dry-run).
 on:
   push:
     branches: [main]
@@ -205,7 +208,14 @@ jobs:
           $SSH_CMD "chmod +x $REMOTE_DIR/vps-run.sh"
 
       - name: (Re)start the container
-        run: $SSH_CMD "GRID_MODE='${{ inputs.mode || 'dry-run' }}' IMAGE='${{ env.IMAGE }}:${{ github.sha }}' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
+        run: |
+          # Push deploys (no dispatch input) pass GRID_MODE=preserve:
+          # vps-run.sh keeps the running container's mode (dry-run fallback
+          # on first deploy). Dispatch deploys pass the chosen mode
+          # explicitly — the only path that can change it.
+          MODE='${{ inputs.mode }}'
+          if [ -z "$MODE" ]; then MODE=preserve; fi
+          $SSH_CMD "GRID_MODE='$MODE' IMAGE='${{ env.IMAGE }}:${{ github.sha }}' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
 
       - name: Health gate (vault load + browser + WT auth can take minutes)
         run: |

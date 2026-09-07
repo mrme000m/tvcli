@@ -11,7 +11,10 @@
 #   IMAGE      image to run                       (default grid-autonomy:local)
 #   NAME       container name                     (default grid-autonomy)
 #   ENV_FILE   BW_* env file for vault_loader     (default /opt/grid-autonomy/.env)
-#   GRID_MODE  dry-run | live-paper               (default dry-run)
+#   GRID_MODE  dry-run | live-paper | preserve    (default preserve: keep the
+#              running container's mode — pushes must never silently downgrade
+#              a live-paper fleet; a first deploy with no previous container
+#              falls back to dry-run)
 #
 # Ports are published on 127.0.0.1 ONLY — the console (:8798) and ctl
 # (:8799) carry no built-in auth; reach them through an SSH tunnel:
@@ -21,7 +24,7 @@ set -euo pipefail
 IMAGE="${IMAGE:-grid-autonomy:local}"
 NAME="${NAME:-grid-autonomy}"
 ENV_FILE="${ENV_FILE:-/opt/grid-autonomy/.env}"
-MODE="${GRID_MODE:-dry-run}"
+MODE="${GRID_MODE:-preserve}"
 
 [ -f "$ENV_FILE" ] || { echo "vps-run: missing env file $ENV_FILE" >&2; exit 1; }
 
@@ -42,12 +45,27 @@ done
 $DOCKER network create grid-net >/dev/null 2>&1 || true
 
 # graceful replace: SIGTERM + up to 60s settle (entrypoint traps and shuts
-# down PB/serve/browser/daemon cleanly), then force-remove the leftovers
+# down PB/serve/browser/daemon cleanly), then force-remove the leftovers.
+# The running mode is captured FIRST so a preserve (default) redeploy keeps
+# the fleet's live/dry posture — an automatic push deploy must never
+# silently downgrade a live-paper instance to dry-run.
+OLD_MODE=""
 if $DOCKER inspect "$NAME" >/dev/null 2>&1; then
+  OLD_MODE="$($DOCKER inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$NAME" \
+               | sed -n 's/^GRID_MODE=//p' | tail -1)"
   echo "vps-run: stopping old $NAME (graceful, up to 60s)…"
   $DOCKER stop -t 60 "$NAME" >/dev/null 2>&1 || true
   $DOCKER rm -f "$NAME" >/dev/null 2>&1 || true
 fi
+
+if [ "$MODE" = "preserve" ]; then
+  MODE="${OLD_MODE:-dry-run}"
+  echo "vps-run: preserving previous GRID_MODE ($MODE)"
+fi
+case "$MODE" in
+  dry-run|live-paper) ;;
+  *) echo "vps-run: unknown GRID_MODE '$MODE' (want dry-run|live-paper|preserve)" >&2; exit 1 ;;
+esac
 
 echo "vps-run: starting $NAME from $IMAGE (GRID_MODE=$MODE)…"
 $DOCKER run -d --name "$NAME" \

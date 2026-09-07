@@ -2242,8 +2242,13 @@ class Daemon:
         for cand in cands:
             if deployed >= max_new:
                 break
-            if demo_cap and len(self.state["active_bots"]) >= demo_cap:
-                break  # every remaining create would 400 at the demo cap
+            if not dry_run and demo_cap \
+                    and len(self.state["active_bots"]) >= demo_cap:
+                # live creates would 400 at the demo cap — stop deliberating.
+                # Dry-run plans carry no create, so the mirror keeps planning
+                # and recording: a dry-run deployment's decision ledger must
+                # reflect what the planner is doing, not freeze at the cap.
+                break
             key = f"{cand['venue']}:{cand['symbol']}"
             if key in active_keys:
                 continue  # already running in another slot — no duplicate deploy

@@ -387,6 +387,27 @@ class TestAnalyzeBot(unittest.TestCase):
         self.assertEqual(len(persist.recs), 1)
         self.assertEqual(rec["id"], "rec-1")
 
+    def test_failed_persist_does_not_consume_daily_cap(self):
+        # a persist that returns no record id (PB down / collection missing)
+        # must NOT burn one of the max_apply_per_day slots — it used to, so
+        # four phantom "successes" silently filled the cap while the PB
+        # collection stayed empty and the console showed no recommendations
+        bot = flat_bot()
+        bot["channel"]["mid"] = 90.0
+        bot["observed"]["fills_24h"] = 5
+        opt, journal, _ = make_optimizer(persist=lambda rec: None)
+        rec = opt.analyze_bot(bot, "7", dry_run=False, now=NOW)
+        self.assertIsNotNone(rec)
+        self.assertFalse(rec.get("persisted"))
+        kinds = [e["kind"] for e in journal.events]
+        self.assertIn("position-optimizer-error", kinds)
+        # the cap is untouched: the same rec persists on a healthy backend
+        ok_persist = FakePersist()
+        opt.persist_fn = ok_persist
+        rid = opt._persist(rec)
+        self.assertEqual(rid, "rec-1")
+        self.assertEqual(len(ok_persist.recs), 1)
+
     def test_disabled_returns_none(self):
         opt, _, _ = make_optimizer(cfg={"enabled": False})
         self.assertIsNone(opt.analyze_bot(flat_bot(), "7", now=NOW))
