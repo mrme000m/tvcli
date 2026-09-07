@@ -582,11 +582,10 @@ class TestHTTP(ConsoleTestCase):
         # own stop marker and, in the VPS container, bricks the daemon into a
         # KILL boot-loop (console 502s).
         calls = {}
-        real_lm, real_pid, real_stop, real_start = (
-            server._launchd_managed, server._pid, server.daemon_stop,
-            server.daemon_start)
+        real_lm, real_pid, real_mode, real_stop, real_start = (
+            server._launchd_managed, server._pid, server._mode,
+            server.daemon_stop, server.daemon_start)
         server._launchd_managed = lambda: False
-        server._pid = lambda: None
         def spy_stop(force=False):
             calls["stop"] = True
             return 200, {"stopped": True}
@@ -596,13 +595,35 @@ class TestHTTP(ConsoleTestCase):
             return 200, {"started": True}
         server.daemon_stop, server.daemon_start = spy_stop, spy_start
         try:
+            # Running daemon: restart must stop it and then start again with
+            # clear_kill=True (the KILL marker the stop just wrote).
+            server._pid = lambda: 4242
+            server._mode = lambda pid: "dry-run"
             code, body = server.daemon_restart()
             self.assertEqual(code, 200)
             self.assertTrue(calls["stop"])
             self.assertTrue(calls["start_clear_kill"])
             self.assertFalse(calls["start_live_paper"])
+            calls.clear()
+            # Already-stopped daemon: restart degrades to a start (no stop to
+            # 409 on) and defaults to the supervisor's GRID_MODE posture.
+            server._pid = lambda: None
+            old_env = server.os.environ.get("GRID_MODE")
+            server.os.environ["GRID_MODE"] = "live-paper"
+            try:
+                code, body = server.daemon_restart()
+            finally:
+                if old_env is None:
+                    server.os.environ.pop("GRID_MODE", None)
+                else:
+                    server.os.environ["GRID_MODE"] = old_env
+            self.assertEqual(code, 200)
+            self.assertFalse(calls.get("stop"))
+            self.assertTrue(calls["start_clear_kill"])
+            self.assertTrue(calls["start_live_paper"])
         finally:
-            server._launchd_managed, server._pid = real_lm, real_pid
+            server._launchd_managed, server._pid, server._mode = (
+                real_lm, real_pid, real_mode)
             server.daemon_stop, server.daemon_start = real_stop, real_start
 
     def test_position_sweeps_endpoint(self):

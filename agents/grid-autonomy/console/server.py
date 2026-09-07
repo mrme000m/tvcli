@@ -1896,6 +1896,15 @@ def daemon_restart(clear_kill=False, live_paper=None) -> tuple[int, dict]:
     pid = _pid()
     if pid is not None:
         current_mode = _mode(pid)
+    if pid is None:
+        # Already stopped (e.g. an operator stop just armed KILL): there is
+        # nothing to stop — a restart degrades to a start. Fall back to the
+        # supervisor's configured posture (GRID_MODE) so a live-paper
+        # container never silently downgrades to dry-run.
+        if live_paper is None:
+            env_mode = os.environ.get("GRID_MODE")
+            live_paper = (env_mode == "live-paper" if env_mode else False)
+        return daemon_start(live_paper=live_paper, clear_kill=True)
     code, body = daemon_stop()
     if code != 200:
         return code, body
