@@ -2874,16 +2874,29 @@ class Daemon:
         return (age <= stale_s), f"age {int(max(age, 0))}s (bound {int(stale_s)}s)"
 
     def _hb_check_optimizer_fresh(self):
-        """(5) fast optimizer liveness — 3× its own interval."""
+        """(5) fast optimizer liveness — 3× its own interval.
+
+        state["optimizer"]["last_at"] is an ISO timestamp string
+        (optimizer.py stores report["at"]), so parse ISO first and fall
+        back to a raw epoch float — float("2026-...T...") always raises,
+        which used to make this check permanently fail (live 2026-09-07
+        az00: every heartbeat nudged a healthy optimizer)."""
         if not getattr(self, "optimizer", None):
             return True, "optimizer unavailable (import failed) — skipped"
         opt_s = self.optimizer_interval_s() or 0
         if not opt_s:
             return True, "optimizer disabled — skipped"
         last = ((self.state.get("optimizer") or {}).get("last_at"))
+        age = None
         try:
             age = time.time() - float(last)
         except (TypeError, ValueError):
+            try:
+                age = time.time() - datetime.fromisoformat(
+                    str(last)).timestamp()
+            except (ValueError, TypeError, OSError):
+                age = None
+        if age is None:
             return False, "no optimizer cycle yet"
         bound = 3 * opt_s
         return (age <= bound), f"last cycle {int(max(age, 0))}s ago (bound {int(bound)}s)"

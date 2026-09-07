@@ -247,6 +247,38 @@ class TestHeartbeatChecks(ManageHarness):
         self.assertTrue(ok)
         self.assertIn("disabled", detail)
 
+    def test_optimizer_fresh_parses_iso_last_at(self):
+        """state['optimizer']['last_at'] is an ISO string (optimizer.py
+        stores report['at']) — float() on it always raises, which made
+        the check permanently fail on live state (regression: az00
+        2026-09-07, every heartbeat nudged a healthy optimizer)."""
+        import datetime as _dt
+        d = self.make_daemon()
+        d.optimizer = object()
+        d.state.setdefault("optimizer", {})
+        with mock.patch.object(daemon.Daemon, "optimizer_interval_s",
+                               lambda self: 180):
+            # ISO string 30s old → fresh
+            d.state["optimizer"]["last_at"] = (
+                _dt.datetime.now(_dt.timezone.utc)
+                - _dt.timedelta(seconds=30)).isoformat()
+            ok, detail = d._hb_check_optimizer_fresh()
+            self.assertTrue(ok)
+            # ISO string 10 min old → stale (bound 3×180s = 540s)
+            d.state["optimizer"]["last_at"] = (
+                _dt.datetime.now(_dt.timezone.utc)
+                - _dt.timedelta(minutes=10)).isoformat()
+            ok, detail = d._hb_check_optimizer_fresh()
+            self.assertFalse(ok)
+            # raw epoch float still supported
+            d.state["optimizer"]["last_at"] = time.time() - 30
+            ok, detail = d._hb_check_optimizer_fresh()
+            self.assertTrue(ok)
+            # garbage → no cycle, never a raise
+            d.state["optimizer"]["last_at"] = "not-a-time"
+            ok, detail = d._hb_check_optimizer_fresh()
+            self.assertFalse(ok)
+
 
 class TestHeartbeatStatusSurfacing(HeartbeatHarness):
     """ctl /status: heartbeat block + the fail-soft data_sources tails
