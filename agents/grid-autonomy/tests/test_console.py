@@ -173,22 +173,6 @@ class TestShaping(ConsoleTestCase):
         self.assertEqual(server._tier({"samples": 40, "profit_factor": 1.4,
                                        "recent_pf": 0.8}), "killed")
 
-    def test_wt_account_label_sources(self):
-        # The deployment (container) and the Mac's local daemon run on two
-        # SEPARATE WunderTrading accounts — the console must be able to say
-        # which one it trades on. WT_ACCOUNT_LABEL env overrides; the
-        # default is container-aware (/.dockerenv) but never a secret.
-        saved = server.WT_ACCOUNT_LABEL
-        try:
-            self.assertIsInstance(saved, str)
-            self.assertTrue(saved)  # a label always resolves
-            server.WT_ACCOUNT_LABEL = "custom (override)"
-            ov = server.overview_payload()
-            self.assertEqual(ov["wt_account"], "custom (override)")
-        finally:
-            server.WT_ACCOUNT_LABEL = saved
-
-
     def test_enriched_bots_stagnation(self):
         self.write_state({
             "active_bots": {"1": {

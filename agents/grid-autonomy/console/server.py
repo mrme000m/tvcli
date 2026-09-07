@@ -115,13 +115,6 @@ CONFIG_PATH = os.path.join(GRID_HOME, "config.yaml")
 STATIC_DIR = os.path.join(HERE, "static")
 KILL_FILE = os.path.join(GRID_HOME, "KILL")
 LAUNCHD_LABEL = "com.tvcli.grid-autonomy"
-# WunderTrading account identity for the header/footnote — the deployment
-# (VPS/container, vault item `wundertrading` folder grid-autonomy) and the
-# Mac's local daemon run on TWO SEPARATE WT accounts. WT_ACCOUNT_LABEL
-# overrides; the default distinguishes container (vault/VPS account) from
-# bare-metal (local Mac account). Never a secret — a display label only.
-WT_ACCOUNT_LABEL = os.environ.get("WT_ACCOUNT_LABEL") or (
-    "vps (vault account)" if os.path.exists("/.dockerenv") else "local (Mac account)")
 # The launchd-supervised daemon's stdout/stderr go here (see
 # launchd/com.tvcli.grid-autonomy.plist), NOT state/daemon.log — start.sh
 # writes daemon.log only for manual/nohup launches. The console must read
@@ -960,12 +953,6 @@ def _enriched_bots(st: dict) -> list[dict]:
             "stagnant": stagnant,
             "position_optimizer": po,
             "optimizer_tracker": bot.get("optimizer"),
-            # current exit profile (enriched grid_list fields projected
-            # by the daemon health cycle / observe layer) — renders the
-            # exit badge on the fleet card when present
-            "exits": (bot.get("exits") if isinstance(bot.get("exits"), dict)
-                      else (obs.get("exits")
-                            if isinstance(obs.get("exits"), dict) else None)),
             "take_profit_usd": bot.get("take_profit_usd"),
             "loss_veto": obs.get("loss_veto") if isinstance(obs, dict) else None,
         })
@@ -1725,7 +1712,6 @@ def overview_payload() -> dict:
         "pocketbase": {"up": pb_ok},
         "readiness": _readiness(ctl_status),
         "screen_cache_age_s": ((time.time() - float(opt.get("screen_cache_age_s", 0))) if isinstance(opt.get("screen_cache_age_s"), (int, float)) else None),
-        "wt_account": WT_ACCOUNT_LABEL,
         "last_arbiter": last_arbiter,
         "config_digest": {
             "total_usd": (portfolio.get("total_usd")),
@@ -2061,7 +2047,6 @@ class Handler(BaseHTTPRequestHandler):
                 "console_port": CONSOLE_PORT, "ctl_port": _ctl_port(),
                 "pocketbase": PB_URL, "state_dir": STATE_DIR,
                 "grid_home": GRID_HOME, "launchd_label": LAUNCHD_LABEL,
-                "wt_account": WT_ACCOUNT_LABEL,
                 "pid": os.getpid(), "started": getattr(SERVER, "started", None),
             })
         else:
