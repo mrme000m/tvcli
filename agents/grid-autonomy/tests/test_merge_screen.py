@@ -253,6 +253,51 @@ class TestTvcliFitness(unittest.TestCase):
         self.assertEqual(bonus, 0.0)
         self.assertEqual(notes, [])
 
+    # --- public `vp` skill shape (aboveVAHBuffer/belowVALBuffer + market
+    # price — vp-pro is a private script most accounts cannot hunt) --------
+
+    @staticmethod
+    def _vp_public(buffers):
+        return {"ok": True, "result": {
+            "structure": {"poc": 100.0, "vah": 105.0, "val": 95.0,
+                          **buffers},
+            "market": {"lastPrice": 100.0, "bias": "range"}}}
+
+    def test_vp_public_value_area_harvest(self):
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="neutral"),
+            vp=self._vp_public({"aboveVAHBuffer": False,
+                                "belowVALBuffer": False}))
+        self.assertEqual(bonus, 1.0)
+        self.assertIn("value-area-harvest", notes)
+        self.assertEqual(fit["vp_poc"], 100.0)
+
+    def test_vp_public_breakout_up_from_buffer(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            vp=self._vp_public({"aboveVAHBuffer": True,
+                                "belowVALBuffer": False}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-up", notes)
+
+    def test_vp_public_breakout_down_from_buffer(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_down"),
+            vp=self._vp_public({"aboveVAHBuffer": False,
+                                "belowVALBuffer": True}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-down", notes)
+
+    def test_vp_public_breakout_from_market_price(self):
+        # buffers absent — market.lastPrice > VAH still proves the breakout
+        res = {"ok": True, "result": {
+            "structure": {"poc": 100.0, "vah": 105.0, "val": 95.0},
+            "market": {"lastPrice": 106.0}}}
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"), vp=res)
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-up", notes)
+
     def test_vp_absent_no_bonus(self):
         # parser returns no structure when POC/VAH/VAL are missing
         bonus, notes, fit = merge.tvcli_fitness(

@@ -77,7 +77,7 @@ screen:
                                # hand-curated list
   top_per_preset_venue: 30
   confluence_top: 10
-  confluence_skills: [squeeze, choppiness, mtf-confluence, dvi, vp-pro, sr-breaks]  # tvcli /hunt
+  confluence_skills: [squeeze, choppiness, mtf-confluence, dvi, vp, sr-breaks]  # tvcli /hunt — `vp` is PUBLIC; `vp-pro` is a private script the deployment's TV account does not own (/hunt 400 private_skill)
   open_slot_min_score: 40.0    # new-venue-slot floor (see portfolio.slots_max)
   rescreen_minutes: 10         # daemon re-runs merge+swarm every 10m
                                # (each run also refreshes state.screen_cache —

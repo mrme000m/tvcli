@@ -26,8 +26,8 @@ tvcli fitness bonus (numeric signals, added to preset score, then re-sorted):
   choppiness CHOP ≤ 38.2 with trend regime (clean trend)     +1.0
   mtf-confluence composite agrees with regime direction      +2.0 (range +1.0)
   dvi trend agrees with regime direction                     +1.0
-  vp-pro value area present in a range regime (harvestable)   +1.0
-  vp-pro value-area breakout aligned with the trend           +1.5
+  vp value area present in a range regime (harvestable)     +1.0
+  vp value-area breakout aligned with the trend             +1.5
   sr-breaks fresh S/R break aligned with regime (≤5 bars)    +1.5
   sr-breaks recent S/R break aligned with regime (≤20 bars)  +0.75
   RSI overheated flag on direction side                      -3.0
@@ -439,22 +439,35 @@ def tvcli_fitness(c, mtf=None, sq=None, ch=None, dvi=None, vp=None, sr=None):
             bonus += 1.0
             notes.append("dvi-trend-agree-short")
 
-    # vp-pro: volume-profile value area. With POC/VAH/VAL published the
-    # tape has a well-defined harvestable band: grids around the value area
-    # fill repeatedly in range regimes; a value-area breakout aligned with
-    # the 1h regime means price just left the band with momentum (large +
-    # fast). Missing POC/VAH/VAL (empty structure) → nothing, fail-soft.
+    # vp (public) / vp-pro (private): volume-profile value area. With
+    # POC/VAH/VAL published the tape has a well-defined harvestable band:
+    # grids around the value area fill repeatedly in range regimes; a
+    # value-area breakout aligned with the 1h regime means price just left
+    # the band with momentum (large + fast). Missing POC/VAH/VAL (empty
+    # structure) → nothing, fail-soft. Both skill shapes are accepted:
+    # vp-pro publishes structure.pricePosition + structure.price; the PUBLIC
+    # `vp` skill publishes aboveVAHBuffer/belowVALBuffer booleans +
+    # market.lastPrice (vp-pro is a private script most accounts do not own
+    # — /hunt refuses it with 400 private_skill, live az00 2026-09-07).
     vpr = (vp or {}).get("result") or {}
     vp_poc = _rnum(vpr, "structure", "poc")
     vp_vah = _rnum(vpr, "structure", "vah")
     vp_val = _rnum(vpr, "structure", "val")
     if vp_poc is not None and vp_vah is not None and vp_val is not None:
         # breakout = price OUTSIDE the value area in the trend's direction
-        # (the parser publishes pricePosition above/below_value_area and
-        # price; its `bias` is only bullish/bearish/neutral, so the
-        # breakout test is positional, never a bias string)
+        # (the vp-pro parser publishes pricePosition above/below_value_area;
+        # the public `vp` parser publishes aboveVAHBuffer/belowVALBuffer
+        # booleans; the `bias` field is only bullish/bearish/neutral, so
+        # the breakout test is positional, never a bias string)
         vp_pos = (vpr.get("structure") or {}).get("pricePosition")
+        if vp_pos is None:
+            if (vpr.get("structure") or {}).get("aboveVAHBuffer"):
+                vp_pos = "above_value_area"
+            elif (vpr.get("structure") or {}).get("belowVALBuffer"):
+                vp_pos = "below_value_area"
         vp_price = _rnum(vpr, "structure", "price")
+        if vp_price is None:
+            vp_price = _rnum(vpr, "market", "lastPrice")
         fit.update({"vp_poc": vp_poc, "vp_vah": vp_vah, "vp_val": vp_val})
         if regime in ("chop_high_volatility", "neutral", "squeeze"):
             # rangey tape with a defined value area → mean-reversion grid
@@ -546,16 +559,18 @@ def apply_confluence(cands, timeframe="1H", bars=180):
         sq = hunts.get("squeeze", {}).get(tv) or {}
         ch = hunts.get("choppiness", {}).get(tv) or {}
         dvi = hunts.get("dvi", {}).get(tv) or {}
-        # vp-pro + sr-breaks are optional extra hunts — only present when
-        # config_confluence_skills() lists them; tolerate their absence.
-        vp = hunts.get("vp-pro", {}).get(tv) or {}
+        # value-area slot: prefer the configured skill's hunt (`vp` public),
+        # fall back to the other name's result when present — both feed the
+        # same fitness block (shapes normalized in tvcli_fitness)
+        vp = hunts.get("vp", {}).get(tv) \
+            or hunts.get("vp-pro", {}).get(tv) or {}
         sr = hunts.get("sr-breaks", {}).get(tv) or {}
         c["confluence"] = {
             "mtf-confluence": (mtf.get("result") is not None),
             "squeeze": (sq.get("result") is not None),
             "choppiness": (ch.get("result") is not None),
             "dvi": (dvi.get("result") is not None),
-            "vp-pro": (vp.get("result") is not None),
+            "vp": (vp.get("result") is not None),
             "sr-breaks": (sr.get("result") is not None),
             "errors": {k: (v.get("error") if isinstance(v, dict) else None)
                        for k, v in (("mtf", mtf), ("sq", sq), ("ch", ch),
