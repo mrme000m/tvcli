@@ -76,18 +76,22 @@ fi
 SKILL_DIR="$HERE/../../.agents/skills/pocketbase"
 mkdir -p "$HOOKS_DIR" "$PB_DIR/pb_migrations"
 HOOKS_SRC="$SKILL_DIR/pb_hooks/main.pb.js"
-MIGRATIONS_SRC="$SKILL_DIR/pb_migrations/1700000000_grid_autonomy_collections.js"
 if [ -f "$HOOKS_SRC" ]; then
   cp "$HOOKS_SRC" "$HOOKS_DIR/main.pb.js"
   echo "Copied hooks: $HOOKS_DIR/main.pb.js"
 else
   echo "WARN: hooks not found at $HOOKS_SRC — skipping." >&2
 fi
-if [ -f "$MIGRATIONS_SRC" ]; then
-  cp "$MIGRATIONS_SRC" "$PB_DIR/pb_migrations/1700000000_grid_autonomy_collections.js"
-  echo "Copied migration: $PB_DIR/pb_migrations/1700000000_grid_autonomy_collections.js"
+# Copy EVERY migration file (not one hardcoded name): new migrations must
+# reach an EXISTING data dir too — `serve` does not auto-apply, and
+# `superuser create` (the only other migrate trigger) runs only on first
+# init, so a migration committed after the initial setup never applied
+# (this is how the `recommendations` collection stayed missing on az00).
+if ls "$SKILL_DIR"/pb_migrations/*.js >/dev/null 2>&1; then
+  cp "$SKILL_DIR"/pb_migrations/*.js "$PB_DIR/pb_migrations/"
+  echo "Copied migrations: $(ls "$PB_DIR"/pb_migrations/*.js | wc -l | tr -d ' ') file(s)"
 else
-  echo "WARN: migration not found at $MIGRATIONS_SRC — skipping." >&2
+  echo "WARN: no migrations at $SKILL_DIR/pb_migrations — skipping." >&2
 fi
 
 # ── 3. Superuser + API key (idempotent) ─────────────────────────────────────
@@ -114,6 +118,22 @@ if [ ! -d "$DATA_DIR" ]; then
     --dir="$DATA_DIR" \
     --hooksDir="$HOOKS_DIR" \
     --migrationsDir="$PB_DIR/pb_migrations"
+fi
+
+# Apply any PENDING migrations (idempotent — a no-op when everything is
+# applied). Runs on every setup for both fresh and existing data dirs:
+# `superuser create` is the only other migrate trigger and it only fires on
+# first init, so without this a migration added after the initial setup
+# would never land on an existing pb_data. Skipped while a PB serve is
+# already running (concurrent sqlite migration) — the restart path runs
+# this before starting serve.
+if [ -d "$DATA_DIR" ] \
+   && ! { [ -f "$PB_DIR/pb.pid" ] \
+          && kill -0 "$(cat "$PB_DIR/pb.pid")" 2>/dev/null; }; then
+  "$BIN" migrate up \
+    --dir="$DATA_DIR" \
+    --migrationsDir="$PB_DIR/pb_migrations" \
+    >> "$PB_DIR/migrate.log" 2>&1 || true
 fi
 
 # ── 4. Start the server ──────────────────────────────────────────────────────
