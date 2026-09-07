@@ -524,6 +524,30 @@ class TestHTTP(ConsoleTestCase):
                                headers={"Origin": "https://evil.example"})
         self.assertEqual(code, 403)
 
+    def test_ctl_post_errors_pass_daemon_message_through(self):
+        # daemon answered but refused (e.g. optimizer import failed) — the
+        # operator must see the daemon's own message, not "ctl unreachable"
+        real_ctl = server._ctl
+        server._ctl = lambda path, method="GET", body=None: (
+            False, {"error": "optimizer unavailable (import failed — "
+                             "see journal)"})
+        try:
+            code, body = self.call("/api/ctl/optimize", "POST", {})
+        finally:
+            server._ctl = real_ctl
+        self.assertEqual(code, 502)
+        self.assertEqual(body["error"], "optimizer unavailable "
+                                        "(import failed — see journal)")
+        self.assertEqual(body["detail"]["error"], "optimizer unavailable "
+                                                  "(import failed — see journal)")
+
+    def test_ctl_post_error_when_daemon_down_names_the_connection(self):
+        # nothing answered (dead ctl port from setUp) — the raw transport
+        # error is shown rather than a misleading bare "ctl unreachable"
+        code, body = self.call("/api/ctl/rescreen", "POST", {})
+        self.assertEqual(code, 502)
+        self.assertIn("urlopen error", body["error"])
+
     # ── dev-script actions ────────────────────────────────────────────
 
     def test_dev_actions_require_confirm(self):

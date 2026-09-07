@@ -335,6 +335,16 @@ def _ctl(path, method="GET", body=None):
     return _http_json(f"http://127.0.0.1:{_ctl_port()}{path}", 3.0, method, body)
 
 
+def _ctl_err(resp):
+    """Error copy for a failed ctl call: the daemon's own message when it
+    ANSWERED with a JSON error body (e.g. POST /optimize 503 "optimizer
+    unavailable (import failed)"), "ctl unreachable" only when nothing
+    answered. Masking daemon errors as unreachable sends the operator
+    debugging the connection instead of the daemon."""
+    return (resp.get("error") if isinstance(resp, dict) else None) \
+        or "ctl unreachable"
+
+
 # ── ctl-plane proxy cache (≤5s: several panels share one /status) ──────
 
 _CTL_TTL = 5.0
@@ -2001,24 +2011,23 @@ class Handler(BaseHTTPRequestHandler):
         if route == "/api/ctl/rescreen":
             ok, resp = _ctl("/rescreen", "POST")
             self._json(200 if ok else 502, resp if ok else
-                       {"error": "ctl unreachable", "detail": resp})
+                       {"error": _ctl_err(resp), "detail": resp})
         elif route == "/api/ctl/optimize":
             ok, resp = _ctl("/optimize", "POST")
             self._json(200 if ok else 502, resp if ok else
-                       {"error": "ctl unreachable", "detail": resp})
+                       {"error": _ctl_err(resp), "detail": resp})
         elif route == "/api/ctl/reliability":
             ok, resp = _ctl("/reliability", "POST")
             self._json(200 if ok else 502, resp if ok else
-                       {"error": "ctl unreachable", "detail": resp})
+                       {"error": _ctl_err(resp), "detail": resp})
         elif route == "/api/ctl/rotate":
             slot = body.get("slot")
             if slot is None:
                 self._json(400, {"error": "missing slot"})
                 return
             ok, resp = _ctl("/rotate", "POST", {"slot": slot})
-            self._json(200 if ok else (502 if not ok else 502), resp if ok else
-                       {"error": "ctl unreachable or slot unknown",
-                        "detail": resp})
+            self._json(200 if ok else 502, resp if ok else
+                       {"error": _ctl_err(resp), "detail": resp})
         elif route == "/api/ctl/kill":
             if not confirmed:
                 self._json(400, {"error": 'pass {"confirm": true}'})

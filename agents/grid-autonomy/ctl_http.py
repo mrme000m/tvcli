@@ -128,8 +128,10 @@ def status_payload(daemon):
 
     PnL and demo-cap observability blocks are computed here (fail-soft —
     observability must never break /status):
-      pnl       {realized, unrealized, net, committed_usd, idle_usd} from
-                the daemon's latest observe fold (daemon.pnl_snapshot)
+      pnl       {realized, unrealized, net, committed_usd, idle_usd, bots} from
+                the daemon's latest observe fold (daemon.pnl_snapshot) —
+                bots maps slot→{symbol, realized, unrealized, fills_24h,
+                projected_24h_usd} for the per-slot cards
       demo_cap  {cap, active, headroom} — the learned WT demo (paper)
                 grid-bot cap vs the live fleet
     """
@@ -137,7 +139,13 @@ def status_payload(daemon):
     pnl = {}
     try:
         if hasattr(daemon, "pnl_snapshot"):
-            pnl = (daemon.pnl_snapshot() or {}).get("fleet") or {}
+            snap = daemon.pnl_snapshot() or {}
+            # both halves on the wire: the fleet totals (console PnL header)
+            # AND the per-bot block the slot cards read for projected /24h
+            # (pnl.bots[slot].projected_24h_usd) — the bots map used to die
+            # here, leaving every slot card's projection cell stuck on "—"
+            pnl = dict(snap.get("fleet") or {})
+            pnl["bots"] = snap.get("bots") or {}
     except Exception:
         pnl = {}
     cap = st.get("demo_bot_cap")

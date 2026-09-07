@@ -1502,6 +1502,12 @@ async function loadDecisions() {
 }
 
 function _decValue(r, key) {
+  if (key === "state") {
+    // derived, not stored: records carry no state field — an attached
+    // outcome means the slot closed since the decision (same rule the
+    // state filter uses)
+    return r.outcome ? "closed" : "open";
+  }
   if (key === "realized") {
     const o = r.outcome;
     return (o && isNum(o.realized_pnl)) ? Number(o.realized_pnl) : null;
@@ -2838,7 +2844,12 @@ $("#llm-save").addEventListener("click", async () => {
   const providers = {};
   for (const name of ["cf", "nvidia", "openrouter", "mistral"]) {
     const prov = llmState.providers[name] || {};
-    const entry = { model: prov.model };
+    // model from the DOM, not llmState — the input has no state-sync
+    // listener, so prov.model is whatever was loaded from the server, not
+    // what was typed. Blank falls back to the loaded value (the server
+    // leaves the stored model untouched when the value is blank).
+    const modelInput = document.querySelector(`.llm-model[data-prov="${name}"]`);
+    const entry = { model: (modelInput && modelInput.value.trim()) || prov.model || "" };
     const keyInput = document.querySelector(`.llm-key[data-prov="${name}"]`);
     if (keyInput && keyInput.dataset.dirty === "1") entry.key = keyInput.value;
     providers[name] = entry;
@@ -2878,6 +2889,13 @@ async function loadLogs(force = false) {
   let data;
   try { data = await api(`/api/logs?${params}`); }
   catch (e) { return; }
+  // label the view with the file actually being tailed — under launchd the
+  // daemon log lives elsewhere and a hard-coded path would lie
+  const logPath = $("#log-path");
+  if (logPath) {
+    logPath.textContent = data.path || logPath.textContent;
+    if (data.source) logPath.title = `source: ${data.source}`;
+  }
   const newLines = data.lines || [];
   const box = $("#logbox");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;

@@ -794,6 +794,25 @@ class TestCtlStatusPayload(ManageHarness):
                     "capabilities", "env", "last_cycle", "journal_tail"):
             self.assertIn(key, payload)
 
+    def test_status_serves_per_bot_pnl_block(self):
+        import ctl_http
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {
+            "symbol": "DOGE", "observed": {"status": "active",
+                                            "realized_pnl": 0.5,
+                                            "unrealized_pnl": -0.25,
+                                            "fills_24h": 2}}
+        payload = ctl_http.status_payload(d)
+        # the fleet totals stay flat alongside the per-bot map
+        self.assertEqual(payload["pnl"]["realized"], 0.5)
+        bot = payload["pnl"]["bots"]["1"]
+        self.assertEqual(bot["symbol"], "DOGE")
+        self.assertEqual(bot["realized"], 0.5)
+        self.assertEqual(bot["unrealized"], -0.25)
+        self.assertEqual(bot["fills_24h"], 2.0)
+        # projected /24h present even when no stagnation policy applies
+        self.assertIn("projected_24h_usd", bot)
+
     def test_demo_cap_unknown_when_not_learned(self):
         import ctl_http
         d = self.make_daemon()
