@@ -56,7 +56,8 @@ services:
       # behind the Cloudflare tunnel's dsh.00m.indevs.in hostname (add a
       # Cloudflare Access policy before exposing it — it shells into the
       # container's world).
-      - "3081:3081"
+      # host 3082, not 3081: az00's caddy already binds 127.0.0.1:3081.
+      - "3082:3081"
       # NEVER publish 8765 (tvcli serve) or 9222 (Chromium CDP) — they are
       # container-internal dependencies only.
       #

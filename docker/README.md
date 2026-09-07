@@ -96,11 +96,11 @@ entrypoint launches it with
 `--trusted-host "${DSH_TRUSTED_HOST:-dsh.00m.indevs.in}"` — tunnel
 requests carry `Host: dsh.00m.indevs.in` and would be rejected without it
 (override `DSH_TRUSTED_HOST` in `grid.env` if you front `:3081` with a
-different hostname). :3081 is also published on `127.0.0.1` for SSH-tunnel
+different hostname). :3081 is also published on `127.0.0.1:3082` (az00's caddy owns :3081) for SSH-tunnel
 parity:
 
 ```sh
-ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3081:localhost:3081 <host>
+ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3082:localhost:3081 <host>
 ```
 
 The `grid-cloudflared` connector runs beside the stack on the `grid-net`

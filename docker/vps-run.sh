@@ -18,9 +18,9 @@
 #              runs on its own WunderTrading account)
 #
 # Ports are published on 127.0.0.1 ONLY — the console (:8798), the ctl
-# (:8799) and the dsh web UI (:3081, the GA agent) carry no built-in auth;
-# reach them through an SSH tunnel:
-#   ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3081:localhost:3081 <host>
+# (:8799) and the dsh web UI (host :3082 → container :3081, the GA agent)
+# carry no built-in auth; reach them through an SSH tunnel:
+#   ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3082:localhost:3081 <host>
 # (dsh.00m.indevs.in on the CF tunnel is the public path for :3081 — ingress
 # is ensured by the deploy workflow's Cloudflare-API step.)
 set -euo pipefail
@@ -81,7 +81,7 @@ $DOCKER run -d --name "$NAME" \
   -e PB_HOST=0.0.0.0 \
   -p 127.0.0.1:8798:8798 \
   -p 127.0.0.1:8799:8799 \
-  -p 127.0.0.1:3081:3081 \
+  -p 127.0.0.1:3082:3081 \   # host :3082 (az00's caddy owns :3081)
   -v grid-state:/app/agents/grid-autonomy/state \
   -v grid-pb:/app/agents/grid-autonomy/.pocketbase \
   -v grid-profile:/data/browser-profile \
