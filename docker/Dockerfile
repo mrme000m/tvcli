@@ -118,6 +118,7 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     npm install -g --no-fund --no-audit pnpm@10; \
     npm install -g --no-fund --no-audit @deepseek-ai/dsh@0.1.1-rc.2; \
+    rm -rf /root/.npm/_cacache; \
     dsh --version
 
 # prime-agent CLI — official installer (the verified pattern from the
@@ -125,10 +126,15 @@ RUN set -eux; \
 # so every prompt falls back to its default; `setsid --wait` + closed stdin
 # make that explicit (the installer's /dev/tty prompt helper). The npm-global
 # install lands `prime-agent` on PATH (/usr/bin) for the runtime supervisor.
+# The uv cache the installer's kernel-venv provisioning leaves behind is
+# pure download cache (~1GB of scipy/numpy wheels — it broke the az00 pull
+# with "no space left on device", run 34170323380) and is removed IN THE
+# SAME LAYER so the bytes never enter the image history.
 RUN set -eux; \
     curl -fsSL https://app.primeintellect.ai/prime-agent/install.sh -o /tmp/prime-agent-install.sh; \
     setsid --wait sh /tmp/prime-agent-install.sh </dev/null; \
     rm -f /tmp/prime-agent-install.sh; \
+    rm -rf /root/.cache/uv /root/.cache/pip; \
     command -v prime-agent; \
     prime-agent --version
 
