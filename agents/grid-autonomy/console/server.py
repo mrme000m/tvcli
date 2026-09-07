@@ -26,6 +26,10 @@ API (all JSON):
     GET  /api/recommendations?limit=  position-optimizer recommendations
                               (PocketBase records, newest first)
     GET  /api/screen          latest rescreen run card extract
+    GET  /api/optimizer        proxy of the fast slot-optimizer status
+                              (ctl /optimizer; fail-soft:
+                              {"optimizer": null, "error": ...} + 200
+                              when down)
     GET  /api/reports         run-card index
     GET  /api/reports/<stem>  one run card {json, md}
     GET  /api/logs?lines=&grep=  daemon.log tail
@@ -41,6 +45,8 @@ API (all JSON):
                               → {points: [{at, fleet{…}}]} newest-first
     GET  /api/meta            ports, paths, versions
     POST /api/ctl/rescreen    queue an immediate rescreen     {confirm}
+    POST /api/ctl/optimize    queue an immediate fast-optimizer
+                              cycle                        {confirm}
     POST /api/ctl/reliability queue a reliability refresh     {confirm}
     POST /api/ctl/rotate      force-rotate a slot {slot}     {confirm}
     POST /api/ctl/kill        write the KILL file            {confirm}
@@ -172,6 +178,11 @@ EDITABLE = {
     "watch.adjust_steps_threshold": dict(t="float", min=0.5, max=10,
                                          group="Cadence",
                                          label="Re-centre drift", unit="steps"),
+    "watch.gone_warn_after": dict(t="int", min=1, max=30, group="Cadence",
+                                  label="Gone-bot warn after",
+                                  unit="ticks"),
+    "watch.gone_clear_min": dict(t="float", min=1, max=720, group="Cadence",
+                                  label="Gone-bot slot clear", unit="min"),
     "policy.hysteresis_score": dict(t="float", min=0, max=50, group="Policy",
                                     label="Rotation hysteresis", unit="pts"),
     "policy.min_hold_h": dict(t="float", min=0, max=720, group="Policy",
@@ -1300,6 +1311,13 @@ class Handler(BaseHTTPRequestHandler):
                 int(q1("limit", 100))))
         elif route == "/api/screen":
             self._json(200, {"screen": screen_payload()})
+        elif route == "/api/optimizer":
+            ok, body = _ctl("/optimizer")
+            # fail-soft: degrade with a 200 + {"optimizer": null, ...} so
+            # the UI keeps the last-known panel when the daemon is down
+            self._json(200, body if ok else
+                       {"optimizer": None, "error": "ctl unreachable",
+                        "detail": body})
         elif route == "/api/observe":
             ok, body = _ctl_cached("/observe")
             # fail-soft: degrade with a 200 + {"error": ...} so the UI can
@@ -1357,6 +1375,10 @@ class Handler(BaseHTTPRequestHandler):
 
         if route == "/api/ctl/rescreen":
             ok, resp = _ctl("/rescreen", "POST")
+            self._json(200 if ok else 502, resp if ok else
+                       {"error": "ctl unreachable", "detail": resp})
+        elif route == "/api/ctl/optimize":
+            ok, resp = _ctl("/optimize", "POST")
             self._json(200 if ok else 502, resp if ok else
                        {"error": "ctl unreachable", "detail": resp})
         elif route == "/api/ctl/reliability":

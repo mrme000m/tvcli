@@ -21,7 +21,7 @@ plus a handful of minor imprecisions (details below).
   journal + run cards: `daemon.py` (rescreen_cycle :1132, health_cycle :1344,
   reliability_cycle :1713, run loop :1753).
 - **Cadences:** health poll 60s (`daemon.py:1783`, `watch.interval_s`),
-  rescreen 60m (`daemon.py:1784`, `screen.rescreen_minutes`),
+  rescreen 10m (`daemon.py`, `screen.rescreen_minutes`),
   reliability cron 24h (`daemon.py:1785`), grid-edit rate limit 6h
   (`daemon.py:1439` "rate limit (1 edit/6h)").
 - Screen stack: HL perps + Binance spot, presets `grid-neutral` +

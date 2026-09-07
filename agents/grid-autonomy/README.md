@@ -23,7 +23,7 @@ Accuracy note: every fact below is verified against the code at
                     │                 daemon.py                    │
                     │        (schedule + orchestrate + journal)     │
                     └───┬───────────────────────────────────┬──────┘
-        every 60m       │ rescreen                           │ every 60s health poll
+        every 10m       │ rescreen                           │ every 60s health poll
                         ▼                                    ▼
 ┌──────────────────────────────────┐        ┌──────────────────────────────────┐
 │  SCREEN      screen/merge.py     │        │  WATCH       execution/observe.py │
@@ -57,7 +57,7 @@ Accuracy note: every fact below is verified against the code at
 
 ## The loop
 
-1. **Screen (60m).** `screen/merge.py` screens Hyperliquid perps and Binance
+1. **Screen (10m).** `screen/merge.py` screens Hyperliquid perps and Binance
    spot (venue fetches are serial, not threaded): public OHLCV → regime classification (`market_regime`),
    preset scoring (`universe_screen`, presets `grid-neutral` +
    `grid-directional`), real Binance book-ticker spreads
@@ -69,10 +69,12 @@ Accuracy note: every fact below is verified against the code at
    hand-curated list — decide what gets a slot.
    The tvcli server (`server.tvcli`, :8765) computes a **numeric fitness
    read** per shortlisted token via `/hunt` (`screen.confluence_skills`:
-   squeeze + choppiness + mtf-confluence + dvi): "moves large" (ATR% ≥ 1.5,
+   squeeze + choppiness + mtf-confluence + dvi + vp-pro + sr-breaks): "moves large" (ATR% ≥ 1.5,
    mtf volRatio ≥ 1.5) and "moves fast" (squeeze released with momentum,
    ≥ 6-bar squeeze coil, DVI trend agreeing with the 1h regime) bonuses,
    CHOP-based harvestability, direction agreement, RSI-overheated penalty —
+   plus vp-pro value-area harvest/breakout and sr-breaks fresh S/R-break
+   bonuses (mean-reversion band + breakout entry) —
    bonus capped at +6, fail-soft when tvcli is down (`tvcli_fitness` in
    `screen/merge.py`, recorded per candidate as `tvcli_fit`).
    Selection hygiene layers on top: USD-stable bases (RLUSD, USD1, USDE,
@@ -113,8 +115,8 @@ Accuracy note: every fact below is verified against the code at
     (default `portfolio.dynamic_slot_venues`) in **dynamic mode**: as long
     as the candidate clears `screen.open_slot_min_score` and spare
     deployable capital covers the new slot's worst case (capital is the
-    ceiling, not a slot count; `slots_hard_max` is the runaway guard,
-    `min_slot_usd` the viability floor); for every other venue the sleeve
+    per-slot constraint; `slots_hard_max` = 6 is the fleet-wide ceiling —
+    only 6 slots watched & rotated profitably — `min_slot_usd` the viability floor); for every other venue the sleeve
     re-splits under the fixed `slots_max` cap. `execution/grid_adapter.py`
     then turns the ticket into the verified
    `grid_bots/upsert` payload: ATR-band channel, ATR-derived
@@ -133,7 +135,14 @@ Accuracy note: every fact below is verified against the code at
    next rescreen. `stagnant` / `re-analysis` / `reliability-flag` journal
    entries log on state TRANSITION only (first sweep per bot, or when the
    reasons change) — not once per 60 s sweep — so the 200-entry journal
-   keeps screen/veto/deploy history visible.
+   keeps screen/veto/deploy history visible. The same dedup applies to a
+   GONE bot (tracked, but absent from a healthy WT grid status list —
+   deleted on the WunderTrading side): one `health-warn` per missing
+   episode after `watch.gone_warn_after` ticks, and after
+   `watch.gone_clear_min` of CONTINUOUS absence one loud `bot-gone` entry
+   removes the bot from `active_bots` and frees the slot for the existing
+   refill logic. Transport-class observe errors (browser/session down)
+   never count toward removal and reset the episode — fail closed.
 6. **Optimize (2–5m).** `optimizer.py` — the fast capital-reallocation
    loop between rescreens. Per cycle: **track** per-slot fill activity
    from the health poll's `fills_24h` (no extra WT calls); **idle**
@@ -147,7 +156,7 @@ Accuracy note: every fact below is verified against the code at
    rescreen) on live 1h candles + preset scoring + grid-fill EV, and
    enriches incumbents AND challengers with tvcli `/hunt` structure on
    **15m** (`optimizer.hunt_skills`: squeeze + choppiness — the fast tape
-   the hourly 1H pass never sees) using the same `tvcli_fitness` bonus;
+   the rescreen's 1H pass never sees) using the same `tvcli_fitness` bonus;
    the **arbiter** (one LLM call, pinned to Mistral via
    `optimizer.llm_provider` — the debate chain stays on CF) compares
    structure + EV + idle context and may approve swaps inside the relaxed
@@ -194,7 +203,7 @@ Accuracy note: every fact below is verified against the code at
    Every hook fail-softs (`position-optimizer-error`); per-bot
    `cooldown_min` (60) bounds re-analysis churn. Research on when TP/SL/
    trailing increase profit: `docs/position_optimizer.md`.
-7. **Rotate (60m, on rescreen).** A stagnant incumbent — or one flagged
+7. **Rotate (10m, on rescreen).** A stagnant incumbent — or one flagged
    out-of-channel/stopped — with an eligible challenger (stagnant
    incumbents additionally need Δscore ≥ 5 hysteresis; the min-hold floor
    and per-token cooldowns always apply) is stopped
@@ -300,7 +309,7 @@ whether the daemon actually reads it:
 | `portfolio.venues.*.grids` | Allowed grid types per venue. | doc only |
 | `portfolio.slots_min` / `slots_max` | 3 / 6 — `slots_max` caps slots for FIXED venues only (everything not in `dynamic_slot_venues`). | `slots_max` yes / `slots_min` doc only |
 | `portfolio.dynamic_slot_venues` | `[hyperliquid]` — DEFAULT dynamic slot mode: slots open as long as a token scores ≥ `screen.open_slot_min_score` AND spare deployable capital covers the new slot's worst case. Capital is the ceiling, not a slot count. | yes (daemon `open_slot`) |
-| `portfolio.slots_hard_max` | 16 — absolute runaway guard for dynamic venues. | yes |
+| `portfolio.slots_hard_max` | 6 — fleet-wide ceiling (operator directive: only 6 slots watched & rotated profitably); capital is still the binding constraint below it. | yes |
 | `portfolio.min_slot_usd` | 100.0 — per-slot budget floor for dynamic opens ($10/line exchange floor × ≥5 lines at 50% worst-case). The new slot's budget is `max(sleeve/(n+1), min_slot_usd)`; existing slots are never shrunk. | yes |
 | `portfolio.slots_default` | Number of slots (`4`). | yes |
 | `portfolio.max_alloc_per_slot` | Per-slot worst-case commitment cap (`0.5`). | yes |
@@ -313,9 +322,9 @@ whether the daemon actually reads it:
 | `screen.universe_max_symbols` | Universe cap per venue (`100`, top-N by 24h volume). | yes (daemon → merge.py) |
 | `screen.top_per_preset_venue` | Screen width passed to merge (`30`). | yes (daemon → merge.py) |
 | `screen.confluence_top` | Candidates sent to tvcli `/hunt` (`10`). | yes (daemon → merge.py) |
-| `screen.confluence_skills` | `squeeze,choppiness,mtf-confluence,dvi` — tvcli fitness hunts. | yes (merge.py reads it) |
+| `screen.confluence_skills` | `squeeze,choppiness,mtf-confluence,dvi,vp-pro,sr-breaks` — tvcli fitness hunts. | yes (merge.py reads it) |
 | `screen.open_slot_min_score` | New-venue-slot floor (`40.0`). | yes (daemon `open_slot` gate) |
-| `screen.rescreen_minutes` | Rescreen cadence (`60`). | yes |
+| `screen.rescreen_minutes` | Rescreen cadence (`10`). | yes |
 | `optimizer.enabled` | Fast loop on/off (`true`). | yes |
 | `optimizer.interval_min` | Hunt cadence (`3`), clamped to the 2–5 min design band by the daemon. | yes |
 | `optimizer.idle_minutes` | Absolute no-fill floor before a slot is idle (`5.0`). | yes |
@@ -331,7 +340,7 @@ whether the daemon actually reads it:
 | `optimizer.max_attempts_per_slot` | Challengers tried per idle slot per cycle (`2`) — a sizing/reliability veto on the top pick falls through to the next-best challenger in the same cycle. | yes |
 | `optimizer.hunt_top` | Challengers refreshed per cycle (`8`). | yes |
 | `optimizer.hunt_skills` | tvcli `/hunt` skills on the fast tape (`squeeze, choppiness`). | yes |
-| `optimizer.hunt_timeframe` / `hunt_bars` | `15m` / `96` — the fast tape the hourly 1H pass never sees. | yes |
+| `optimizer.hunt_timeframe` / `hunt_bars` | `15m` / `96` — the fast tape the rescreen's 1H pass never sees. | yes |
 | `optimizer.refresh_limit` | 1h candles per refresh (`180`, light vs merge's 300). | yes |
 | `optimizer.screen_cache_fresh_min` | Candidate board older than `120` min → wait for rescreen. | yes |
 | `optimizer.refill_nudge_min` | Empty-slot rescreen-nudge rate limit (`10`). | yes |
@@ -371,6 +380,8 @@ whether the daemon actually reads it:
 | `reliability.kill_min_samples` | 10. | kill-flag binds only with ≥ this many closed trips |
 | `autonomy.tier_max_grids` | `{base: 12, probe: 20, full: 30}`. | tier also caps grid density, not just the worst-case target |
 | `watch.interval_s` | Health-poll cadence (`60`). | yes |
+| `watch.gone_warn_after` | A tracked bot missing from a HEALTHY WT grid status list warns once after this many ticks (`3`) — once per missing episode, not per sweep. | yes |
+| `watch.gone_clear_min` | Minutes of CONTINUOUS missing observations before the bot is dropped from `active_bots` (journal `bot-gone`, slot freed for the refill logic). Transport errors ("browser/session down") never count — fail closed. | yes |
 | `watch.adjust_steps_threshold` | In-place re-centre when price drifts > `2.0` grid steps from mid. | yes |
 | `watch.browser_cdp` | CloakBrowser CDP probe URL (`http://127.0.0.1:9222`) for the browser watchdog. | yes |
 | `watch.browser_restart_cooldown_s` | Watchdog relaunch cooldown (`600`). | yes |
@@ -636,7 +647,8 @@ environment to be used.
 **Mistral runs the fast lane.** The slot optimizer's arbiter is pinned to
 Mistral by default (`optimizer.llm_provider: mistral` via
 `provider.named_chain()`), so the 2–5 min tactical swap verdicts run on a
-different model than the hourly debate chain; without `MISTRAL_API_KEY`
+different model than the rescreen's debate chain; without
+`MISTRAL_API_KEY`
 the arbiter degrades to the numeric-margin rule fallback. Any role can be
 pinned per-agent with `GRID_LLM_ROLES` (JSON, keys include the swarm roles
 and `optimizer`).
@@ -661,7 +673,11 @@ path so a transient failure does not silently degrade autonomy:
 
 Prolonged total blindness now escalates: when **every** bot errors on every
 observe sweep for ~30 min, the journal gets one loud `observe-outage` entry
-per 30-min window (in addition to the per-bot `health-warn` lines).
+per 30-min window (in addition to the per-bot `health-warn` lines). A bot
+missing from a HEALTHY status list is the opposite case — see
+`watch.gone_clear_min` above: after a continuous `gone_clear_min` of
+absence it is journaled `bot-gone` and its slot freed, so stale
+WunderTrading-side deletions can never spam the journal forever.
 
 **Known operator task — WT session expiry:** the WunderTrading `PHPSESSID`
 cookie (in the browser profile) expires roughly weekly (current one:

@@ -843,9 +843,14 @@ let optimizerData = null;
 async function loadOptimizer() {
   let d;
   try { d = await api("/api/recommendations?limit=200"); }
-  catch (e) { toast(`optimizer: ${e.message}`, true); return; }
-  optimizerData = d;
-  renderOptimizer(d);
+  catch (e) { toast(`optimizer: ${e.message}`, true); d = null; }
+  if (d) { optimizerData = d; renderOptimizer(d); }
+  // fast slot optimizer (ctl /optimizer): fail-soft — render a quiet
+  // note when the daemon is down, never a toast storm
+  let f = null;
+  try { f = await api("/api/optimizer"); }
+  catch (e) { f = null; }
+  renderFastOptimizer(f);
 }
 
 function blockedByBadge(b) {
@@ -899,6 +904,77 @@ function renderOptimizer(d) {
     `<tr><td colspan="9"><div class="empty-note">No pending recommendations \u2014 the position optimizer emits one when a bot\u2019s grid is off-price by more than the drift threshold (15 min cadence).</div></td></tr>`;
   $("#opt-applied-body").innerHTML = applied.map((r) => row(r, true)).join("") ||
     `<tr><td colspan="8"><div class="empty-note">Nothing applied yet${applyEnabled ? "" : " \u2014 apply is disabled in config (advisory mode)"}.</div></td></tr>`;
+}
+
+/* ── fast slot optimizer (2–5m cadence capital reallocation) ───────── */
+
+function renderFastOptimizer(f) {
+  const box = $("#opt-fast");
+  if (!box) return;
+  const o = f && f.optimizer;
+  if (!o) {
+    // ctl plane down or the fetch itself failed — quiet fail-soft note
+    const why = (f && (f.error || f.detail)) || "unreachable";
+    box.innerHTML = `
+      <div class="card-head"><span class="card-title">Fast slot optimizer</span>
+        <span class="spacer"></span><span class="badge badge--warn" title="daemon ctl plane not responding">offline</span></div>
+      <div class="card-body"><div class="empty-note">Fast-optimizer status unavailable (${esc(why)}) — fail-soft: this panel refills automatically once the daemon ctl plane is reachable again. Swaps paused while it is down.</div></div>`;
+    return;
+  }
+  const rep = o.last_report || {};
+  const hunt = rep.hunt || {};
+  const idle = rep.idle || [];
+  const vetoes = rep.vetoes || [];
+  const cap = rep.capital || {};
+  const cacheAge = f.screen_cache_age_s == null ? null : `${fmtNum(f.screen_cache_age_s, 0)}s`;
+  const kv = (k, v, title = "") =>
+    `<div class="row"><span class="k"${title ? ` title="${esc(title)}"` : ""}>${esc(k)}</span><span class="v">${v}</span></div>`;
+
+  box.innerHTML = `
+    <div class="card-head"><span class="card-title">Fast slot optimizer</span>
+      <span class="spacer"></span><span class="mono" style="font-size:10.5px;color:var(--ink-faint)" title="last report ${esc(rep.at || "—")}">report ${esc(relTime(rep.at))}${cacheAge ? ` · screen cache ${esc(cacheAge)}` : ""}</span></div>
+    <div class="card-body"><div class="mini-kv">
+      ${kv("State", `${o.enabled ? '<span class="badge badge--ok">enabled</span>' : '<span class="badge badge--dim">disabled</span>'} · every ${esc(o.interval_min ?? "—")} min`, "fast capital-reallocation loop (optimizer.py)")}
+      ${kv("Cycles", `${esc(o.cycles ?? "—")} · swaps ${esc(o.swaps_total ?? 0)}`, "completed cycles; total slot swaps executed through the guard/churn machinery")}
+      ${kv("Last cycle", esc(relTime(o.last_at)))}
+      ${kv("Capital", `${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd)} idle · ${esc(cap.free_slots ?? "—")} free slot(s)`, "deployable ceiling = free capital available to commit to challengers")}
+    </div></div>
+    <div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr><th>idle slot</th><th>market</th><th>reasons</th></tr></thead>
+        <tbody>
+          ${idle.map((s) => `<tr>
+            <td class="td-mono">${esc(s.slot ?? "—")}</td>
+            <td class="td-mono">${esc(s.venue || "")}:${esc(s.symbol || "?")}</td>
+            <td>${(s.reasons || []).map((r) => `<span class="badge badge--warn">${esc(r)}</span>`).join(" ") || "—"}</td>
+          </tr>`).join("") || `<tr><td colspan="3"><div class="empty-note">No idle slots in the last report — every slot is pulling its weight.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr><th>challenger</th><th>regime</th><th>score</th><th>harvest 24h</th></tr></thead>
+        <tbody>
+          ${(hunt.top3 || []).map((c) => `<tr>
+            <td class="td-mono"><span class="venue-tag venue-tag--${esc(c.venue)}">${esc(c.venue)}</span>:${esc(c.symbol)}</td>
+            <td><span class="badge badge--dim">${esc(c.regime || "?")}</span></td>
+            <td class="td-mono">${esc(fmtNum(c.score_final, 1))}</td>
+            <td class="td-mono ${(c.harvest_net_pct_24h || 0) >= 0 ? "m-value--good" : "m-value--bad"}">${c.harvest_net_pct_24h == null ? "—" : `${Number(c.harvest_net_pct_24h) >= 0 ? "+" : ""}${fmtNum(c.harvest_net_pct_24h, 2)}%`}</td>
+          </tr>`).join("") || `<tr><td colspan="4"><div class="empty-note">No challenger hunt yet — the first cycle populates the top-3.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr><th>vetoed slot</th><th>reason</th></tr></thead>
+        <tbody>
+          ${vetoes.map((v) => `<tr>
+            <td class="td-mono">${esc(v.slot ?? "—")}</td>
+            <td><div class="rationale" title="${esc(v.reason || "")}">${esc(v.reason || "—")}</div></td>
+          </tr>`).join("") || `<tr><td colspan="2"><div class="empty-note">No recent vetoes — nothing blocked by the guard/churn bounds.</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 /* ── reliability ──────────────────────────────────────────────────── */
@@ -1309,6 +1385,21 @@ $("#ctl-rescreen").addEventListener("click", async () => {
     toast("Rescreen queued.");
     loadOverview();
   } catch (e) { toast(`rescreen failed: ${e.message}`, true); }
+});
+
+$("#ctl-optimize").addEventListener("click", async () => {
+  const { ok } = await confirmDialog({
+    title: "Run slot optimizer",
+    body: [el("div", {}, "Runs the fast capital-reallocation cycle now — idle-slot detection, challenger hunt on live 15m candles, Mistral-pinned arbiter. Swaps only pass through the full guard/churn machinery.")],
+    label: "Run optimizer",
+  });
+  if (!ok) return;
+  try {
+    await api("/api/ctl/optimize", { method: "POST", body: {} });
+    toast("Optimizer cycle queued.");
+    loadOptimizer();
+    loadOverview();
+  } catch (e) { toast(`optimize failed: ${e.message}`, true); }
 });
 
 $("#ctl-reliability").addEventListener("click", async () => {

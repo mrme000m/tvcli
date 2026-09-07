@@ -66,7 +66,13 @@ class TestSelfHealEnv(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.old = {k: os.environ.pop(k, None) for k in
                     ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY",
-                     "CLOUDFLARE_AI_TOKEN", "PB_TOKEN", "PB_ADMIN_EMAIL")}
+                     "CLOUDFLARE_AI_TOKEN", "PB_TOKEN", "PB_ADMIN_EMAIL",
+                     "NVIDIA_API_KEY", "OPENROUTER_API_KEY", "MISTRAL_API_KEY")}
+        # hermetic: a machine-local state/llm.env sidecar must not leak a
+        # real "llm" heal into these assertions
+        patcher = mock.patch.object(daemon, "_load_llm_env", lambda: None)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.addCleanup(self._restore)
 
     def _restore(self):
@@ -274,6 +280,145 @@ class TestObserveOutageEscalation(unittest.TestCase):
             len([j for j in d.state["journal"] if j["kind"] == "observe-outage"]),
             0)
         self.assertEqual(d.state["observe_error_sweeps"], 0)
+
+
+# ── gone-bot reconciliation in health_cycle ────────────────────────────
+GONE_ERR = "grid resource not found in status list"
+TRANSPORT_ERR = "grid status list unavailable (browser/session down)"
+
+
+class TestGoneBotReconciliation(unittest.TestCase):
+    """A tracked bot absent from a HEALTHY WT grid status list is a gone
+    bot: warn once per missing episode, free the slot only after
+    watch.gone_clear_min of CONTINUOUS absence; transport-class observe
+    errors (browser/session down) never count toward removal."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        patcher = mock.patch("daemon.STATE_PATH",
+                             os.path.join(self.tmp.name, "state.json"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _daemon(self, watch=None):
+        d = make_daemon(watch)
+        d.state["active_bots"] = {
+            "1": {"symbol": "CASHCAT", "venue": "hyperliquid",
+                  "bot_code": "B1", "stagnation_policy": {}}}
+        d.state["committed"] = {"1": 150.0}
+        return d
+
+    @staticmethod
+    def _err(err):
+        return {"1": {"error": err, "status": "unknown", "price": None,
+                      "fills_24h": 0, "realized_ratio": 0.0,
+                      "unrealized_pnl": None, "ladder_full": False,
+                      "dd_vs_atr_band": 0.0}}
+
+    def _health(self, d, obs, n=1):
+        with mock.patch.object(daemon, "cdp_alive", lambda *a: True), \
+                mock.patch.object(daemon, "observe_all_safe",
+                                  return_value=obs):
+            for _ in range(n):
+                d.health_cycle(dry_run=True)
+
+    def test_missing_bot_warns_once_then_stays_quiet(self):
+        d = self._daemon()  # defaults: gone_warn_after=3, gone_clear_min=30
+        self._health(d, self._err(GONE_ERR), n=8)
+        warns = [j for j in d.state["journal"]
+                 if j["kind"] == "health-warn" and GONE_ERR in j["msg"]]
+        self.assertEqual(len(warns), 1)
+        # default gone_clear_min (30 m) not elapsed — bot still tracked
+        self.assertIn("1", d.state["active_bots"])
+        self.assertTrue(d.state["active_bots"]["1"]["gone_warned"])
+
+    def test_gone_bot_removed_and_journaled_after_clear_min(self):
+        d = self._daemon({"gone_warn_after": 1, "gone_clear_min": 5})
+        t = {"now": 1_000_000.0}
+        with mock.patch.object(daemon.time, "time",
+                               side_effect=lambda: t["now"]):
+            self._health(d, self._err(GONE_ERR))  # episode starts, warns
+            t["now"] += 5 * 60 + 1                 # 5 min continuous
+            self._health(d, self._err(GONE_ERR))   # past gone_clear_min
+        self.assertNotIn("1", d.state["active_bots"])   # slot freed
+        self.assertNotIn("1", d.state["committed"])
+        gones = [j for j in d.state["journal"] if j["kind"] == "bot-gone"]
+        self.assertEqual(len(gones), 1)
+        g = gones[0]
+        self.assertEqual(g["slot"], "1")
+        self.assertEqual(g["symbol"], "CASHCAT")
+        self.assertEqual(g["venue"], "hyperliquid")
+        self.assertGreaterEqual(g["minutes_missing"], 5.0)
+        # exactly one bot-gone — no repeated spam on later ticks
+        self._health(d, self._err(GONE_ERR), n=3)
+        self.assertEqual(
+            len([j for j in d.state["journal"] if j["kind"] == "bot-gone"]),
+            1)
+
+    def test_transport_error_never_removes_and_resets_episode(self):
+        d = self._daemon({"gone_warn_after": 1, "gone_clear_min": 5})
+        t = {"now": 2_000_000.0}
+        with mock.patch.object(daemon.time, "time",
+                               side_effect=lambda: t["now"]):
+            self._health(d, self._err(GONE_ERR))  # seed a missing episode
+            self.assertIsNotNone(
+                d.state["active_bots"]["1"].get("gone_missing_since"))
+            # browser/session down for far longer than gone_clear_min
+            for _ in range(8):
+                t["now"] += 10 * 60
+                self._health(d, self._err(TRANSPORT_ERR))
+        self.assertIn("1", d.state["active_bots"])  # fail closed: kept
+        self.assertIn("1", d.state["committed"])
+        bot = d.state["active_bots"]["1"]
+        # the in-progress missing episode was reset, not accumulated
+        for k in ("gone_missing_since", "gone_ticks", "gone_warned"):
+            self.assertNotIn(k, bot)
+        self.assertEqual(
+            [j for j in d.state["journal"] if j["kind"] == "bot-gone"], [])
+
+    def test_all_gone_fleet_is_not_an_observe_outage(self):
+        # a fleet of gone bots (healthy list, bots deleted WT-side) must
+        # NOT trigger the browser-outage escalation — that is transport
+        # blindness only.
+        d = self._daemon({"gone_warn_after": 1, "gone_clear_min": 0.2})
+        t = {"now": 4_000_000.0}
+        with mock.patch.object(daemon.time, "time",
+                               side_effect=lambda: t["now"]):
+            # long past gone_clear_min → fleet removed, never escalated
+            for _ in range(3):
+                t["now"] += 60          # clock advances between sweeps
+                self._health(d, self._err(GONE_ERR))
+        self.assertEqual(d.state.get("observe_error_sweeps", 0), 0)
+        self.assertEqual(
+            [j for j in d.state["journal"] if j["kind"] == "observe-outage"],
+            [])
+        self.assertNotIn("1", d.state["active_bots"])
+
+    def test_reappearance_resets_episode_without_clearing(self):
+        d = self._daemon({"gone_warn_after": 1, "gone_clear_min": 30})
+        healthy = {"1": {"status": "active", "price": 100.0,
+                         "fills_24h": 5, "realized_ratio": 1.0}}
+        t = {"now": 3_000_000.0}
+        with mock.patch.object(daemon.time, "time",
+                               side_effect=lambda: t["now"]):
+            self._health(d, self._err(GONE_ERR))   # episode 1: warns
+            first_since = d.state["active_bots"]["1"]["gone_missing_since"]
+            self._health(d, healthy)                # back → episode reset
+            t["now"] += 120                         # well under 30 min
+            self._health(d, self._err(GONE_ERR))    # fresh episode 2
+        # slot NOT cleared (only 2 min into the fresh episode)
+        self.assertIn("1", d.state["active_bots"])
+        bot = d.state["active_bots"]["1"]
+        self.assertEqual(bot["gone_ticks"], 1)
+        self.assertTrue(bot["gone_warned"])          # re-warned once again
+        self.assertGreater(bot["gone_missing_since"], first_since)
+        # one warn per episode → exactly two across the two episodes
+        warns = [j for j in d.state["journal"]
+                 if j["kind"] == "health-warn" and GONE_ERR in j["msg"]]
+        self.assertEqual(len(warns), 2)
+        self.assertEqual(
+            [j for j in d.state["journal"] if j["kind"] == "bot-gone"], [])
 
 
 # ── PB mirror upsert ────────────────────────────────────────────────────

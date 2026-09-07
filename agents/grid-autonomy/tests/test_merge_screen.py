@@ -131,6 +131,143 @@ class TestTvcliFitness(unittest.TestCase):
         # raw sum would be 1+1.5+1+2+1+1=7.5 → capped at TVCLI_BONUS_CAP
         self.assertEqual(bonus, merge.TVCLI_BONUS_CAP)
 
+    # --- vp-pro (volume profile value area) --------------------------------
+
+    def test_vp_value_area_harvest(self):
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="neutral"),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "range", "valueAreaWidth": 10.0,
+                     "price": 100.0, "pricePosition": "inside_value_area",
+                     "distToPOCPct": 0.1, "distToVAHPct": 4.5,
+                     "distToVALPct": -5.0}))
+        self.assertEqual(bonus, 1.0)
+        self.assertIn("value-area-harvest", notes)
+        self.assertEqual(fit["vp_poc"], 100.0)
+        self.assertEqual(fit["vp_vah"], 105.0)
+        self.assertEqual(fit["vp_val"], 95.0)
+
+    def test_vp_breakout_up_with_trend(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "bullish", "price": 106.0,
+                     "distToPOCPct": 6.0, "distToVAHPct": 1.0,
+                     "distToVALPct": 11.0, "pricePosition": "above_value_area",
+                     "valueAreaWidth": 10.0}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-up", notes)
+
+    def test_vp_breakout_up_inferred_from_price(self):
+        # pricePosition absent (older parser) — price > VAH still proves it
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "bullish", "price": 105.5}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-up", notes)
+
+    def test_vp_breakout_down_with_trend(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_down"),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "bearish", "price": 94.0,
+                     "pricePosition": "below_value_area"}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("va-breakout-down", notes)
+
+    def test_vp_inside_value_area_trend_no_breakout_bonus(self):
+        # trend regime but price INSIDE the value area → no breakout bonus
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "neutral", "price": 101.0,
+                     "pricePosition": "inside_value_area"}))
+        self.assertEqual(bonus, 0.0)
+        self.assertEqual(notes, [])
+
+    def test_vp_absent_no_bonus(self):
+        # parser returns no structure when POC/VAH/VAL are missing
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5), vp={"result": {}})
+        self.assertEqual(bonus, 0.0)
+        self.assertEqual(notes, [])
+        self.assertNotIn("vp_poc", fit)
+
+    # --- sr-breaks (support/resistance breaks) ----------------------------
+
+    def test_sr_fresh_breakout_up(self):
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            sr=_res({"support": 100.0, "resistance": 110.0, "price": 111.0,
+                     "bias": "bullish", "lastBreak": "bullish",
+                     "breakBarsAgo": 3}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("fresh-breakout-up", notes)
+        self.assertEqual(fit["sr_last_break"], "bullish")
+        self.assertEqual(fit["sr_break_bars_ago"], 3)
+
+    def test_sr_recent_breakout_up(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            sr=_res({"support": 100.0, "resistance": 110.0, "price": 109.0,
+                     "bias": "bullish", "lastBreak": "bullish",
+                     "breakBarsAgo": 12}))
+        self.assertEqual(bonus, 0.75)
+        self.assertIn("recent-breakout-up", notes)
+
+    def test_sr_fresh_breakout_down(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_down"),
+            sr=_res({"support": 100.0, "resistance": 110.0, "price": 99.0,
+                     "bias": "bearish", "lastBreak": "bearish",
+                     "breakBarsAgo": 2}))
+        self.assertEqual(bonus, 1.5)
+        self.assertIn("fresh-breakout-down", notes)
+
+    def test_sr_recent_breakout_down(self):
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_down"),
+            sr=_res({"support": 100.0, "resistance": 110.0, "price": 101.0,
+                     "bias": "bearish", "lastBreak": "bearish",
+                     "breakBarsAgo": 20}))
+        self.assertEqual(bonus, 0.75)
+        self.assertIn("recent-breakout-down", notes)
+
+    def test_sr_regime_disagree_zero(self):
+        # bullish break against a down regime → 0, never negative
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_down"),
+            sr=_res({"lastBreak": "bullish", "breakBarsAgo": 1}))
+        self.assertEqual(bonus, 0.0)
+        self.assertEqual(notes, [])
+
+    def test_sr_stale_break_no_bonus(self):
+        # aligned but >20 bars ago → too old to ride
+        bonus, notes, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            sr=_res({"lastBreak": "bullish", "breakBarsAgo": 45}))
+        self.assertEqual(bonus, 0.0)
+
+    def test_sr_absent_no_bonus(self):
+        bonus, notes, fit = merge.tvcli_fitness(_cand(atr=0.5))
+        self.assertEqual(bonus, 0.0)
+        self.assertEqual(notes, [])
+        self.assertNotIn("sr_last_break", fit)
+
+    def test_positive_bonus_capped_with_new_skills(self):
+        # raw sum 1.5+1+2+1+1+1.5+1.5 = 9.5 → capped at TVCLI_BONUS_CAP
+        bonus, _, _ = merge.tvcli_fitness(
+            _cand(atr=0.5, regime="trend_up"),
+            sq=_res({"squeezeOn": True, "squeezeBars": 8}),
+            ch=_res({"chop": 20.0}),
+            mtf=_res({"mtfComposite": 150.0, "volRatio": 2.0}),
+            dvi=_res({"trend": 1}),
+            vp=_res({"poc": 100.0, "vah": 105.0, "val": 95.0,
+                     "bias": "bullish-breakout"}),
+            sr=_res({"lastBreak": "bullish", "breakBarsAgo": 2}))
+        self.assertEqual(bonus, merge.TVCLI_BONUS_CAP)
+
     def test_rsi_overheated_penalty(self):
         bonus, notes, _ = merge.tvcli_fitness(_cand(atr=0.5, rsi=80.0))
         self.assertEqual(bonus, -3.0)

@@ -42,11 +42,14 @@ portfolio:
   slots_min: 3
   slots_max: 5                  # slot-count ceiling for FIXED venues only
                                 # (everything not in dynamic_slot_venues)
-  slots_hard_max: 9             # absolute runaway guard for DYNAMIC venues
-                                # — the real ceiling there is capital
-                                # (5 planned slots + dynamic-open headroom;
-                                # each new slot needs its $ worst-case in
-                                # spare deployable capital anyway)
+  slots_hard_max: 6             # operator ceiling: watch at most 6 TOTAL
+                                # slots (5 hyperliquid + 1 binance at the
+                                # current sleeves) — enforced both in
+                                # open_slot AND by pruning empty slots above
+                                # it at reconcile + health ticks. Capital is
+                                # still the binding constraint: each new
+                                # slot needs its $ worst-case in spare
+                                # deployable capital anyway
   dynamic_slot_venues: [hyperliquid]
                                 # DEFAULT DYNAMIC MODE: HL slots open as long
                                 # as there is a profitable opportunity
@@ -74,9 +77,9 @@ screen:
                                # hand-curated list
   top_per_preset_venue: 30
   confluence_top: 10
-  confluence_skills: [squeeze, choppiness, mtf-confluence, dvi]  # tvcli /hunt
+  confluence_skills: [squeeze, choppiness, mtf-confluence, dvi, vp-pro, sr-breaks]  # tvcli /hunt
   open_slot_min_score: 40.0    # new-venue-slot floor (see portfolio.slots_max)
-  rescreen_minutes: 60         # daemon re-runs merge+swarm every 60m
+  rescreen_minutes: 10         # daemon re-runs merge+swarm every 10m
                                # (each run also refreshes state.screen_cache —
                                # the optimizer's challenger board)
 
@@ -103,7 +106,7 @@ optimizer:                     # fast loop BETWEEN rescreens (optimizer.py)
                                # (the slot stays free for the next-best one)
   hunt_top: 8                  # challengers refreshed per cycle
   hunt_skills: [squeeze, choppiness]   # tvcli /hunt on the FAST tape —
-  hunt_timeframe: 15m          # the hourly 1H pass never sees these bars
+  hunt_timeframe: 15m          # the rescreen's 1H pass never sees these bars
   hunt_bars: 96
   refresh_limit: 180           # 1h candles per refresh (light vs merge's 300)
   screen_cache_fresh_min: 120  # older candidate board → wait for rescreen
@@ -175,6 +178,13 @@ watch:                         # daemon health-poll loop (Phase 4)
                                # limiter. Failed edits are retried after a
                                # 10-min backoff, not treated as applied.
   pnl_snapshot_interval_s: 300 # fleet PnL journal cadence (0 = off)
+  gone_warn_after: 3           # ticks a bot must be missing from a HEALTHY
+                               # grid status list before the (once-per-episode)
+                               # health-warn fires
+  gone_clear_min: 30           # minutes of CONTINUOUS missing observations
+                               # before the bot is dropped (journal `bot-gone`,
+                               # slot freed). Transport errors ("browser/
+                               # session down") never count — fail closed.
   browser_cdp: http://127.0.0.1:9222      # CloakBrowser CDP probe (WT session-API transport)
   browser_restart_cooldown_s: 600         # watchdog relaunch at most every 10 min
   # The WT cookie session lives in the minimal-mjs browser profile — relaunch

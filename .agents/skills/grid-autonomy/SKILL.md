@@ -13,18 +13,19 @@ WunderTrading **paper profiles only** unless an operator lifts the live gate.
 
 ## What it does
 
-- **Screen (60m):** `screen/merge.py` screens Hyperliquid perps + Binance
+- **Screen (10m):** `screen/merge.py` screens Hyperliquid perps + Binance
   spot — broad universe (≥ `screen.min_volume_usd`, top
   `screen.universe_max_symbols` by 24h volume; universe fetches retry with
   backoff and fail soft per venue), regime + preset score, real spreads,
-  numeric tvcli `/hunt` fitness (squeeze/choppiness/mtf-confluence/dvi —
-  "moves large & fast" bonuses, cap +6, fail-soft), 4h trend confirmation,
+  numeric tvcli `/hunt` fitness (squeeze/choppiness/mtf-confluence/dvi/vp-pro/
+  sr-breaks — "moves large & fast" bonuses, cap +6, fail-soft), 4h trend confirmation,
   dead-tape floor + expected-value grid-fill pass. When a venue's slots are
   full but a token scores ≥ `screen.open_slot_min_score` and deployable
   capital is spare, the daemon opens another slot — **Hyperliquid defaults
   to dynamic mode** (`portfolio.dynamic_slot_venues`): slots open while
-  profitable candidates wait AND capital is left (capital is the ceiling,
-  not a slot count; `slots_hard_max` is the runaway guard, `min_slot_usd`
+  profitable candidates wait AND capital is left (capital is the per-slot
+  constraint; `slots_hard_max` = 6 is the fleet-wide ceiling — only 6
+  slots watched & rotated profitably — and `min_slot_usd`
   the $100 viability floor — existing slots are never shrunk); other
   venues re-split the sleeve under the fixed `slots_max`. On every startup,
   `reconcile_slots` re-normalizes the persisted slot budgets to the
@@ -232,6 +233,17 @@ re-login in the browser window (or vault `wundertrading-session` →
   `browser-restart`,
   `env-heal`, `observe-outage`, `kill`, and more. `stagnant` and
   `re-analysis` log once per state transition, not every 60 s sweep.
+  `bot-gone` (gone-bot reconciliation): a tracked bot missing from a
+  HEALTHY WT grid status list ("grid resource not found in status list" —
+  deleted on the WunderTrading side) warns via `health-warn` at most ONCE
+  per missing episode (after `watch.gone_warn_after` ticks), and after
+  `watch.gone_clear_min` of CONTINUOUS missing observations one `bot-gone`
+  entry ({slot, symbol, venue, minutes_missing}) removes the bot from
+  `active_bots`, frees the slot for the existing refill logic (rescreen /
+  optimizer nudge), and persists state. Transport-class observe errors
+  ("grid status list unavailable — browser/session down") NEVER count
+  toward removal and reset the episode — fail closed, a dead browser must
+  never look like a gone bot.
 - **Decision journal:** `state/decisions.jsonl` — one line per decision;
   `record_outcome` attaches `"outcome"` on close. Ids are
   `dYYYYMMDD-NNN`. `payload_digest` is an md5 — full payloads are never

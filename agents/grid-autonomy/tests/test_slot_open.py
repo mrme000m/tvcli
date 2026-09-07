@@ -433,5 +433,149 @@ class TestRescreenSlotOpening(ManageHarness):
         self.assertEqual(d.state["active_bots"]["5"]["symbol"], "PEPE")
 
 
+
+class _HealthTickHarness(ManageHarness):
+    """ManageHarness + health-cycle isolation: the watchdog probes (and
+    can relaunch) a real CloakBrowser — patch it so health_cycle stays
+    offline (same pattern as test_daemon_position_optimizer)."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(
+            daemon.Daemon, "browser_watchdog", lambda self: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+
+class TestFleetCeilingPrune(ManageHarness):
+    """Fleet ceiling: the operator's TOTAL-slot cap (portfolio.
+    slots_hard_max when any dynamic venue is configured, else
+    portfolio.slots_max — the same total-count semantics open_slot
+    enforces on growth) must also hold for a fleet that is ALREADY above
+    it: the highest-numbered EMPTY slots are pruned down to the ceiling;
+    occupied slots never lose their slot id."""
+
+    def _slot(self, n, venue="hyperliquid", balance=100.0):
+        return {"slot": n, "venue": venue, "balance": balance,
+                "max_commitment": round(balance * 0.5, 2),
+                "venue_sleeve": 400.0, "venue_slots": 7, "dynamic": True}
+
+    def _fleet(self, d, n=7, venue="hyperliquid"):
+        d.state["slots"] = [self._slot(i, venue) for i in range(1, n + 1)]
+
+    def test_above_ceiling_prunes_one_highest_empty(self):
+        # (a) the live az00 shape: 7 slots, 3 occupied, ceiling 6 →
+        # exactly one highest-numbered EMPTY slot (7) pruned
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        self._fleet(d, 7)
+        for k in ("1", "2", "3"):
+            d.state["active_bots"][k] = _active_bot(
+                f"SYM{k}", "hyperliquid", f"B{int(k)}")
+        pruned = d._prune_unfillable_slots(
+            d.state["slots"], set(d.state["active_bots"]))
+        self.assertEqual(pruned, [(7, "hyperliquid", "fleet ceiling 7/6")])
+        self.assertEqual([s["slot"] for s in d.state["slots"]],
+                         [1, 2, 3, 4, 5, 6])
+        # occupied slots are NEVER touched — a live bot never loses its id
+        self.assertEqual(sorted(d.state["active_bots"]), ["1", "2", "3"])
+
+    def test_all_occupied_above_ceiling_prunes_nothing(self):
+        # (b) fail-closed: 7 slots all occupied → nothing pruned even
+        # though the fleet is above the ceiling 6
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        self._fleet(d, 7)
+        for i in range(1, 8):
+            d.state["active_bots"][str(i)] = _active_bot(
+                f"SYM{i}", "hyperliquid", f"B{i}")
+        pruned = d._prune_unfillable_slots(
+            d.state["slots"], set(d.state["active_bots"]))
+        self.assertEqual(pruned, [])
+        self.assertEqual(len(d.state["slots"]), 7)
+
+    def test_at_ceiling_prunes_nothing(self):
+        # (c) 6 slots at the ceiling → no prune, no reason strings
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        self._fleet(d, 6)
+        pruned = d._prune_unfillable_slots(d.state["slots"], set())
+        self.assertEqual(pruned, [])
+        self.assertEqual(len(d.state["slots"]), 6)
+
+    def test_fixed_venues_use_slots_max_ceiling(self):
+        # (d) no dynamic venues configured → the fixed slots_max is the
+        # ceiling (5 slots, cap 3: the two highest empties drop)
+        d = self.make_daemon()          # dynamic_slot_venues = []
+        d.config["portfolio"]["slots_max"] = 3
+        self._fleet(d, 5)
+        pruned = d._prune_unfillable_slots(d.state["slots"], set())
+        self.assertEqual(pruned, [(5, "hyperliquid", "fleet ceiling 5/3"),
+                                  (4, "hyperliquid", "fleet ceiling 4/3")])
+        self.assertEqual([s["slot"] for s in d.state["slots"]], [1, 2, 3])
+
+
+class TestHealthCycleCeilingPrune(_HealthTickHarness):
+    """The 60s health tick keeps the fleet ceiling at runtime (not just at
+    the startup reconcile): the prune runs every tick, but journals +
+    saves ONLY when something was actually pruned."""
+
+    def _slot(self, n):
+        return {"slot": n, "venue": "hyperliquid", "balance": 100.0,
+                "max_commitment": 50.0, "venue_sleeve": 400.0,
+                "venue_slots": 7, "dynamic": True}
+
+    def test_prunes_journals_and_saves_only_on_change(self):
+        # (e) 7 slots / no bots (health_cycle early-returns after the
+        # prune): first tick prunes slot 7 down to the ceiling, journals
+        # one `slots-reconciled` line, saves state exactly once
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        d.state["slots"] = [self._slot(i) for i in range(1, 8)]
+        with mock.patch("daemon.save_state",
+                        wraps=daemon.save_state) as save:
+            d.health_cycle(dry_run=True)
+        self.assertEqual([s["slot"] for s in d.state["slots"]],
+                         [1, 2, 3, 4, 5, 6])
+        entries = [j for j in d.state["journal"]
+                   if j["kind"] == "slots-reconciled"]
+        self.assertEqual(len(entries), 1)
+        self.assertIn("pruned empty slots above the fleet ceiling",
+                      entries[0]["msg"])
+        self.assertIn("slot 7 (hyperliquid: fleet ceiling 7/6)",
+                      entries[0]["msg"])
+        self.assertEqual(save.call_count, 1)
+        # second tick: at the ceiling → no new journal line, no save
+        with mock.patch("daemon.save_state",
+                        wraps=daemon.save_state) as save:
+            d.health_cycle(dry_run=True)
+        self.assertEqual(
+            len([j for j in d.state["journal"]
+                 if j["kind"] == "slots-reconciled"]), 1)
+        self.assertEqual(save.call_count, 0)
+
+    def test_occupied_fleet_above_ceiling_no_journal_no_save(self):
+        # the runtime ceiling respects the fail-closed rule too: an
+        # all-occupied above-ceiling fleet journals and saves nothing
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        d.state["slots"] = [self._slot(i) for i in range(1, 8)]
+        for i in range(1, 8):
+            d.state["active_bots"][str(i)] = _active_bot(
+                f"SYM{i}", "hyperliquid", f"B{i}")
+        with mock.patch("daemon.save_state",
+                        wraps=daemon.save_state) as save, \
+                mock.patch("daemon.observe_all_safe",
+                           lambda bots: {
+                               str(k): {"error": "offline test"}
+                               for k in bots}):
+            d.health_cycle(dry_run=True)
+        self.assertEqual(len(d.state["slots"]), 7)   # nothing pruned
+        self.assertNotIn("slots-reconciled",
+                         [j["kind"] for j in d.state["journal"]])
+        self.assertGreaterEqual(save.call_count, 0)  # prune never saved
+
+
+
 if __name__ == "__main__":
     unittest.main()

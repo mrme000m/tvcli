@@ -52,6 +52,7 @@
           <div class="card-head"><span class="card-title">Controls</span></div>
           <div class="card-body">
             <div class="ctl-grid">
+              <button class="btn" id="ctl-optimize" title="Queue an immediate fast-optimizer cycle">Optimize now</button>
               <button class="btn" id="ctl-rescreen" title="Queue an immediate rescreen cycle">Force rescreen</button>
               <button class="btn" id="ctl-reliability" title="Refresh the reliability ledger now">Refresh reliability</button>
               <button class="btn btn--danger" id="ctl-halt">Halt daemon</button>
@@ -141,6 +142,8 @@
       <h2>Position optimizer</h2>
       <span class="sub">Slow-loop recommendations (fresh-candle grid revaluation, TP/SL/trailing exit scoring) — advisory by default, each with its apply-gate verdict.</span>
     </div>
+    <div class="card" id="opt-fast"></div>
+    <p></p>
     <div id="opt-banner"></div>
     <div class="card">
       <div class="card-head"><span class="card-title">Pending · unapplied</span>

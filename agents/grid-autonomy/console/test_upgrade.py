@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Offline tests for the console upgrade: fail-soft /api/status, /api/pnl
-(PB → state.json fallback), recommendation apply-gate verdicts, and the
-reliability ledger's real/synthetic split + staleness.
+(PB → state.json fallback), recommendation apply-gate verdicts, the
+reliability ledger's real/synthetic split + staleness, and the fast
+slot-optimizer proxies (/api/optimizer fail-soft, /api/ctl/optimize 502).
 
 Run:  python3 -m unittest discover -s console -p "test_upgrade.py"
 """
@@ -14,6 +15,7 @@ import sys
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
@@ -95,11 +97,14 @@ class UpgradeTestCase(unittest.TestCase):
         self.assertEqual(out, {"points": [], "source": "state", "total": 0})
 
     def test_recommendations_blocked_by_verdicts(self):
+        # `at` stamps must be TODAY (utc): persisted_today counts records
+        # whose `at` date prefix matches the current UTC date
+        today = server.utcnow()[:10]
         recs = [
-            {"at": "2026-09-06T01:00:00+00:00", "applied": True,
-             "applied_at": "2026-09-06T01:01:00+00:00"},
-            {"at": "2026-09-06T02:00:00+00:00"},   # no applied key at all
-            {"at": "2026-09-06T03:00:00+00:00"},
+            {"at": f"{today}T01:00:00+00:00", "applied": True,
+             "applied_at": f"{today}T01:01:00+00:00"},
+            {"at": f"{today}T02:00:00+00:00"},   # no applied key at all
+            {"at": f"{today}T03:00:00+00:00"},
         ]
         real_http = server._http_json
         server._http_json = (lambda url, timeout=2.0, method="GET", body=None:
@@ -112,7 +117,7 @@ class UpgradeTestCase(unittest.TestCase):
         self.assertEqual(payload["persisted_today"], 3)
         self.assertEqual(payload["recommendations"][0]["blocked_by"], "applied")
         self.assertEqual(payload["recommendations"][0]["applied_at"],
-                         "2026-09-06T01:01:00+00:00")
+                         f"{today}T01:01:00+00:00")
         for r in payload["recommendations"][1:]:
             self.assertEqual(r["blocked_by"], "apply disabled")
             self.assertFalse(r["applied"])
@@ -157,6 +162,32 @@ class UpgradeTestCase(unittest.TestCase):
         code, body = self.call("/api/pnl")
         self.assertEqual(code, 200)
         self.assertEqual(body["points"], [])
+
+    def test_optimizer_fail_soft_200_null_when_ctl_dead(self):
+        # ctl port is a dead 59999 here — the panel route must degrade
+        # with a 200 + {"optimizer": null, "error": ...}, never a 502
+        code, body = self.call("/api/optimizer")
+        self.assertEqual(code, 200)
+        self.assertIsNone(body.get("optimizer"))
+        self.assertIn("error", body)
+        self.assertIn("detail", body)
+
+    def test_ctl_optimize_502_when_ctl_dead(self):
+        # POST /api/ctl/optimize mirrors /api/ctl/rescreen: ctl down → 502
+        req = urllib.request.Request(
+            f"http://127.0.0.1:{self.port}/api/ctl/optimize",
+            data=b"{}", method="POST",
+            headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                code, body = resp.status, json.loads(resp.read() or b"{}")
+            self.fail("expected HTTPError 502")
+        except urllib.error.HTTPError as exc:
+            code = exc.code
+            body = json.loads(exc.read() or b"{}")
+        self.assertEqual(code, 502)
+        self.assertEqual(body.get("error"), "ctl unreachable")
+        self.assertIn("detail", body)
 
 
 if __name__ == "__main__":

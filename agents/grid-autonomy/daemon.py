@@ -7,7 +7,7 @@ Schedules (from ../config.yaml, merged over built-in defaults):
   optimizer               2–5m       (idle-slot detection → fast challenger
                                       hunt (tvcli 15m structure) → Mistral
                                       arbiter → swap via execute_rotation)
-  rescreen                60m        (merge.py → swarm → guardrails → deploy;
+  rescreen                10m        (merge.py → swarm → guardrails → deploy;
                                       also refreshes state.screen_cache for
                                       the optimizer's challenger board)
   reliability cron        24h        (bot_trades → archetype_stats → save
@@ -427,13 +427,14 @@ DEFAULT_CONFIG = {
         # tier with upsert-init capacity 200): slots open while a profitable
         # candidate waits (screen.open_slot_min_score) AND deployable capital
         # is spare — capital is the ceiling, not a slot count.
-        # slots_hard_max is the absolute runaway guard for dynamic venues;
+        # slots_hard_max is the fleet-wide ceiling for dynamic venues
+        # (operator directive: only 6 slots watched & rotated profitably);
         # slots_max caps FIXED venues (everything not in dynamic_slot_venues).
-        "slots_hard_max": 16, "dynamic_slot_venues": ["hyperliquid"],
+        "slots_hard_max": 6, "dynamic_slot_venues": ["hyperliquid"],
         "min_slot_usd": 100.0,
         "max_alloc_per_slot": 0.5, "cash_buffer_pct": 0.15,
     },
-    "screen": {"rescreen_minutes": 60, "confirm_interval": "4h",
+    "screen": {"rescreen_minutes": 10, "confirm_interval": "4h",
                # scan breadth: all moderately significant tokens are screened
                # (top-N by 24h volume) so the EV + tvcli passes — not a
                # hand-picked list — decide what gets a slot
@@ -452,6 +453,14 @@ DEFAULT_CONFIG = {
               "adjust_cooldown_h": 2.0,
               # fleet PnL journal cadence in seconds (0 = off)
               "pnl_snapshot_interval_s": 300,
+              # gone-bot reconciliation: a tracked bot missing from a
+              # HEALTHY WT grid status list ("grid resource not found in
+              # status list") warns once after this many ticks, and the
+              # slot is freed after this many minutes of CONTINUOUS
+              # missing observations (transport failures never count —
+              # fail closed, a dead browser must never look like a gone
+              # bot).
+              "gone_warn_after": 3, "gone_clear_min": 30,
               # browser watchdog: every WunderTrading session-API call rides
               # the headful CloakBrowser on CDP — when it dies the daemon is
               # blind and deploy/rotate fail. Probed each health pass.
@@ -1015,6 +1024,27 @@ def refuse_new_archetype(reliability, archetype, min_samples=None):
     return recent_pf is not None and recent_pf < 1.0
 
 
+# ── gone-bot reconciliation ──────────────────────────────────────────────
+# execution/observe.py distinguishes two observe error classes: transport
+# failure ("grid status list unavailable (browser/session down)") and the
+# bot genuinely missing from a HEALTHY status list ("grid resource not
+# found in status list"). The live az00 deployment had tracked bots that
+# WunderTrading had deleted server-side, so health_cycle warned the
+# missing-bot class on EVERY 60 s tick forever — the slots were never
+# freed and the journal flooded. Reconciliation (Daemon._reconcile_gone_bot)
+# now tracks a per-slot missing EPISODE and frees the slot after
+# watch.gone_clear_min of continuous absence.
+GONE_BOT_ERROR = "grid resource not found in status list"
+
+
+def is_gone_bot_error(err):
+    """True only for the missing-bot class. Transport failures are NEVER
+    this class: they must not count toward removal (fail-closed — while
+    the browser/session is down, a tracked bot's absence is unknown, not
+    gone, and the state must stay exactly as it was)."""
+    return bool(err) and GONE_BOT_ERROR in str(err)
+
+
 # ── Daemon ─────────────────────────────────────────────────────────────
 
 class Daemon:
@@ -1339,7 +1369,7 @@ class Daemon:
         p = self.config["portfolio"]
         dynamic = venue in (p.get("dynamic_slot_venues") or [])
         min_slot_usd = float(p.get("min_slot_usd", 100.0))
-        cap = int(p.get("slots_hard_max", 16) if dynamic
+        cap = int(p.get("slots_hard_max", 6) if dynamic
                   else p.get("slots_max", 5))
         cur = list(self.state["slots"])
         if len(cur) >= cap:
@@ -2174,9 +2204,84 @@ class Daemon:
         write_run_card_safe(cycle_report)
         return actions
 
+    # ── gone-bot reconciliation (see is_gone_bot_error) ──────────────────
+    # The missing-episode state lives on the bot dict itself
+    # (gone_missing_since / gone_ticks / gone_warned), so an episode
+    # survives daemon restarts via state.json.
+    @staticmethod
+    def _clear_gone_episode(bot):
+        """End a missing-bot episode (bot reappeared, or a transport
+        error made the observation inconclusive — fail closed)."""
+        for k in ("gone_missing_since", "gone_ticks", "gone_warned"):
+            bot.pop(k, None)
+
+    def _reconcile_gone_bot(self, slot_key, bot, now=None):
+        """Record one more missing-bot observation for slot_key.
+
+        Warns at most ONCE per episode (after watch.gone_warn_after
+        ticks), then — after watch.gone_clear_min of CONTINUOUS missing
+        observations — journals one loud `bot-gone` entry, removes the
+        bot from active_bots (slot freed; the existing refill logic —
+        rescreen/optimizer nudge — repopulates it), drops its committed
+        worst-case claim, and persists. Returns True when the bot was
+        removed (caller `continue`s)."""
+        now = time.time() if now is None else now
+        if bot.get("gone_missing_since") is None:
+            bot["gone_missing_since"] = now
+        bot["gone_ticks"] = int(bot.get("gone_ticks") or 0) + 1
+        watch = self.config.get("watch") or {}
+        warn_after = max(1, int(watch.get("gone_warn_after", 3)))
+        clear_min = max(0.1, float(watch.get("gone_clear_min", 30)))
+        if bot["gone_ticks"] >= warn_after and not bot.get("gone_warned"):
+            bot["gone_warned"] = True
+            log(self.state, {"kind": "health-warn", "slot": slot_key,
+                             "msg": f"observe error: {GONE_BOT_ERROR} — "
+                                    f"bot missing on WunderTrading; slot "
+                                    f"frees after {clear_min:g} min "
+                                    f"continuous"})
+        if now - float(bot["gone_missing_since"]) >= clear_min * 60.0:
+            mins = (now - float(bot["gone_missing_since"])) / 60.0
+            log(self.state, {
+                "kind": "bot-gone", "slot": slot_key,
+                "symbol": bot.get("symbol"), "venue": bot.get("venue"),
+                "minutes_missing": round(mins, 1),
+                "msg": f"{bot.get('venue')}:{bot.get('symbol')} absent "
+                       f"from the WT grid status list for {mins:.0f} min — "
+                       f"removed from state.active_bots, slot freed "
+                       f"for the existing refill logic"})
+            # same slot-clear the rotation path performs: per-slot
+            # optimizer/position-optimizer trackers live on the bot dict
+            # itself and are dropped with it (there are no separate
+            # per-slot tracker structures to clean up)
+            self.state["active_bots"].pop(slot_key, None)
+            self.state.setdefault("committed", {}).pop(slot_key, None)
+            save_state(self.state)
+            return True
+        return False
+
     # ── health poll ────────────────────────────────────────────────────
     def health_cycle(self, dry_run=True):
         self.browser_watchdog()
+        # fleet-ceiling prune (pure state math, no network): open_slot
+        # enforces the ceiling on growth, but state can already sit above
+        # it (older cap, config edit) and the rescreen refill path
+        # deploys into ANY free slot with no total-count check of its
+        # own — without this an above-ceiling fleet only shrank on
+        # restart. Journal + persist ONLY when something was pruned.
+        try:
+            pruned = self._prune_unfillable_slots(
+                self.state.get("slots") or [],
+                {str(k) for k in (self.state.get("active_bots") or {})})
+            if pruned:
+                log(self.state, {
+                    "kind": "slots-reconciled",
+                    "msg": "pruned empty slots above the fleet ceiling: "
+                           + "; ".join(f"slot {sid} ({v}: {r})"
+                                       for sid, v, r in pruned)[:300]})
+                save_state(self.state)
+        except Exception as exc:
+            log(self.state, {"kind": "health-warn",
+                             "msg": f"slot prune failed: {str(exc)[:120]}"})
         if not self.state["active_bots"]:
             return
         observed_all = observe_all_safe(self.state["active_bots"])
@@ -2186,9 +2291,25 @@ class Daemon:
             bot["observed"] = obs
             bot["last_observed"] = utcnow()
             if obs.get("error"):
-                log(self.state, {"kind": "health-warn", "slot": slot_key,
-                                 "msg": f"observe error: {obs['error'][:160]}"})
+                err = str(obs["error"])
+                if is_gone_bot_error(err):
+                    # missing-bot class: the status list itself loaded fine
+                    # and the bot is not in it (deleted on the WT side).
+                    # Warn once per episode, then free the slot after a
+                    # continuous gone_clear_min — never per tick.
+                    if self._reconcile_gone_bot(slot_key, bot):
+                        continue
+                else:
+                    # transport class (browser/session down): fail closed —
+                    # never counts toward removal, and any in-progress
+                    # missing episode resets so only CONTINUOUS absence
+                    # can clear a slot.
+                    self._clear_gone_episode(bot)
+                    log(self.state, {"kind": "health-warn", "slot": slot_key,
+                                     "msg": f"observe error: {err[:160]}"})
                 continue
+            # observable again: an earlier missing-bot episode is over
+            self._clear_gone_episode(bot)
             policy = bot.get("stagnation_policy") or {}
             status = (obs.get("status") or "active").lower()
             price = obs.get("price")
@@ -2359,8 +2480,13 @@ class Daemon:
         # observe-outage event every ~30 blind minutes instead.
         bots = self.state["active_bots"] or {}
         if bots:
+            # only TRANSPORT-class errors count as blindness here: a fleet
+            # of gone bots (deleted on the WT side) is not an outage —
+            # the status list itself loaded fine for them.
             errs = sum(1 for b in bots.values()
-                       if (b.get("observed") or {}).get("error"))
+                       if (b.get("observed") or {}).get("error")
+                       and not is_gone_bot_error(
+                           (b.get("observed") or {}).get("error")))
             if errs and errs == len(bots):
                 n = int(self.state.get("observe_error_sweeps", 0)) + 1
                 self.state["observe_error_sweeps"] = n
@@ -3143,6 +3269,10 @@ class Daemon:
         """Drop EMPTY slots that can never host a bot. Mutates `slots`
         in place, returns [(slot, venue, reason), …]. Fail-closed: a slot
         is only dropped on a POSITIVE blocker —
+          * the TOTAL slot count is above the fleet ceiling
+            (portfolio.slots_hard_max when any dynamic venue is
+            configured, else portfolio.slots_max): the highest-numbered
+            EMPTY slots are dropped until total == ceiling, or
           * the fleet is at the learned demo (paper) grid-bot cap (no new
             bot can be created on ANY venue until one stops), or
           * the slot's venue is at its plan tier cap (e.g. binance free
@@ -3152,6 +3282,44 @@ class Daemon:
         """
         pruned = []
         try:
+            # fleet ceiling: the operator's TOTAL-slot-count cap
+            # (portfolio.slots_hard_max when any dynamic venue is
+            # configured, else portfolio.slots_max — the same
+            # total-count semantics open_slot enforces on growth). A
+            # fleet already above it (state grew under an older cap, or a
+            # config edit lowered the ceiling — the rescreen refill
+            # path deploys into ANY free slot with no total-count check
+            # of its own) otherwise only shrank on the next restart.
+            # Fail-closed: prune the HIGHEST-numbered EMPTY slots until
+            # total == ceiling; occupied slots are never touched, and at
+            # or below the ceiling nothing is pruned.
+            p = self.config.get("portfolio") or {}
+            dyn = p.get("dynamic_slot_venues") or []
+            active_set = {str(k) for k in (active or set())}
+            try:
+                fleet_cap = int(p.get("slots_hard_max", 16) if dyn
+                                else p.get("slots_max", 5))
+            except (TypeError, ValueError):
+                fleet_cap = None
+
+            def _slot_num(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return -1
+
+            if fleet_cap is not None and len(slots) > fleet_cap:
+                over = len(slots) - fleet_cap
+                empties = sorted(
+                    (s for s in slots
+                     if str(s.get("slot")) not in active_set),
+                    key=lambda s: _slot_num(s.get("slot")), reverse=True)
+                for s in empties[:over]:
+                    total = len(slots)
+                    slots.remove(s)
+                    pruned.append(
+                        (s.get("slot"), s.get("venue"),
+                         f"fleet ceiling {total}/{fleet_cap}"))
             cap = self.state.get("demo_bot_cap")
             at_demo_cap = bool(cap) and len(active or {}) >= int(cap)
             for s in list(slots):

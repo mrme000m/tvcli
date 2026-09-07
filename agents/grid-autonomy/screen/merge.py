@@ -26,6 +26,10 @@ tvcli fitness bonus (numeric signals, added to preset score, then re-sorted):
   choppiness CHOP ≤ 38.2 with trend regime (clean trend)     +1.0
   mtf-confluence composite agrees with regime direction      +2.0 (range +1.0)
   dvi trend agrees with regime direction                     +1.0
+  vp-pro value area present in a range regime (harvestable)   +1.0
+  vp-pro value-area breakout aligned with the trend           +1.5
+  sr-breaks fresh S/R break aligned with regime (≤5 bars)    +1.5
+  sr-breaks recent S/R break aligned with regime (≤20 bars)  +0.75
   RSI overheated flag on direction side                      -3.0
   binance spot short regime (can't trade it)                 -25.0
 Positive bonus is capped at +6.0 — confluence refines, never dominates.
@@ -272,12 +276,13 @@ def _rnum(res, *path, default=None):
         return default
 
 
-def tvcli_fitness(c, mtf=None, sq=None, ch=None, dvi=None):
+def tvcli_fitness(c, mtf=None, sq=None, ch=None, dvi=None, vp=None, sr=None):
     """(bonus, notes, fit) — numeric tvcli fitness read for one candidate.
 
-    Pure function: no network. `mtf`/`sq`/`ch`/`dvi` are the per-symbol hunt
-    result dicts ({"result": {...}} or {}). A missing skill contributes 0 —
-    the heuristic score stands alone when tvcli is down (fail-soft).
+    Pure function: no network. `mtf`/`sq`/`ch`/`dvi`/`vp`/`sr` are the
+    per-symbol hunt result dicts ({"result": {...}} or {}). A missing skill
+    contributes 0 — the heuristic score stands alone when tvcli is down
+    (fail-soft).
 
     The weighting answers "which tokens move large and fast":
       * large  — ATR% ≥ 1.5 and mtf volRatio ≥ 1.5 (volatility expansion)
@@ -353,6 +358,65 @@ def tvcli_fitness(c, mtf=None, sq=None, ch=None, dvi=None):
             bonus += 1.0
             notes.append("dvi-trend-agree-short")
 
+    # vp-pro: volume-profile value area. With POC/VAH/VAL published the
+    # tape has a well-defined harvestable band: grids around the value area
+    # fill repeatedly in range regimes; a value-area breakout aligned with
+    # the 1h regime means price just left the band with momentum (large +
+    # fast). Missing POC/VAH/VAL (empty structure) → nothing, fail-soft.
+    vpr = (vp or {}).get("result") or {}
+    vp_poc = _rnum(vpr, "structure", "poc")
+    vp_vah = _rnum(vpr, "structure", "vah")
+    vp_val = _rnum(vpr, "structure", "val")
+    if vp_poc is not None and vp_vah is not None and vp_val is not None:
+        # breakout = price OUTSIDE the value area in the trend's direction
+        # (the parser publishes pricePosition above/below_value_area and
+        # price; its `bias` is only bullish/bearish/neutral, so the
+        # breakout test is positional, never a bias string)
+        vp_pos = (vpr.get("structure") or {}).get("pricePosition")
+        vp_price = _rnum(vpr, "structure", "price")
+        fit.update({"vp_poc": vp_poc, "vp_vah": vp_vah, "vp_val": vp_val})
+        if regime in ("chop_high_volatility", "neutral", "squeeze"):
+            # rangey tape with a defined value area → mean-reversion grid
+            bonus += 1.0
+            notes.append("value-area-harvest")
+        elif regime == "trend_up" and (
+                vp_pos == "above_value_area"
+                or (vp_price is not None and vp_price > vp_vah)):
+            bonus += 1.5
+            notes.append("va-breakout-up")
+        elif regime == "trend_down" and (
+                vp_pos == "below_value_area"
+                or (vp_price is not None and vp_price < vp_val)):
+            bonus += 1.5
+            notes.append("va-breakout-down")
+
+    # sr-breaks: last support/resistance break. A FRESH break (≤5 bars) in
+    # the regime direction is the classic grid-breakout entry — price just
+    # left the level; ≤20 bars still recent enough to ride. A break that
+    # DISAGREES with the regime adds 0 (never negative — only the rsi/venue
+    # guards subtract). Absent/empty break → 0, fail-soft.
+    srr = (sr or {}).get("result") or {}
+    sr_break = (srr.get("structure") or {}).get("lastBreak")
+    sr_bars = _rnum(srr, "structure", "breakBarsAgo")
+    if sr_break is not None:
+        fit["sr_last_break"] = sr_break
+    if sr_bars is not None:
+        fit["sr_break_bars_ago"] = sr_bars
+    if sr_break == "bullish" and regime == "trend_up":
+        if sr_bars is not None and sr_bars <= 5:
+            bonus += 1.5
+            notes.append("fresh-breakout-up")
+        elif sr_bars is not None and sr_bars <= 20:
+            bonus += 0.75
+            notes.append("recent-breakout-up")
+    elif sr_break == "bearish" and regime == "trend_down":
+        if sr_bars is not None and sr_bars <= 5:
+            bonus += 1.5
+            notes.append("fresh-breakout-down")
+        elif sr_bars is not None and sr_bars <= 20:
+            bonus += 0.75
+            notes.append("recent-breakout-down")
+
     atr = m.get("atr_pct")
     if atr is not None:
         fit["atr_pct"] = atr
@@ -390,16 +454,23 @@ def apply_confluence(cands, timeframe="1H", bars=180):
         sq = hunts.get("squeeze", {}).get(tv) or {}
         ch = hunts.get("choppiness", {}).get(tv) or {}
         dvi = hunts.get("dvi", {}).get(tv) or {}
+        # vp-pro + sr-breaks are optional extra hunts — only present when
+        # config_confluence_skills() lists them; tolerate their absence.
+        vp = hunts.get("vp-pro", {}).get(tv) or {}
+        sr = hunts.get("sr-breaks", {}).get(tv) or {}
         c["confluence"] = {
             "mtf-confluence": (mtf.get("result") is not None),
             "squeeze": (sq.get("result") is not None),
             "choppiness": (ch.get("result") is not None),
             "dvi": (dvi.get("result") is not None),
+            "vp-pro": (vp.get("result") is not None),
+            "sr-breaks": (sr.get("result") is not None),
             "errors": {k: (v.get("error") if isinstance(v, dict) else None)
                        for k, v in (("mtf", mtf), ("sq", sq), ("ch", ch),
-                                    ("dvi", dvi))},
+                                    ("dvi", dvi), ("vp", vp), ("sr", sr))},
         }
-        bonus, notes, fit = tvcli_fitness(c, mtf=mtf, sq=sq, ch=ch, dvi=dvi)
+        bonus, notes, fit = tvcli_fitness(c, mtf=mtf, sq=sq, ch=ch, dvi=dvi,
+                                          vp=vp, sr=sr)
         c["tvcli_fit"] = fit
         c["confluence_bonus"] = bonus
         c["confluence_notes"] = notes

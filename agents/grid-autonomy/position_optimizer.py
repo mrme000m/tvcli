@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Position optimizer — per-bot grid revaluation + exit-profile engine.
 
-The rescreen (60 min) and the slot optimizer (2–5 min) manage WHICH token
+The rescreen (10 min) and the slot optimizer (2–5 min) manage WHICH token
 a slot trades and how idle capital moves. This module manages the deployed
 position itself: for a bot that is already live on WunderTrading it
 re-analyzes the market, REVALUES the grid geometry (ATR-band channel +
