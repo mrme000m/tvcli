@@ -134,13 +134,22 @@ RUN set -eux; \
 
 # dsh-prime-orchestrator into the baked `web` profile — `dsh plugin` forwards
 # to pnpm in the profile dir (git from the layer above resolves the github:
-# spec; pnpm 10 runs the git-dep prepare scripts unconditionally, so no
-# allowBuilds remedy is needed — the pnpm >= 11 gotcha the prime_stack plugin
-# stage encodes does not apply). The built-artifact assert mirrors the stage:
-# a listed-but-unbuilt dependency is a half-state the runtime must not
-# inherit.
+# spec). pnpm blocks the git-hosted dep's build scripts with
+# ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED (verified on pnpm 10.x in CI, run
+# 34169182646 — the prime_stack plugin stage's "pnpm 10 needs no remedy"
+# note is stale), so the install runs the stage's verified allowBuilds
+# remedy: parse the demanded `name@<tarball-url-with-sha>` keys from the
+# failure log, merge them into the profile's pnpm-workspace.yaml, retry.
+# The built-artifact assert mirrors the stage: a listed-but-unbuilt
+# dependency is a half-state the runtime must not inherit.
+COPY docker/pnpm_allowbuilds.py /tmp/pnpm_allowbuilds.py
 RUN set -eux; \
-    DSH_HOME=/opt/dsh-home dsh plugin --profile web add github:mrme000m/dsh-prime-orchestrator; \
+    if ! DSH_HOME=/opt/dsh-home dsh plugin --profile web add github:mrme000m/dsh-prime-orchestrator \
+            > /tmp/plugin-add.log 2>&1; then \
+        cat /tmp/plugin-add.log; \
+        python3 /tmp/pnpm_allowbuilds.py /opt/dsh-home/profiles/web /tmp/plugin-add.log; \
+        DSH_HOME=/opt/dsh-home dsh plugin --profile web add github:mrme000m/dsh-prime-orchestrator; \
+    fi; \
     test -f /opt/dsh-home/profiles/web/node_modules/dsh-prime-orchestrator/lib/index.js
 
 COPY agents/grid-autonomy/ /app/agents/grid-autonomy/

@@ -47,8 +47,12 @@ docker build -t grid-autonomy:local -f docker/Dockerfile .
     asserted; the npm-global install lands it on `/usr/bin`),
   - dsh-prime-orchestrator (`dsh plugin --profile web add
     github:mrme000m/dsh-prime-orchestrator`) into the baked SEED home
-    `/opt/dsh-home` — pnpm 10 runs git-dep prepare scripts unconditionally, so
-    the pnpm>=11 `allowBuilds` remedy does not apply; the built artifact
+    `/opt/dsh-home` — pnpm 10.x blocks the git-dep's prepare scripts
+    (ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED, CI run 34169182646), so the
+    install retries through the verified allowBuilds remedy
+    (`docker/pnpm_allowbuilds.py` parses the demanded keys from the failure
+    log into the profile's pnpm-workspace.yaml — a self-contained port of
+    the prime_stack plugin stage's pure functions); the built artifact
     (`…/node_modules/dsh-prime-orchestrator/lib/index.js`) is asserted,
   - `docker/ga-preset/` → `/opt/dsh-home/.agent-presets/ga/` (the vendored GA
     preset, container paths — customSkillDirs second entry `/app/.agents/skills`),
