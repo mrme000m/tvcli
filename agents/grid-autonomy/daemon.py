@@ -2325,18 +2325,12 @@ class Daemon:
                     # dry-run slot-open simulation: same gates as a live
                     # open, no persisted mutation — the mirror records what
                     # the planner WOULD open and deploy instead of silently
-                    # skipping every candidate when all slots are occupied
+                    # skipping every candidate when all slots are occupied.
+                    # No slot-open journal here: the recorded decision row
+                    # itself carries the virtual slot (tests assert dry-run
+                    # never journals slot-open).
                     slot, open_err = self._open_slot_plan(cand["venue"],
                                                           commit=False)
-                    if slot is not None and cand["venue"] not in slot_open_noted:
-                        slot_open_noted.add(cand["venue"])
-                        log(self.state, {"kind": "slot-open",
-                                         "slot": slot["slot"], "dry_run": True,
-                                         "msg": (f"dry-run: would open "
-                                                 f"{cand['venue']} slot "
-                                                 f"{slot['slot']} "
-                                                 f"(${slot['balance']:.0f} "
-                                                 f"budget)")})
                 else:
                     slot, open_err = self.open_slot(cand["venue"])
                 if slot is None:
