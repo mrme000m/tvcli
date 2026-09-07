@@ -35,6 +35,21 @@ name: grid-autonomy deploy (az00)
 #   SSH_PORT         ssh port (22)
 #   SSH_PRIVATE_KEY  OpenSSH private key for that user
 #
+# Cloudflare (OPTIONAL — the "Ensure CF tunnel ingress for dsh" step below;
+# absent → ::warning:: + skip, the deploy never fails on it):
+#   CF_API_TOKEN     API token with Cloudflare Tunnel edit + DNS edit rights
+#                    (Account › Cloudflare Tunnel › Configure, Zone › DNS ›
+#                    Edit, and Zone › Zone › Read for the zone lookup — all
+#                    scoped to the 00m.indevs.in zone / the account)
+#   CF_ACCOUNT_ID    the Cloudflare account id owning the tunnel
+#   CF_TUNNEL_ID     the id of the remotely-managed 'grid-autonomy' tunnel
+#                    (the one whose connector token is GRID_TUNNEL_TOKEN)
+# The step ensures the tunnel serves dsh.00m.indevs.in →
+# http://grid-autonomy:3081 (the GA agent's dsh web UI) and that the DNS
+# CNAME dsh.00m.indevs.in → <tunnel-id>.cfargotunnel.com exists. Every other
+# ingress rule on the tunnel (grid/grid-ctl/grid-pb/grid-api + the
+# catch-all) is preserved verbatim — only the dsh rule is added/replaced.
+#
 # The deployment itself is vault-driven: the container's entrypoint logs
 # into the Bitwarden vault with the BW_* machine credentials (repo secrets,
 # written to /opt/grid-autonomy/.env on the host, mode 600) and pulls ALL
@@ -143,6 +158,12 @@ jobs:
           # CloakBrowser bake) are pulled as cache instead of rebuilt.
           cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
           cache-to: type=registry,mode=max,ref=${{ env.IMAGE }}:buildcache
+          # The commit SHA stamps /opt/dsh-home/.baked-rev in the image: the
+          # entrypoint's dsh component uses it to detect image revisions and
+          # refresh the seeded GA preset / web profile in the grid-dsh volume
+          # (operator-edited preset files are preserved, not clobbered).
+          build-args: |
+            GA_PRESET_REV=${{ github.sha }}
 
       - name: Resolve transport
         run: |
@@ -223,6 +244,85 @@ jobs:
           if [ -z "$MODE" ]; then MODE=preserve; fi
           $SSH_CMD "GRID_MODE='$MODE' IMAGE='${{ env.IMAGE }}:${{ github.sha }}' NAME='$NAME' bash $REMOTE_DIR/vps-run.sh"
 
+      # ── dsh.00m.indevs.in tunnel ingress (GA agent web UI) ──────────────
+      # Idempotent Cloudflare-API reconciliation, NEVER fatal: gated on the
+      # CF_* repo secrets (absent → ::warning:: + skip), and every API error
+      # degrades to a ::warning:: too — the deploy above already succeeded.
+      - name: Ensure CF tunnel ingress for dsh (GA agent web UI)
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.CF_API_TOKEN }}" ] || [ -z "${{ secrets.CF_ACCOUNT_ID }}" ] || [ -z "${{ secrets.CF_TUNNEL_ID }}" ]; then
+            echo "::warning::CF_API_TOKEN / CF_ACCOUNT_ID / CF_TUNNEL_ID repo secrets not all set — skipping the dsh tunnel ingress step"
+            exit 0
+          fi
+          CF_API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer ${{ secrets.CF_API_TOKEN }}"
+          ACCT="${{ secrets.CF_ACCOUNT_ID }}"
+          TUNNEL="${{ secrets.CF_TUNNEL_ID }}"
+          HOST="dsh.00m.indevs.in"
+          SERVICE="http://grid-autonomy:3081"
+
+          # soft-fail helper: warn + exit 0 (the deploy continues)
+          cf_skip() {
+            echo "::warning::CF API step failed: $1 — dsh tunnel ingress skipped (deploy continues)"
+            exit 0
+          }
+
+          # 1. current tunnel configuration (GET)
+          CFG_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/accounts/$ACCT/cfd_tunnel/$TUNNEL/configurations" || true)"
+          [ -n "$CFG_JSON" ] || cf_skip "GET configurations returned nothing"
+          echo "$CFG_JSON" | jq -e '.success' >/dev/null 2>&1 \
+            || cf_skip "GET configurations unsuccessful: $(echo "$CFG_JSON" | jq -c '.errors' 2>/dev/null || echo '?')"
+          INGRESS="$(echo "$CFG_JSON" | jq -c '.result.config.ingress')"
+          [ "$INGRESS" != "null" ] || cf_skip "tunnel has no ingress configuration"
+
+          # 2. rebuild the list: drop any existing rule for $HOST, insert ours
+          #    before the first hostname-less catch-all rule (jq tested
+          #    against the live tunnel shape incl. the idempotent re-run).
+          NEW_INGRESS="$(jq -c --arg h "$HOST" --arg s "$SERVICE" '
+            map(select(.hostname != $h)) as $kept
+            | ($kept | to_entries | map(select(.value.hostname == null)) | first | .key // ($kept | length)) as $idx
+            | $kept[:$idx] + [{hostname: $h, service: $s}] + $kept[$idx:]' <<<"$INGRESS")"
+
+          # 3. PUT it back only when it changed
+          if [ "$NEW_INGRESS" != "$(jq -c . <<<"$INGRESS")" ]; then
+            BODY="$(jq -nc --argjson ingress "$NEW_INGRESS" '{config: {ingress: $ingress}}')"
+            PUT_JSON="$(curl -fsS -m 30 -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+              -d "$BODY" "$CF_API/accounts/$ACCT/cfd_tunnel/$TUNNEL/configurations" || true)"
+            echo "$PUT_JSON" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "PUT configurations unsuccessful: $(echo "$PUT_JSON" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "tunnel ingress updated: $HOST → $SERVICE"
+          else
+            echo "tunnel ingress already correct: $HOST → $SERVICE"
+          fi
+
+          # 4. DNS CNAME $HOST → <tunnel>.cfargotunnel.com (proxied)
+          ZONE_NAME="${HOST#*.}"
+          ZONE_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/zones?name=$ZONE_NAME" || true)"
+          ZONE_ID="$(echo "$ZONE_JSON" | jq -r '.result[0].id // empty' 2>/dev/null || true)"
+          [ -n "$ZONE_ID" ] || cf_skip "zone lookup for $ZONE_NAME"
+          TARGET="$TUNNEL.cfargotunnel.com"
+          REC_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/zones/$ZONE_ID/dns_records?name=$HOST" || true)"
+          REC="$(echo "$REC_JSON" | jq -c '.result[0] // empty' 2>/dev/null || true)"
+          if [ -z "$REC" ]; then
+            CREATE="$(curl -fsS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"type\":\"CNAME\",\"name\":\"$HOST\",\"content\":\"$TARGET\",\"proxied\":true}" \
+              "$CF_API/zones/$ZONE_ID/dns_records" || true)"
+            echo "$CREATE" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "POST dns_records unsuccessful: $(echo "$CREATE" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "DNS CNAME created: $HOST → $TARGET (proxied)"
+          elif [ "$(echo "$REC" | jq -r '.type')" = "CNAME" ] && [ "$(echo "$REC" | jq -r '.content')" = "$TARGET" ]; then
+            echo "DNS CNAME already correct: $HOST → $TARGET (proxied)"
+          else
+            REC_ID="$(echo "$REC" | jq -r '.id')"
+            UPDATE="$(curl -fsS -m 30 -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"type\":\"CNAME\",\"name\":\"$HOST\",\"content\":\"$TARGET\",\"proxied\":true}" \
+              "$CF_API/zones/$ZONE_ID/dns_records/$REC_ID" || true)"
+            echo "$UPDATE" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "PUT dns_records unsuccessful: $(echo "$UPDATE" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "DNS record updated: $HOST → $TARGET (proxied)"
+          fi
+
       - name: Health gate (vault load + browser + WT auth can take minutes)
         run: |
           for i in $(seq 1 48); do
@@ -239,4 +339,4 @@ jobs:
       - name: Deployment report
         if: always()
         run: |
-          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head -5; echo; sudo docker logs --tail 25 '"$NAME"' 2>&1 | grep -iE "vault|wt |wt-|login|auth|daemon|keeper|console|pocketbase|serve|browser" || true'
+          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head -5; echo; sudo docker logs --tail 25 '"$NAME"' 2>&1 | grep -iE "vault|wt |wt-|login|auth|daemon|keeper|console|pocketbase|serve|browser|dsh" || true'

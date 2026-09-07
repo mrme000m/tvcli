@@ -17,9 +17,12 @@
 #              falls back to live-paper, the deployment default — the VPS
 #              runs on its own WunderTrading account)
 #
-# Ports are published on 127.0.0.1 ONLY — the console (:8798) and ctl
-# (:8799) carry no built-in auth; reach them through an SSH tunnel:
-#   ssh -L 8798:localhost:8798 -L 8799:localhost:8799 <host>
+# Ports are published on 127.0.0.1 ONLY — the console (:8798), the ctl
+# (:8799) and the dsh web UI (:3081, the GA agent) carry no built-in auth;
+# reach them through an SSH tunnel:
+#   ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3081:localhost:3081 <host>
+# (dsh.00m.indevs.in on the CF tunnel is the public path for :3081 — ingress
+# is ensured by the deploy workflow's Cloudflare-API step.)
 set -euo pipefail
 
 IMAGE="${IMAGE:-grid-autonomy:local}"
@@ -35,7 +38,7 @@ if [ -z "$DOCKER" ]; then
   if docker info >/dev/null 2>&1; then DOCKER=docker; else DOCKER="sudo docker"; fi
 fi
 
-for v in grid-state grid-pb grid-profile grid-secrets grid-bwcli; do
+for v in grid-state grid-pb grid-profile grid-secrets grid-bwcli grid-dsh; do
   $DOCKER volume create "$v" >/dev/null
 done
 
@@ -78,11 +81,13 @@ $DOCKER run -d --name "$NAME" \
   -e PB_HOST=0.0.0.0 \
   -p 127.0.0.1:8798:8798 \
   -p 127.0.0.1:8799:8799 \
+  -p 127.0.0.1:3081:3081 \
   -v grid-state:/app/agents/grid-autonomy/state \
   -v grid-pb:/app/agents/grid-autonomy/.pocketbase \
   -v grid-profile:/data/browser-profile \
   -v grid-secrets:/app/browser-debug/secrets/runtime \
   -v grid-bwcli:/data/bw-cli \
+  -v grid-dsh:/data/dsh \
   "$IMAGE"
 
 echo "vps-run: container up — boot (vault load → browser → WT auth → daemon) takes 1-4 min"

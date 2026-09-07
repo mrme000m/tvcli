@@ -25,6 +25,10 @@
 !docker/healthcheck.sh
 !docker/patch_config.py
 !docker/vault_loader.sh
+!docker/prime_agent_config.py
+!docker/ga-preset/
+!docker/ga-preset/**
+!docker/dsh-settings.yaml
 
 # ── grid-autonomy daemon source ──────────────────────────────────────────────
 !agents/
@@ -44,6 +48,10 @@
 !.agents/skills/pocketbase/pb_hooks/**
 !.agents/skills/pocketbase/pb_migrations/
 !.agents/skills/pocketbase/pb_migrations/**
+!.agents/skills/grid-autonomy/
+!.agents/skills/grid-autonomy/**
+!.agents/skills/grid-bot/
+!.agents/skills/grid-bot/**
 
 # ── self-contained Node ESM tools (baked CloakBrowser lands here at build) ──
 !browser-debug/launch.mjs

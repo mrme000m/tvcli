@@ -1,0 +1,57 @@
+# Managed template — rendered into the runtime DSH home by the image's
+# entrypoint (docker/entrypoint.sh, dsh component): the @CF_ACCOUNT_ID@
+# placeholder is substituted from the runtime environment (CF_ACCOUNT_ID,
+# falling back to CLOUDFLARE_ACCOUNT_ID — the env names the dsh/prime-agent
+# Cloudflare provider stack expects; see bootstrapping/python/prime_stack/
+# stages/{dsh_config,env_bridge}.py). NO secrets live here: the API key is
+# read at request time from the apiKeyEnv variable (CLOUDFLARE_AI_TOKEN,
+# bridged from CLOUDFLARE_API_KEY by the entrypoint when unset).
+agent-default-model:
+  provider: cloudflare-workers-ai
+  model: "@cf/zai-org/glm-5.3"
+agent-presets:
+  default: ga
+locale:
+  preference: en
+permission:
+  defaultPreset: danger-full-access
+llm-pi-ai:
+  providers:
+    cloudflare-workers-ai:
+      displayName: cloudflare-workers-ai
+      apiKeyEnv: CLOUDFLARE_AI_TOKEN
+      api: openai-completions
+      baseURL: https://api.cloudflare.com/client/v4/accounts/@CF_ACCOUNT_ID@/ai/v1
+      models:
+        - id: "@cf/zai-org/glm-5.2"
+          name: "CF Workers AI / GLM-5.2"
+          contextWindow: 262144
+          maxTokens: 16384
+        - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
+          name: "CF Workers AI / DeepSeek V4 Flash 0731"
+          contextWindow: 131072
+          maxTokens: 16384
+        - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
+          name: "CF Workers AI / DeepSeek V4 Pro 0813"
+          contextWindow: 131072
+          maxTokens: 16384
+        - id: "@cf/qwen/qwen3.8-27b"
+          name: "CF Workers AI / Qwen3.8 27B"
+          contextWindow: 262144
+          maxTokens: 16384
+        - id: "@cf/moonshotai/kimi-k2.6"
+          name: "CF Workers AI / Kimi K2.6"
+          contextWindow: 262144
+          maxTokens: 16384
+        - id: "@cf/moonshotai/kimi-k2.7-code"
+          name: "CF Workers AI / Kimi K2.7 Code"
+          contextWindow: 262144
+          maxTokens: 16384
+        - id: "@cf/zai-org/glm-5.3"
+          name: "glm53"
+          contextWindow: 1048576
+          maxTokens: 256000
+        - id: "@cf/zai-org/glm-5.3-flash"
+          name: "glm53flash"
+          contextWindow: 1048576
+          maxTokens: 128000
