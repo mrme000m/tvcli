@@ -11,6 +11,7 @@ import json
 import os
 import sys
 import unittest
+import urllib.error
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -407,6 +408,29 @@ class TestBinanceUniverse(unittest.TestCase):
             rows = merge.binance_spot_universe(
                 min_quote_vol_usd=2_000_000, max_symbols=10)
         self.assertEqual(len(rows), 10)
+
+    def test_vision_first_with_api_fallback(self):
+        # data-api.binance.vision is tried first; on HTTP 451 (az00 geo-block)
+        # it falls through to api.binance.com. retry_urlopen_json inspects the
+        # request's full_url to decide which host is being called.
+        tickers = [{"symbol": "BTCUSDT", "quoteVolume": "900000000"}]
+        calls = []
+
+        def fake_retry(req, tries=3, timeout=30, backoff_s=2.0):
+            url = getattr(req, "full_url", "")
+            calls.append(url)
+            if "data-api.binance.vision" in url:
+                raise urllib.error.HTTPError(
+                    url, 451, "Unavailable For Legal Reasons", None, None)
+            return tickers
+
+        with mock.patch("merge.retry_urlopen_json", side_effect=fake_retry):
+            rows = merge.binance_spot_universe(
+                min_quote_vol_usd=2_000_000, max_symbols=100)
+        self.assertEqual([s for s, _ in rows], ["BTCUSDT"])
+        self.assertEqual(len(calls), 2)
+        self.assertIn("data-api.binance.vision", calls[0])
+        self.assertIn("api.binance.com", calls[1])
 
 
 if __name__ == "__main__":

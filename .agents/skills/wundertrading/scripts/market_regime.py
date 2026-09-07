@@ -22,6 +22,7 @@ in references/strategy-playbook.md and user constraints before executing.
 import argparse
 import json
 import math
+import os
 import ssl
 import sys
 import urllib.request
@@ -86,7 +87,45 @@ def args_window_ms(limit, interval):
     return int(limit * _interval_ms(interval) * 1.2)
 
 
+# tvcli HTTP server (:8765) — TradingView WebSocket OHLCV. Geo-agnostic:
+# TradingView is not region-gated the way api.binance.com is (HTTP 451 from
+# US-datacenter IPs). The daemon sets TVCLI_SERVER to the in-container serve.
+TVCLI_SERVER = os.environ.get("TVCLI_SERVER", "http://127.0.0.1:8765")
+
+
 def fetch_candles(exchange, symbol, interval, limit, market="spot"):
+    """OHLCV rows [(open, high, low, close), ...] oldest-first, fail-soft.
+
+    Source chain (in order):
+      hyperliquid  api.hyperliquid.xyz            → tvcli /fetch (TradingView)
+      binance      data-api.binance.vision (spot) → api.binance.com → tvcli
+
+    data-api.binance.vision is Binance's public data mirror — not geo-gated
+    the way api.binance.com is (HTTP 451 "Unavailable For Legal Reasons" from
+    US-datacenter IPs) — so it is tried first. Spot klines stand in for the
+    futures sleeve too (within bps for majors; metrics are shape-based). The
+    tvcli leg is geo-agnostic, so candle data still flows when every venue
+    REST API is blocked. Errors are aggregated only for the final diagnostic;
+    any one success short-circuits.
+    """
+    errors = []
+    if exchange == "binance":
+        try:
+            return _binance_mirror(symbol, interval, limit)
+        except Exception as exc:
+            errors.append(f"vision: {exc}")
+    try:
+        return _fetch_direct(exchange, symbol, interval, limit, market)
+    except Exception as exc:  # noqa: BLE001 — chain to the next source
+        errors.append(f"{exchange}: {exc}")
+    try:
+        return fetch_candles_tvcli(exchange, symbol, interval, limit, market)
+    except Exception as exc:
+        errors.append(f"tvcli: {exc}")
+    raise RuntimeError("candle fetch failed — " + " | ".join(errors))
+
+
+def _fetch_direct(exchange, symbol, interval, limit, market="spot"):
     if exchange == "hyperliquid":
         interval_map = HL_INTERVALS
         end_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
@@ -123,10 +162,54 @@ def fetch_candles(exchange, symbol, interval, limit, market="spot"):
     raise SystemExit(f"unknown exchange: {exchange}")
 
 
+def _binance_mirror(symbol, interval, limit):
+    """data-api.binance.vision — public klines mirror, same schema, no auth,
+    not geo-gated. Spot klines suffice for regime metrics even for the
+    futures sleeve (within bps of futures for majors; metrics are
+    shape-based), matching the direct-fetch spot fallback philosophy."""
+    url = (f"https://data-api.binance.vision/api/v3/klines?symbol={symbol}"
+           f"&interval={BINANCE_INTERVALS[interval]}&limit={limit}")
+    return _binance_klines(url)
+
+
 def _binance_klines(url):
     with urllib.request.urlopen(url, timeout=30, context=ssl_context()) as resp:
         data = json.loads(resp.read())
     return [(float(k[1]), float(k[2]), float(k[3]), float(k[4])) for k in data]
+
+
+def _tv_symbol(exchange, symbol):
+    """TradingView symbol for a venue/base pair. Binance needs the full
+    pair (BTCUSDT); hyperliquid perps ride their Binance USDT pair (mirrors
+    screen/merge.py's fetch_symbol/tv_symbol convention)."""
+    s = (symbol or "").upper().replace("/", "")
+    if exchange == "binance":
+        return f"BINANCE:{s}" if s.endswith(("USDT", "USDC", "BUSD")) \
+            else f"BINANCE:{s}USDT"
+    return f"BINANCE:{s}USDT"
+
+
+def fetch_candles_tvcli(exchange, symbol, interval, limit, market="spot"):
+    """OHLCV via the tvcli HTTP server's /fetch endpoint (TradingView
+    WebSocket, authenticated). Returns the same [(o,h,l,c), ...] oldest-first
+    rows as the REST sources. Used as the geo-agnostic last-resort fallback
+    so the regime pipeline never starves on a venue geo-block."""
+    tf = {"15m": "15m", "1h": "1h", "4h": "4h", "1d": "1d"}[interval]
+    body = json.dumps({"symbol": _tv_symbol(exchange, symbol),
+                       "timeframe": tf, "bars": int(limit)}).encode()
+    req = urllib.request.Request(f"{TVCLI_SERVER}/fetch", data=body,
+                                 headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        data = json.loads(resp.read())
+    periods = data.get("periods") or []
+    # tvcli returns newest-first; the module convention is oldest-first, so
+    # order by bar time ascending (robust regardless of the API's ordering).
+    periods = sorted(periods, key=lambda p: (p.get("time") or 0))
+    rows = [(float(p["open"]), float(p["high"]), float(p["low"]),
+             float(p["close"])) for p in periods]
+    if not rows:
+        raise RuntimeError("tvcli /fetch returned no bars")
+    return rows
 
 
 def ema(values, period):

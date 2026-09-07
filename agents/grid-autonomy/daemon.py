@@ -600,6 +600,17 @@ def screen_cache_entry(cand):
     return {k: cand.get(k) for k in SCREEN_CACHE_FIELDS}
 
 
+def _confluence_ok(cand):
+    """Count of tvcli confluence skills that returned a result for a
+    candidate. Surfaces in the screen report top3 so operators can see at a
+    glance whether the tvcli /hunt pass actually contributed (vs fail-soft
+    score-only screening). 0 with confluence_bonus 0 means tvcli was down."""
+    con = cand.get("confluence") if isinstance(cand, dict) else None
+    if not isinstance(con, dict):
+        return 0
+    return sum(1 for k, v in con.items() if k != "errors" and v is True)
+
+
 # ── Worker A/C safe wrappers ───────────────────────────────────────────
 
 def resolve_pair_safe(venue, symbol, market=None):
@@ -2184,6 +2195,10 @@ class Daemon:
                        "top3": [{"venue": c.get("venue"), "symbol": c.get("symbol"),
                                  "regime": c.get("regime"),
                                  "score_final": c.get("score_final"),
+                                 "score": c.get("score"),
+                                 "confluence_bonus": c.get("confluence_bonus"),
+                                 "tvcli_fit": c.get("tvcli_fit"),
+                                 "confluence_ok": _confluence_ok(c),
                                  "step": c.get("step", c.get("step_pct")),
                                  "spread_pct": c.get("spread_pct"),
                                  "expected_fills_per_24h":
@@ -3272,7 +3287,17 @@ class Daemon:
           * the TOTAL slot count is above the fleet ceiling
             (portfolio.slots_hard_max when any dynamic venue is
             configured, else portfolio.slots_max): the highest-numbered
-            EMPTY slots are dropped until total == ceiling, or
+            EMPTY slots are dropped until total == ceiling — VENUE-AWARE:
+            an EMPTY slot that is the last remaining slot (occupied or
+            empty) of a FUNDED venue (portfolio.venues entry with
+            balance_usd > 0) is never dropped while another empty slot
+            whose venue keeps another slot is available (a venue stripped
+            of its last slot can never host a deploy again — refill only
+            fills same-venue free slots and open_slot refuses at the
+            ceiling). If every droppable empty is protected (e.g. the
+            ceiling sits below the number of funded venues), the plain
+            highest-empty rule applies: the ceiling is a hard operator
+            cap and never keeps the fleet above it, or
           * the fleet is at the learned demo (paper) grid-bot cap (no new
             bot can be created on ANY venue until one stops), or
           * the slot's venue is at its plan tier cap (e.g. binance free
@@ -3314,7 +3339,40 @@ class Daemon:
                     (s for s in slots
                      if str(s.get("slot")) not in active_set),
                     key=lambda s: _slot_num(s.get("slot")), reverse=True)
-                for s in empties[:over]:
+                # venue-aware protection: the LAST remaining slot of a
+                # FUNDED venue (portfolio.venues with balance_usd > 0) is
+                # never the drop of choice while another empty exists —
+                # dropping it would strand the venue's sleeve (refill
+                # only fills same-venue free slots; open_slot refuses at
+                # the ceiling), so binance-screened candidates could
+                # never deploy again. Protected empties are only
+                # considered AFTER every unprotected one (and only then
+                # when the hard ceiling still demands a drop) — the
+                # operator's cap always wins over venue protection.
+                funded_venues = set()
+                try:
+                    venues_cfg = p.get("venues") or {}
+                    for name, vc in venues_cfg.items():
+                        try:
+                            if float((vc or {}).get("balance_usd")
+                                    or 0) > 0:
+                                funded_venues.add(str(name))
+                        except (TypeError, ValueError):
+                            continue
+                except Exception:
+                    pass
+                venue_counts = {}
+                for s in slots:
+                    v = str(s.get("venue"))
+                    venue_counts[v] = venue_counts.get(v, 0) + 1
+
+                def _venue_protected(s):
+                    v = str(s.get("venue"))
+                    return v in funded_venues and venue_counts.get(v, 0) <= 1
+
+                ordered = ([s for s in empties if not _venue_protected(s)]
+                           + [s for s in empties if _venue_protected(s)])
+                for s in ordered[:over]:
                     total = len(slots)
                     slots.remove(s)
                     pruned.append(
@@ -3368,6 +3426,17 @@ class Daemon:
             slots 4/6/8/9 for 27+ slot-hours). Occupied slots are NEVER
             touched — live bots never lose their slot id — and open_slot
             can always recreate capacity later (ids continue from the max).
+          * stranded-venue rebalance (2026-09-07) — a venue FUNDED in
+            portfolio.venues (balance_usd > 0) that holds ZERO slots can
+            never host a deploy again: the refill path only fills
+            same-venue free slots and open_slot refuses at the fleet
+            ceiling (live: the ceiling prune had dropped binance's only
+            slot, stranding the $120 sleeve). The reconcile converts the
+            highest-numbered EMPTY slot of a venue that keeps another
+            empty one to the stranded venue — never an occupied slot,
+            never a source venue's last empty slot, never growing the
+            total slot count — and the budget loop re-normalizes it
+            through the same per-venue math below.
           * committed clamp — an ACTIVE bot's worst-case claim is clamped
             to its slot's new max_commitment when a config SHRINK lowers
             the cap (otherwise a phantom claim eats the deployable
@@ -3390,6 +3459,51 @@ class Daemon:
             scale = total / vsum
             dynamic = set(p.get("dynamic_slot_venues") or [])
             min_slot_usd = float(p.get("min_slot_usd", 100.0))
+            # stranded-venue rebalance: a venue FUNDED in config
+            # (balance_usd > 0) with ZERO slots is dead capital — the
+            # refill path only fills same-venue free slots and open_slot
+            # refuses at the fleet ceiling (live 2026-09-07: the ceiling
+            # prune had dropped binance's only slot, so the $120 sleeve
+            # could never rotate). Convert the highest-numbered EMPTY
+            # slot of a venue that keeps another empty one; the budget
+            # loop below re-normalizes balance / max_commitment /
+            # venue_sleeve / venue_slots through the same per-venue math
+            # (dynamic venues floor at min_slot_usd). Fail-closed:
+            # occupied slots are never converted, a source venue never
+            # loses its last empty slot, the total count never grows.
+            rebalanced = []
+
+            def _num(v):
+                try:
+                    return int(v)
+                except (TypeError, ValueError):
+                    return -1
+
+            for vname, vbal in venues.items():
+                if vbal <= 0 or any(s.get("venue") == vname for s in slots):
+                    continue
+                empty_counts = {}
+                for s in slots:
+                    if str(s.get("slot")) not in active:
+                        ev = str(s.get("venue"))
+                        empty_counts[ev] = empty_counts.get(ev, 0) + 1
+                candidates = [
+                    s for s in slots
+                    if str(s.get("slot")) not in active
+                    and empty_counts.get(str(s.get("venue")), 0) > 1]
+                if not candidates:
+                    continue
+                src = max(candidates, key=lambda s: _num(s.get("slot")))
+                src_venue = str(src.get("venue"))
+                src["venue"] = vname
+                rebalanced.append(
+                    f"slot {src.get('slot')} {src_venue}→{vname} "
+                    f"(${vbal * scale:.0f} sleeve had no slot)")
+            if rebalanced:
+                log(self.state, {"kind": "slots-reconciled",
+                                 "msg": "rebalanced empty slot to stranded "
+                                        "funded venue: "
+                                        + "; ".join(rebalanced)[:300]})
             counts = {}
             for s in slots:
                 counts[s["venue"]] = counts.get(s["venue"], 0) + 1
@@ -3478,7 +3592,7 @@ class Daemon:
                                         + "; ".join(f"slot {sid} ({v}: {r})"
                                                     for sid, v, r in pruned
                                                     )[:300]})
-            if changed or pruned or clamped:
+            if changed or pruned or clamped or rebalanced:
                 log(self.state, {"kind": "slots-reconciled",
                                  "msg": f"slot budgets re-normalized to "
                                         f"config (total ${total:.0f}): "

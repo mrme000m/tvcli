@@ -466,14 +466,22 @@ function renderScreen(screen) {
     box.innerHTML = `<div class="empty-note" style="padding:14px;">No rescreen run card yet — wait for the next cycle or force one.</div>`;
     return;
   }
-  box.innerHTML = (screen.top || []).slice(0, 5).map((c, i) => `
+  box.innerHTML = (screen.top || []).slice(0, 5).map((c, i) => {
+    const bonus = c.confluence_bonus;
+    const okSkills = c.confluence_ok;
+    const tvcliChip = (bonus != null || okSkills != null)
+      ? `<span class="badge ${(bonus || 0) > 0 ? "badge--ok" : "badge--dim"}" title="${okSkills != null ? `${okSkills}/6 tvcli skills returned a result` : "tvcli confluence"} · +${fmtNum(bonus ?? 0, 1)} to score">tvcli +${fmtNum(bonus ?? 0, 1)}</span>`
+      : "";
+    return `
     <div class="candidate">
       <span class="rank">${String(i + 1).padStart(2, "0")}</span>
       <span class="venue-tag venue-tag--${esc(c.venue)}">${esc(c.venue)}</span>
       <span class="sym">${esc(c.symbol)}</span>
       <span class="badge badge--dim">${esc(c.regime || "?")}</span>
+      ${tvcliChip}
       <span class="score">${esc(fmtNum(c.score_final, 1))}</span>
-    </div>`).join("");
+    </div>`;
+  }).join("");
 }
 
 function renderSummary(ov) {
@@ -996,6 +1004,8 @@ async function loadReliability() {
     if (rel.stale) {
       notes.push(`<div class="banner banner--warn"><div><div class="banner-title">Reliability ledger is a stale snapshot (${fmtNum(age, 1)}h old)</div>
         The 24h refresh cadence has been missed — the daemon may be down or its health cycle has not run. Treat every aggregate below as last-known, not live.</div></div>`);
+    } else if (rel.missing || (rel.note && !rel.stale)) {
+      notes.push(`<div class="banner banner--info"><div>${esc(rel.note || "No closed round-trips yet.")}</div></div>`);
     } else if (age != null) {
       notes.push(`<div class="banner banner--info"><div>Ledger snapshot age: <b>${fmtNum(age, 1)}h</b> (refresh cadence ${esc(rel.refresh_cadence_h ?? 24)}h).</div></div>`);
     }

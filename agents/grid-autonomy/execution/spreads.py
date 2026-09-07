@@ -16,7 +16,13 @@ import ssl
 import urllib.parse
 import urllib.request
 
-_BOOK_TICKER = "https://api.binance.com/api/v3/ticker/bookTicker"
+# data-api.binance.vision is Binance's public data mirror — not geo-gated the
+# way api.binance.com is (HTTP 451 "Unavailable For Legal Reasons" from
+# US-datacenter IPs) — so it is tried first with api.binance.com as fallback.
+_BOOK_TICKER_HOSTS = (
+    "https://data-api.binance.vision/api/v3/ticker/bookTicker",
+    "https://api.binance.com/api/v3/ticker/bookTicker",
+)
 _UA = {"User-Agent": "tvcli-grid-autonomy/1.0"}
 
 
@@ -40,10 +46,17 @@ def _spread_pct(ticker):
 
 
 def _fetch_all(symbols):
-    url = _BOOK_TICKER + "?symbols=" + urllib.parse.quote(json.dumps(symbols))
-    req = urllib.request.Request(url, headers=_UA)
-    with urllib.request.urlopen(req, timeout=20, context=_ctx()) as resp:
-        return json.loads(resp.read())
+    last = None
+    q = urllib.parse.quote(json.dumps(symbols))
+    for base in _BOOK_TICKER_HOSTS:
+        try:
+            url = base + "?symbols=" + q
+            req = urllib.request.Request(url, headers=_UA)
+            with urllib.request.urlopen(req, timeout=20, context=_ctx()) as resp:
+                return json.loads(resp.read())
+        except Exception as exc:  # noqa: BLE001 — try the next host
+            last = exc
+    raise last
 
 
 def binance_spreads(symbols):
@@ -72,16 +85,18 @@ def binance_spreads(symbols):
     # per-symbol fallback (public endpoint; a failed bulk query shouldn't
     # abort the whole binance screening leg)
     for sym in syms:
-        try:
-            req = urllib.request.Request(
-                _BOOK_TICKER + "?symbol=" + urllib.parse.quote(sym), headers=_UA)
-            with urllib.request.urlopen(req, timeout=10, context=_ctx()) as resp:
-                t = json.loads(resp.read())
-            spread = _spread_pct(t)
-            if spread is not None:
-                out[sym] = spread
-        except Exception:
-            continue
+        for base in _BOOK_TICKER_HOSTS:
+            try:
+                req = urllib.request.Request(
+                    base + "?symbol=" + urllib.parse.quote(sym), headers=_UA)
+                with urllib.request.urlopen(req, timeout=10, context=_ctx()) as resp:
+                    t = json.loads(resp.read())
+                spread = _spread_pct(t)
+                if spread is not None:
+                    out[sym] = spread
+                break
+            except Exception:
+                continue
     return out
 
 

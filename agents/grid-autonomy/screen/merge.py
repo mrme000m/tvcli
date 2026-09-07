@@ -158,10 +158,25 @@ def retry_urlopen_json(req, tries=3, timeout=30, backoff_s=2.0):
 
 
 def binance_spot_universe(min_quote_vol_usd=5_000_000, max_symbols=60):
-    """[(symbol, quoteVol)] top Binance SPOT USDT pairs by 24h quote volume."""
-    url = "https://api.binance.com/api/v3/ticker/24hr"
-    req = urllib.request.Request(url, headers={"User-Agent": "tvcli-grid-autonomy/1.0"})
-    tickers = retry_urlopen_json(req, timeout=30)
+    """[(symbol, quoteVol)] top Binance SPOT USDT pairs by 24h quote volume.
+
+    data-api.binance.vision is Binance's public data mirror — not geo-gated
+    the way api.binance.com is (HTTP 451 from US-datacenter IPs) — so it is
+    tried first with api.binance.com as the fallback."""
+    urls = ("https://data-api.binance.vision/api/v3/ticker/24hr",
+            "https://api.binance.com/api/v3/ticker/24hr")
+    tickers = None
+    last = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(
+                url, headers={"User-Agent": "tvcli-grid-autonomy/1.0"})
+            tickers = retry_urlopen_json(req, timeout=30)
+            break
+        except Exception as exc:
+            last = exc
+    if tickers is None:
+        raise last
     rows = []
     for t in tickers:
         s = t.get("symbol", "")

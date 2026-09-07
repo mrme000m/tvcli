@@ -503,6 +503,58 @@ class TestFleetCeilingPrune(ManageHarness):
         self.assertEqual(pruned, [])
         self.assertEqual(len(d.state["slots"]), 6)
 
+    def test_ceiling_prune_keeps_last_funded_venue_slot(self):
+        # the live az00 incident: 7 slots (HL 1,2,3,5,6,7 + BN 4),
+        # occupied 5,6,7, ceiling 6, both venues funded → the HIGHEST
+        # empty (BN 4) is protected as binance's only slot; the prune
+        # drops the highest UNPROTECTED empty (HL 3) instead — the
+        # binance sleeve keeps a deployable slot
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        d.state["slots"] = ([self._slot(i, "hyperliquid")
+                             for i in (1, 2, 3, 5, 6, 7)]
+                            + [self._slot(4, "binance")])
+        for k in ("5", "6", "7"):
+            d.state["active_bots"][k] = _active_bot(
+                f"SYM{k}", "hyperliquid", f"B{int(k)}")
+        pruned = d._prune_unfillable_slots(
+            d.state["slots"], set(d.state["active_bots"]))
+        self.assertEqual(pruned, [(3, "hyperliquid", "fleet ceiling 7/6")])
+        venues = {s["slot"]: s["venue"] for s in d.state["slots"]}
+        self.assertEqual(len(venues), 6)
+        self.assertEqual(venues[4], "binance")   # sleeve keeps its slot
+        self.assertNotIn(3, venues)
+
+    def test_ceiling_prune_drops_unfunded_venue_slot(self):
+        # same shape but binance NOT funded (balance 0) → no venue
+        # protection: the plain highest-empty rule drops BN slot 4
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 6
+        d.config["portfolio"]["venues"]["binance"]["balance_usd"] = 0.0
+        d.state["slots"] = ([self._slot(i, "hyperliquid")
+                             for i in (1, 2, 3, 5, 6, 7)]
+                            + [self._slot(4, "binance")])
+        for k in ("5", "6", "7"):
+            d.state["active_bots"][k] = _active_bot(
+                f"SYM{k}", "hyperliquid", f"B{int(k)}")
+        pruned = d._prune_unfillable_slots(
+            d.state["slots"], set(d.state["active_bots"]))
+        self.assertEqual(pruned, [(4, "binance", "fleet ceiling 7/6")])
+        self.assertNotIn(4, [s["slot"] for s in d.state["slots"]])
+
+    def test_ceiling_below_funded_venue_count_still_wins(self):
+        # hard cap: ceiling 1 with TWO funded venues each holding one
+        # (empty) slot → every empty is protected, but the ceiling is the
+        # operator's hard cap — the plain highest-empty fallback still
+        # prunes down to the ceiling
+        d = self.make_dynamic_daemon()
+        d.config["portfolio"]["slots_hard_max"] = 1
+        d.state["slots"] = [self._slot(1, "hyperliquid"),
+                            self._slot(2, "binance")]
+        pruned = d._prune_unfillable_slots(d.state["slots"], set())
+        self.assertEqual(pruned, [(2, "binance", "fleet ceiling 2/1")])
+        self.assertEqual([s["slot"] for s in d.state["slots"]], [1])
+
     def test_fixed_venues_use_slots_max_ceiling(self):
         # (d) no dynamic venues configured → the fixed slots_max is the
         # ceiling (5 slots, cap 3: the two highest empties drop)
@@ -513,6 +565,95 @@ class TestFleetCeilingPrune(ManageHarness):
         self.assertEqual(pruned, [(5, "hyperliquid", "fleet ceiling 5/3"),
                                   (4, "hyperliquid", "fleet ceiling 4/3")])
         self.assertEqual([s["slot"] for s in d.state["slots"]], [1, 2, 3])
+
+
+class TestReconcileStrandedVenue(ManageHarness):
+    """A venue FUNDED in portfolio.venues (balance_usd > 0) that holds
+    ZERO slots is dead capital: the refill path only fills same-venue
+    free slots and open_slot refuses at the fleet ceiling (live
+    2026-09-07: the ceiling prune had dropped binance's only slot, so
+    the $120 sleeve could never rotate). reconcile_slots converts the
+    highest-numbered EMPTY slot of a venue that keeps another empty one
+    to the stranded venue — never an occupied slot, never a source
+    venue's last empty, never growing the total count."""
+
+    def _slot(self, n, venue="hyperliquid", balance=100.0):
+        return {"slot": n, "venue": venue, "balance": balance,
+                "max_commitment": round(balance * 0.5, 2),
+                "venue_sleeve": 480.0, "venue_slots": 6, "dynamic": True}
+
+    def _live_daemon(self, bn_balance=120.0):
+        # the post-incident live shape: 6 hyperliquid slots (3 occupied,
+        # 3 empty), binance funded but holding ZERO slots, ceiling 6
+        d = self.make_dynamic_daemon()
+        p = d.config["portfolio"]
+        p["total_usd"] = 600.0
+        p["venues"]["hyperliquid"]["balance_usd"] = 480.0
+        p["venues"]["binance"]["balance_usd"] = bn_balance
+        p["slots_hard_max"] = 6
+        p["min_slot_usd"] = 100.0
+        d.state["slots"] = [self._slot(i) for i in range(1, 7)]
+        for k in ("4", "5", "6"):
+            d.state["active_bots"][k] = _active_bot(
+                f"SYM{k}", "hyperliquid", f"B{int(k)}")
+        return d
+
+    def test_highest_empty_converts_to_stranded_venue(self):
+        d = self._live_daemon()
+        d.reconcile_slots()
+        slots = {s["slot"]: s for s in d.state["slots"]}
+        # total count never grows, ids unchanged: [1..6]
+        self.assertEqual(sorted(slots), [1, 2, 3, 4, 5, 6])
+        # the HIGHEST empty (3) became the binance slot, re-normalized
+        # through the $120 sleeve: balance 120, worst-case 60
+        self.assertEqual(slots[3]["venue"], "binance")
+        self.assertEqual(slots[3]["balance"], 120.0)
+        self.assertEqual(slots[3]["max_commitment"], 60.0)
+        self.assertEqual(slots[3]["venue_sleeve"], 120.0)
+        self.assertEqual(slots[3]["venue_slots"], 1)
+        # HL keeps 5 slots at the dynamic floor max(480/5, 100) = 100
+        hl = [s for s in d.state["slots"] if s["venue"] == "hyperliquid"]
+        self.assertEqual(len(hl), 5)
+        self.assertEqual([s["balance"] for s in hl], [100.0] * 5)
+        # journaled as a slots-reconciled venue rebalance
+        msgs = [e.get("msg", "") for e in d.state["journal"]
+                if e.get("kind") == "slots-reconciled"]
+        self.assertTrue(any("rebalanced empty slot" in m for m in msgs))
+        self.assertTrue(any("slot 3 hyperliquid→binance" in m
+                            for m in msgs))
+        # occupied slots never converted
+        for k in ("4", "5", "6"):
+            self.assertEqual(slots[int(k)]["venue"], "hyperliquid")
+
+    def test_unfunded_venue_is_not_rebalanced(self):
+        # binance NOT funded (balance 0) → no conversion, all-HL fleet
+        d = self._live_daemon(bn_balance=0.0)
+        d.reconcile_slots()
+        self.assertTrue(
+            all(s["venue"] == "hyperliquid" for s in d.state["slots"]))
+        self.assertEqual(len(d.state["slots"]), 6)
+        self.assertNotIn(
+            "rebalanced empty slot",
+            " ".join(e.get("msg", "") for e in d.state["journal"]
+                     if e.get("kind") == "slots-reconciled"))
+
+    def test_source_venue_keeps_its_last_empty_slot(self):
+        # hyperliquid holds exactly ONE empty slot (plus occupied ones):
+        # a source venue never loses its last empty → no conversion
+        d = self._live_daemon()
+        d.state["slots"] = [self._slot(1), self._slot(2), self._slot(3),
+                            self._slot(4)]
+        d.state["active_bots"] = {
+            k: _active_bot(f"SYM{k}", "hyperliquid", f"B{int(k)}")
+            for k in ("2", "3", "4")}
+        d.reconcile_slots()
+        self.assertTrue(
+            all(s["venue"] == "hyperliquid" for s in d.state["slots"]))
+        self.assertEqual([s["slot"] for s in d.state["slots"]], [1, 2, 3, 4])
+        self.assertNotIn(
+            "rebalanced empty slot",
+            " ".join(e.get("msg", "") for e in d.state["journal"]
+                     if e.get("kind") == "slots-reconciled"))
 
 
 class TestHealthCycleCeilingPrune(_HealthTickHarness):

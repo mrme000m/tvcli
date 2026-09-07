@@ -547,11 +547,12 @@ def _tier(stats: dict) -> str:
 def reliability_payload() -> dict:
     path = os.path.join(STATE_DIR, "reliability.json")
     ledger = _read_json(path, {}) or {}
+    missing = not os.path.isfile(path)
     age_h = None
     try:
         age_h = round((time.time() - os.path.getmtime(path)) / 3600.0, 1)
     except OSError:
-        pass
+        missing = True
     archs = {}
     for arch, st in ledger.items():
         if isinstance(st, dict):
@@ -566,9 +567,22 @@ def reliability_payload() -> dict:
             archs[arch] = st
     # the ledger is a snapshot refreshed by the daemon's health cycle;
     # past the 24h refresh cadence (+grace) it is stale evidence.
+    stale = bool(age_h is not None and age_h > 26)
+    if missing:
+        note = ("no closed round-trips yet — archetypes populate once paper "
+                "bots close their first grid trip (first refresh after a "
+                "fresh deploy)")
+    elif not archs:
+        note = ("ledger computed but empty — no closed grid round-trips yet; "
+                "archetypes appear after the first completed trip")
+    elif stale:
+        note = (f"ledger snapshot is {age_h}h old (stale past the 24h "
+                f"refresh cadence)")
+    else:
+        note = ""
     return {"ladder": LADDER, "archetypes": archs,
-            "ledger_age_h": age_h, "stale": bool(age_h is not None and age_h > 26),
-            "refresh_cadence_h": 24}
+            "ledger_age_h": age_h, "stale": stale, "missing": missing,
+            "note": note, "refresh_cadence_h": 24}
 
 
 def _enriched_bots(st: dict) -> list[dict]:
