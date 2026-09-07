@@ -61,11 +61,48 @@ function relTimeEpoch(ts) {
   if (!isFinite(n) || n <= 0) return "\u2014";
   return relTime(new Date(n * 1000).toISOString());
 }
+/* Human-readable "how long has this bot been held" — H:MM for under 48h,
+   "Nd" above. Mirrors the on-the-hour precision an operator wants when
+   deciding whether a bot is stale (24h+) without pulling out a calculator
+   for the decimal "24.3h" the old version emitted. */
 const heldFor = (iso) => {
   if (!iso) return null;
-  const h = (Date.now() - Date.parse(iso)) / 3600000;
-  return isNaN(h) ? null : (h >= 48 ? `${(h / 24).toFixed(1)}d` : `${h.toFixed(1)}h`);
+  const ms = Date.now() - Date.parse(iso);
+  if (isNaN(ms) || ms < 0) return null;
+  const m = Math.floor(ms / 60000);
+  if (m < 1) return "<1m";
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 48) return `${h}:${String(m % 60).padStart(2, "0")}`;
+  return `${Math.floor(h / 24)}d`;
 };
+
+/* Rough "expected close by" for a slot: how many hours until net PnL
+   (realized + mark) reaches the profit-exit target, assuming the model's
+   projected /24h grid-income rate holds. "Rough" is the point — the exit
+   is daemon-owned (take_profit_pct × budget), not a fixed clock, so this
+   is a trend estimate, not a promise. Falls back to "—" when any input is
+   missing or the projected rate isn't positive (a rate of zero or negative
+   means the model can't see income, so no honest ETA exists). */
+function estimateCloseBy(bot) {
+  const obs = bot.observed || {};
+  const net = (isNum(obs.realized_pnl) ? Number(obs.realized_pnl) : 0)
+            + (isNum(obs.unrealized_pnl) ? Number(obs.unrealized_pnl) : 0);
+  const rate = isNum(bot.projected_24h_usd) ? Number(bot.projected_24h_usd) / 24 : null;
+  if (rate == null || rate <= 0) return "—";
+  const budget = isNum(bot.committed) ? Number(bot.committed) : null;
+  if (budget == null || budget <= 0) return "—";
+  const tp = isNum(bot.take_profit_pct) ? Number(bot.take_profit_pct)
+    : isNum((lastOverview || {}).config_digest && (lastOverview || {}).config_digest.take_profit_pct)
+      ? Number((lastOverview || {}).config_digest.take_profit_pct) : 0.10;
+  const target = tp * budget;
+  const missing = target - net;
+  if (missing <= 0) return "now";
+  const hrs = missing / rate;
+  if (!isFinite(hrs) || hrs <= 0) return "—";
+  if (hrs < 24) return `${Math.round(hrs)}h`;
+  return `${Math.round(hrs / 24)}d`;
+}
 
 async function api(path, opts = {}) {
   const res = await fetch(path, {
@@ -82,6 +119,27 @@ function toast(msg, bad = false, ms = 4200) {
   const t = el("div", { class: `toast${bad ? " toast--bad" : ""}` }, msg);
   $("#toasts").append(t);
   setTimeout(() => t.remove(), ms);
+}
+
+/* navigator.clipboard with a one-shot fallback (file:// or older WebViews
+   reject it; execCommand("copy") on a temporary textarea still works). */
+async function copyText(s) {
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(s);
+      return true;
+    }
+  } catch (_) { /* fall through */ }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = s;
+    ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.append(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) { return false; }
 }
 
 /* ── confirm modal ────────────────────────────────────────────────── */
@@ -176,7 +234,9 @@ async function loadOverview() {
     renderSummary(ov);
     drawPnlChart(lastPnlPoints || []);
     loadSlotCharts(ov);
-    renderLlmBrains();   // live ping, ~9s; fire-and-forget (idempotent)
+    // fire-and-forget — server caches the ping for 60s; awaiting it would
+    // block the rest of the overview render for up to 9s on a slow provider.
+    renderLlmBrains();
   }
 }
 
@@ -187,16 +247,26 @@ function renderStatusbar(ov) {
     return;
   }
   const d = ov.daemon || {};
+  const st = lastStatus;
+  const livePnl = (st && typeof st.pnl === "object" && st.pnl) || null;
   const chips = [];
   if (d.running) {
     chips.push(`<span class="chip chip--ok"><span class="dot pulse"></span>daemon <b>${esc(d.mode || "?")}</b> · ${esc(d.supervisor)} · pid ${esc(d.pid)}</span>`);
   } else {
     chips.push(`<span class="chip chip--bad"><span class="dot"></span>daemon stopped</span>`);
   }
+  if (!st) {
+    chips.push(`<span class="chip chip--bad" title="daemon ctl plane not responding (every proxy panel below will fail-soft to 'offline' until this recovers)"><span class="dot"></span><b>ctl down</b></span>`);
+  }
   const lastCycle = (ov.ctl && ov.ctl.status && ov.ctl.status.last_cycle) || null;
   chips.push(`<span class="chip"><span class="dot"></span>loop <b>${esc(relTime(lastCycle))}</b></span>`);
   const slots = (ov.slots || []).length || 1;
-  chips.push(`<span class="chip"><span class="dot"></span>fleet <b>${(ov.bots || []).length}/${slots}</b> · ${esc(fmtUsd(ov.committed_usd))} committed</span>`);
+  // prefer the daemon's own committed-usd from the live ctl /status pnl
+  // block (rounded to 2dp) over the per-cycle state.json snapshot — same
+  // pattern the statusbar already uses for liveAllow
+  const committed = (livePnl && isNum(livePnl.committed_usd))
+    ? Number(livePnl.committed_usd) : ov.committed_usd;
+  chips.push(`<span class="chip"><span class="dot"></span>fleet <b>${(ov.bots || []).length}/${slots}</b> · ${esc(fmtUsd(committed))} committed</span>`);
   chips.push(d.kill_file
     ? `<span class="chip chip--bad"><span class="dot"></span><b>KILL armed</b></span>`
     : `<span class="chip"><span class="dot"></span>KILL clear</span>`);
@@ -206,6 +276,20 @@ function renderStatusbar(ov) {
   const liveAllow = (ov.ctl && ov.ctl.status && ov.ctl.status.live_allow) ?? ov.live_allow;
   if (liveAllow) {
     chips.push(`<span class="chip chip--warn"><span class="dot"></span><b>live_allow=true</b></span>`);
+  }
+  // always-on heartbeat score (green ≥90 / amber 70–89 / red <70). The
+  // dedicated heartbeat card only shows when a check fails; surfacing the
+  // score here means a healthy loop is visible without scrolling.
+  const hb = (st && typeof st.heartbeat === "object" && st.heartbeat) || null;
+  if (hb && isNum(hb.score)) {
+    const s = Number(hb.score);
+    const col = s >= 90 ? "var(--teal)" : s >= 70 ? "var(--amber)" : "var(--crimson)";
+    const failed = Object.entries(hb.checks || {})
+      .filter(([, c]) => c && !c.ok).map(([k]) => k);
+    const title = failed.length
+      ? `loop-health heartbeat — failed: ${failed.join(", ")}`
+      : "loop-health heartbeat — all checks passing";
+    chips.push(`<span class="chip" style="border-color:${col};color:${col}" title="${esc(title)}">♥ ${s}</span>`);
   }
   bar.innerHTML = chips.join("");
 }
@@ -386,7 +470,7 @@ function slotCard(bot) {
     <div class="symbol-line">
       <span class="symbol">${esc(bot.symbol || "?")}</span>
       <span class="gridtype">${esc(bot.grid_type || "—")} grid</span>
-      ${bot.decision_id ? `<span class="slot-decision-link mono" data-did="${esc(bot.decision_id)}" role="button" tabindex="0" title="View the deliberation evidence the bot was deployed on">${esc(bot.decision_id)} \u2192</span>` : ""}
+      ${bot.decision_id ? `<span class="slot-decision-link mono" data-did="${esc(bot.decision_id)}" data-copy="${esc(bot.decision_id)}" role="button" tabindex="0" title="View the deliberation evidence the bot was deployed on (alt-click to copy id)">${esc(bot.decision_id)} →</span>` : ""}
     </div>
     <div class="slot-spark" data-key="${esc(bot.venue)}:${esc(bot.symbol)}"
          data-slot="${esc(bot.slot)}" role="button" tabindex="0"
@@ -408,6 +492,17 @@ function slotCard(bot) {
       <div class="metric"><div class="m-label">trips</div><div class="m-value">${trips}</div></div>
       <div class="metric"><div class="m-label">open lines</div>
         <div class="m-value ${isNum(obs.open_losing) && obs.open_losing > 0 ? "m-value--warn" : ""}" title="${isNum(obs.open_losing) ? `${obs.open_losing} of ${obs.open_lines ?? "?"} lines losing` : ""}">${esc(obs.open_lines ?? "—")}<span style="color:var(--ink-faint);font-weight:400"> (${esc(obs.open_losing ?? "?")} losing)</span></div></div>
+      <div class="metric"><div class="m-label" title="average unrealized loss per losing line (negative mark, backstop when per-line mark isn't reported)">worst avg</div>
+        <div class="m-value">${(() => {
+          const los = isNum(obs.open_losing) ? obs.open_losing : 0;
+          const u = isNum(unrl) ? Number(unrl) : null;
+          if (!los || u == null || u >= 0) return "—";
+          // per-line avg assumes the backstop aggregate `unrealized_pnl`
+          // is the only honest number we have when per-line marks are
+          // unavailable; this surfaces the magnitude of a held-under-water
+          // loss without claiming per-line precision
+          return fmtSignedUsd(u / los);
+        })()}</div></div>
       <div class="metric"><div class="m-label">dd vs band</div>
         <div class="m-value ${outsideBand ? "m-value--bad" : ""}">${isNum(dd) ? `${fmtNum(dd, 2)}×` : "—"}</div></div>
       <div class="metric"><div class="m-label">budget</div><div class="m-value">${fmtUsd(bot.committed)}</div></div>
@@ -418,6 +513,7 @@ function slotCard(bot) {
     ${optimizerTrackerHTML(bot)}
     <div class="slot-foot">
       <span class="slot-since">held ${esc(heldFor(bot.since) ?? "—")}</span>
+      <span class="slot-since" title="model-based estimate: hours until net PnL reaches the profit-exit target (take_profit_pct × budget) at the projected grid-income rate — assume income, not a guarantee">expected close ${esc(estimateCloseBy(bot))}</span>
       <span style="margin-left:auto"></span>
       <button class="btn btn--sm btn--danger" data-rotate="${esc(bot.slot)}">Rotate</button>
     </div>`;
@@ -433,11 +529,22 @@ function slotCard(bot) {
     }
   });
   // decision-evidence deep link — opens the Decisions tab with the row
-  // pre-expanded so the operator can audit what the swarm evaluated
+  // pre-expanded so the operator can audit what the swarm evaluated.
+  // alt/meta-click copies the id to the clipboard instead (cheaper than
+  // switching tabs just to grab the UUID).
   const decLink = card.querySelector(".slot-decision-link");
   if (decLink) {
     const open = () => openDecisionFromSlot(decLink.dataset.did);
-    decLink.addEventListener("click", open);
+    const copy = async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const id = decLink.dataset.copy;
+      const ok = await copyText(id);
+      toast(ok ? `copied ${id}` : "copy failed", !ok);
+    };
+    decLink.addEventListener("click", (e) => {
+      if (e.altKey || e.metaKey || e.ctrlKey) return copy(e);
+      open();
+    });
     decLink.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
     });
@@ -462,7 +569,7 @@ async function openDecisionFromSlot(did) {
   if (!(next && next.classList.contains("dec-detail"))) {
     const det = document.createElement("tr");
     det.className = "dec-detail";
-    det.innerHTML = `<td colspan="11">${decEvidenceHTML(decisions.find((d) => d.id === did))}</td>`;
+    det.innerHTML = `<td colspan="12">${decEvidenceHTML(decisions.find((d) => d.id === did))}</td>`;
     row.after(det);
   }
 }
@@ -581,80 +688,115 @@ function renderSlotSparklines() {
 /* the big chart modal: 96×1h closes as a line + light area fill, dashed
    channel high/mid/low with right-edge labels, lo/hi/last captions and
    the bar window. Reuses #modal-root; Escape/backdrop/Close all clean
-   the key listener up (confirmDialog's onKey pattern). */
+   the key listener up (confirmDialog's onKey pattern).
+
+   Cold-cache: a slot card with a not-yet-fetched sparkline still has a
+   clickable .slot-spark. The old version rendered the modal with
+   "no chart data cached … yet" while the fetch was in flight in the
+   background, then left the operator staring at it. We now show a
+   spinner, wait for the in-flight fetch (with a 12s timeout — tvcli is
+   normally <3s for a cached Binance candle window), and re-render once
+   data lands. */
 function openMarketModal(key, slot) {
   const parts = String(key).split(":");
   const venue = parts[0] || "?", symbol = parts.slice(1).join(":") || "?";
-  const hit = chartCache[`${key}:1h`];
-  const bars = (hit && hit.data && hit.data.bars) || [];
-  const bots = (lastOverview && lastOverview.bots) || [];
-  const bot = bots.find((b) => String(b.slot) === String(slot)) || null;
-  const ch = (bot && bot.channel) || null;
   const root = $("#modal-root");
   const box = el("div", { class: "modal-backdrop" });
 
   const W = Math.max(320, Math.min(window.innerWidth * 0.9, 900)), H = 360;
   const RX = 62;   // right gutter for channel labels
-  let chartHTML = `<div class="mk-empty">no chart data cached for ${esc(venue)}:${esc(symbol)} yet</div>`;
-  let captions = "";
-  if (bars.length >= 2) {
-    const closes = [];
-    for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
-    if (closes.length >= 2) {
-      let lo = Math.min(...closes), hi = Math.max(...closes);
-      if (isNum(ch && ch.low)) lo = Math.min(lo, Number(ch.low));
-      if (isNum(ch && ch.high)) hi = Math.max(hi, Number(ch.high));
-      if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
-      const padY = (hi - lo) * 0.08;
-      lo -= padY; hi += padY;
-      const T = 10, B = 10;
-      const X = (i) => 8 + (i / (bars.length - 1)) * (W - RX - 14);
-      const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-      let pts = "", area = `M ${X(0).toFixed(1)},${(H - B).toFixed(1)}`;
-      bars.forEach((b, i) => {
-        const c = Number(b && b.c);
-        if (!isFinite(c)) return;
-        pts += `${X(i).toFixed(1)},${Y(c).toFixed(1)} `;
-        area += ` L ${X(i).toFixed(1)},${Y(c).toFixed(1)}`;
-      });
-      area += ` L ${X(bars.length - 1).toFixed(1)},${(H - B).toFixed(1)} Z`;
-      const first = closes[0], last = closes[closes.length - 1];
-      const up = last >= first;
-      let refs = "";
-      const chLine = (v, label) => {
-        if (!isNum(v)) return "";
-        const y = Y(Number(v)).toFixed(1);
-        const lbl = label ? `${esc(label)} ${fmtPrice(v)}` : fmtPrice(v);
-        return `<line x1="8" y1="${y}" x2="${W - RX}" y2="${y}" class="mk-ch"/>`
-          + `<text x="${W - RX + 6}" y="${Number(y) + 3}" class="mk-label">${lbl}</text>`;
-      };
-      if (ch) refs = chLine(ch.high, "hi") + chLine(ch.mid, "mid") + chLine(ch.low, "lo");
-      chartHTML = `
-        <svg class="mk-svg" viewBox="0 0 ${W.toFixed(0)} ${H}" role="img"
-             aria-label="1h closes for ${esc(venue)}:${esc(symbol)}">
-          <path class="mk-area${up ? "" : " mk-area--down"}" d="${area}"/>
-          ${refs}
-          <polyline class="mk-line${up ? "" : " mk-line--down"}" points="${pts.trim()}"/>
-        </svg>`;
-      const t0 = Number(bars[0] && bars[0].t), tN = Number(bars[bars.length - 1] && bars[bars.length - 1].t);
-      captions = `
-        <div class="mk-captions mono">
-          <span>lo <b>${fmtPrice(Math.min(...closes))}</b></span>
-          <span>hi <b>${fmtPrice(Math.max(...closes))}</b></span>
-          <span>last <b>${fmtPrice(last)}</b></span>
-          <span class="mk-delta ${up ? "mk-delta--up" : "mk-delta--down"}">
-            \u0394 ${up ? "+" : "\u2212"}${Math.abs(first ? ((last - first) / first) * 100 : 0).toFixed(2)}%</span>
-          <span class="mk-window">${bars.length} \u00d7 1h bars \u00b7 ${relTimeEpoch(t0)} \u2192 ${relTimeEpoch(tN)}</span>
-        </div>`;
-    }
-  }
 
   const modal = el("div", { class: "modal modal--chart", role: "dialog", "aria-modal": "true" },
     el("h3", {}, `MARKET — ${esc(venue)}:${esc(symbol)}`),
     el("div", { class: "modal-body" },
-      el("div", { class: "mk-chart", html: chartHTML + captions })),
+      el("div", { class: "mk-chart" })),
     el("div", { class: "modal-actions" },
       el("button", { class: "btn", onclick: () => done() }, "Close")));
+  const chartHost = modal.querySelector(".mk-chart");
+
+  function paint(bars) {
+    const bots = (lastOverview && lastOverview.bots) || [];
+    const bot = bots.find((b) => String(b.slot) === String(slot)) || null;
+    const ch = (bot && bot.channel) || null;
+    let chartHTML = `<div class="mk-empty">no chart data cached for ${esc(venue)}:${esc(symbol)} yet</div>`;
+    let captions = "";
+    if (bars.length >= 2) {
+      const closes = [];
+      for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
+      if (closes.length >= 2) {
+        let lo = Math.min(...closes), hi = Math.max(...closes);
+        if (isNum(ch && ch.low)) lo = Math.min(lo, Number(ch.low));
+        if (isNum(ch && ch.high)) hi = Math.max(hi, Number(ch.high));
+        if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
+        const padY = (hi - lo) * 0.08;
+        lo -= padY; hi += padY;
+        const T = 10, B = 10;
+        const X = (i) => 8 + (i / (bars.length - 1)) * (W - RX - 14);
+        const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+        let pts = "", area = `M ${X(0).toFixed(1)},${(H - B).toFixed(1)}`;
+        bars.forEach((b, i) => {
+          const c = Number(b && b.c);
+          if (!isFinite(c)) return;
+          pts += `${X(i).toFixed(1)},${Y(c).toFixed(1)} `;
+          area += ` L ${X(i).toFixed(1)},${Y(c).toFixed(1)}`;
+        });
+        area += ` L ${X(bars.length - 1).toFixed(1)},${(H - B).toFixed(1)} Z`;
+        const first = closes[0], last = closes[closes.length - 1];
+        const up = last >= first;
+        let refs = "";
+        const chLine = (v, label) => {
+          if (!isNum(v)) return "";
+          const y = Y(Number(v)).toFixed(1);
+          const lbl = label ? `${esc(label)} ${fmtPrice(v)}` : fmtPrice(v);
+          return `<line x1="8" y1="${y}" x2="${W - RX}" y2="${y}" class="mk-ch"/>`
+            + `<text x="${W - RX + 6}" y="${Number(y) + 3}" class="mk-label">${lbl}</text>`;
+        };
+        if (ch) refs = chLine(ch.high, "hi") + chLine(ch.mid, "mid") + chLine(ch.low, "lo");
+        chartHTML = `
+          <svg class="mk-svg" viewBox="0 0 ${W.toFixed(0)} ${H}" role="img"
+               aria-label="1h closes for ${esc(venue)}:${esc(symbol)}">
+            <path class="mk-area${up ? "" : " mk-area--down"}" d="${area}"/>
+            ${refs}
+            <polyline class="mk-line${up ? "" : " mk-line--down"}" points="${pts.trim()}"/>
+          </svg>`;
+        const t0 = Number(bars[0] && bars[0].t), tN = Number(bars[bars.length - 1] && bars[bars.length - 1].t);
+        captions = `
+          <div class="mk-captions mono">
+            <span>lo <b>${fmtPrice(Math.min(...closes))}</b></span>
+            <span>hi <b>${fmtPrice(Math.max(...closes))}</b></span>
+            <span>last <b>${fmtPrice(last)}</b></span>
+            <span class="mk-delta ${up ? "mk-delta--up" : "mk-delta--down"}">
+              \u0394 ${up ? "+" : "\u2212"}${Math.abs(first ? ((last - first) / first) * 100 : 0).toFixed(2)}%</span>
+            <span class="mk-window">${bars.length} \u00d7 1h bars \u00b7 ${relTimeEpoch(t0)} \u2192 ${relTimeEpoch(tN)}</span>
+          </div>`;
+      }
+    }
+    chartHost.innerHTML = chartHTML + captions;
+  }
+
+  // First paint from the cache; if cold, request a fetch + show a spinner.
+  const cached = chartCache[`${key}:1h`];
+  const cachedBars = (cached && cached.data && cached.data.bars) || [];
+  if (cachedBars.length >= 2) {
+    paint(cachedBars);
+  } else {
+    chartHost.innerHTML = `<div class="mk-empty"><span class="spinner"></span> fetching ${esc(venue)}:${esc(symbol)} 1h bars…</div>`;
+    // Fire (or wait on an in-flight) fetch with a bounded timeout — never
+    // strand the operator on a spinner if tvcli is down.
+    let timer;
+    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("timeout")), 12000); });
+    const work = fetchChart(venue, symbol, "1h", 96)
+      .then((d) => (d && d.bars) || [])
+      .catch(() => null);
+    Promise.race([work, timeout]).then((bars) => {
+      clearTimeout(timer);
+      // If the user closed the modal in the meantime, chartHost is no
+      // longer in the DOM — skip the second paint.
+      if (!chartHost.isConnected) return;
+      paint(bars && bars.length >= 2 ? bars : []);
+    });
+  }
+
   function done() {
     root.innerHTML = "";
     document.removeEventListener("keydown", onKey);
@@ -773,6 +915,25 @@ function renderFleet(ov, st) {
     if (!slots.some((s) => String(s.slot) === slotKey)) board.append(slotCard(bot));
   }
 
+  // Populate the controls-panel "force rotate one slot" select whenever
+  // the fleet is non-empty. Hidden otherwise — pointless to expose
+  // rotation when there are no active bots to rotate.
+  const rotRow = $("#ctl-rotate-row");
+  const rotSel = $("#ctl-rotate-slot");
+  if (rotRow && rotSel) {
+    const bots = (ov.bots || []).filter((b) => b && b.slot != null);
+    if (!bots.length) {
+      rotRow.hidden = true;
+    } else {
+      rotRow.hidden = false;
+      const cur = rotSel.value;
+      rotSel.innerHTML = bots.map((b) => {
+        const lbl = `slot ${b.slot} — ${esc(b.venue || "")}:${esc(b.symbol || "?")} (${esc(b.grid_type || "—")})`;
+        return `<option value="${esc(b.slot)}">${lbl}</option>`;
+      }).join("");
+      if (cur && bots.some((b) => String(b.slot) === cur)) rotSel.value = cur;
+    }
+  }
   // banners
   const banners = [];
   const d = ov.daemon || {};
@@ -802,6 +963,30 @@ function renderFleet(ov, st) {
   wire("#b-start-paper", () => ctlStart(true));
 }
 
+/* Wire the global "Rotate slot" control once — the button is a fixed
+   element in the controls panel, so we attach a single delegated
+   handler at boot. The dropdown is repopulated by renderFleet(). */
+async function ctlRotateFromPanel() {
+  const sel = $("#ctl-rotate-slot");
+  if (!sel || !sel.value) { toast("no slot selected", true); return; }
+  const slot = Number(sel.value);
+  const bot = (lastOverview && lastOverview.bots || []).find((b) => Number(b.slot) === slot);
+  if (!bot) { toast(`slot ${slot} not active`, true); return; }
+  const { ok } = await confirmDialog({
+    title: `Rotate slot ${slot}`,
+    body: [el("div", {}, `Stop, close and delete `,
+      el("code", {}, `${bot.venue || ""}:${bot.symbol || ""}`),
+      `, then deploy the best challenger on the next rescreen. Per-token cooldown applies.`)],
+    label: "Queue rotation", danger: true,
+  });
+  if (!ok) return;
+  try {
+    await api("/api/ctl/rotate", { method: "POST", body: { slot } });
+    toast(`rotation queued for slot ${slot} — applied on next rescreen.`);
+    loadOverview();
+  } catch (e) { toast(`rotate failed: ${e.data && e.data.error || e.message}`, true); }
+}
+
 function renderFeed(journal) {
   const feed = $("#feed");
   const rows = [...journal].reverse().slice(0, 60); // newest first
@@ -820,14 +1005,25 @@ function renderScreen(screen) {
     box.innerHTML = `<div class="empty-note" style="padding:14px;">No rescreen run card yet — wait for the next cycle or force one.</div>`;
     return;
   }
-  box.innerHTML = (screen.top || []).slice(0, 5).map((c, i) => {
+  // the latest rescreen's run-card stem (if reports/ is populated). The
+  // rail cards are buttons that jump to the Run cards tab and open it.
+  const stem = screen.run_card_stem || null;
+  // score history sparkline: small line of the last N cycles' top score,
+  // oldest → newest. Renders inside the rail head as a chip-sized band so
+  // a glance answers "is screening improving or degrading?" without
+  // leaving the Fleet view.
+  const hist = Array.isArray(screen.score_history) ? screen.score_history : [];
+  const histSvg = hist.length >= 2 ? scoreSparklineSVG(hist) : "";
+  const itemsHtml = (screen.top || []).slice(0, 5).map((c, i) => {
     const bonus = c.confluence_bonus;
     const okSkills = c.confluence_ok;
     const tvcliChip = (bonus != null || okSkills != null)
       ? `<span class="badge ${(bonus || 0) > 0 ? "badge--ok" : "badge--dim"}" title="${okSkills != null ? `${okSkills}/6 tvcli skills returned a result` : "tvcli confluence"} · +${fmtNum(bonus ?? 0, 1)} to score">tvcli +${fmtNum(bonus ?? 0, 1)}</span>`
       : "";
+    const click = stem ? `data-stem="${esc(stem)}" data-rank="${i + 1}" role="button" tabindex="0"` : "";
+    const cursor = stem ? "cursor:pointer" : "";
     return `
-    <div class="candidate">
+    <div class="candidate" ${click} style="${cursor}" title="${stem ? `open latest rescreen run card (rank #${i + 1})` : "no run card available"}">
       <span class="rank">${String(i + 1).padStart(2, "0")}</span>
       <span class="venue-tag venue-tag--${esc(c.venue)}">${esc(c.venue)}</span>
       <span class="sym">${esc(c.symbol)}</span>
@@ -836,6 +1032,49 @@ function renderScreen(screen) {
       <span class="score">${esc(fmtNum(c.score_final, 1))}</span>
     </div>`;
   }).join("");
+  box.innerHTML =
+    (histSvg ? `<div class="screen-trend" title="top-of-screen score over the last ${hist.length} rescreen cycles">${histSvg}<span class="mono" style="color:var(--ink-faint);font-size:10.5px">${fmtNum(hist[0].score, 1)} → ${fmtNum(hist[hist.length - 1].score, 1)}</span></div>` : "") +
+    itemsHtml;
+  if (stem) {
+    for (const node of box.querySelectorAll(".candidate[data-stem]")) {
+      const open = () => jumpToRunCard(node.dataset.stem);
+      node.addEventListener("click", open);
+      node.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+      });
+    }
+  }
+}
+
+/* Jump to the Run cards tab and open one stem. The tab's normal load
+   path is fire-and-forget; we await it so the run card is rendered
+   before we tell the page to scroll. */
+async function jumpToRunCard(stem) {
+  selectView("reports");
+  if (typeof openRunCard === "function") {
+    try { await openRunCard(stem); } catch (_) { /* toast already shown */ }
+  }
+}
+
+/* Tiny inline SVG sparkline for the "last screen" rail — top-of-screen
+   score over the last N rescreen cycles. Green when trending up, crimson
+   when trending down (last vs first), gray when flat. */
+function scoreSparklineSVG(history) {
+  if (!Array.isArray(history) || history.length < 2) return "";
+  const W = 110, H = 18, P = 2;
+  const scores = history.map((h) => Number(h.score)).filter(isFinite);
+  if (scores.length < 2) return "";
+  const lo = Math.min(...scores), hi = Math.max(...scores);
+  const span = Math.max(1e-6, hi - lo);
+  const X = (i) => P + (i / (scores.length - 1)) * (W - 2 * P);
+  const Y = (v) => P + (1 - (v - lo) / span) * (H - 2 * P);
+  const pts = scores.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
+  const first = scores[0], last = scores[scores.length - 1];
+  const up = last > first, flat = last === first;
+  const stroke = flat ? "var(--ink-faint)" : up ? "var(--teal)" : "var(--crimson)";
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true" class="screen-spark">
+    <polyline fill="none" stroke="${stroke}" stroke-width="1.2" points="${pts}"/>
+  </svg>`;
 }
 
 /* the LLM intelligence lane: the daemon's periodic market brief over the
@@ -905,28 +1144,27 @@ async function renderLlmBrains() {
       <span class="ready-val">${r.ok ? `${r.latency_ms}ms` : "down"}</span>
     </div>`;
   }).join("");
-  // Role → provider pin matrix (which agent uses which model)
-  const swarmRoles = (d.role_keys || []).filter((r) => r !== "optimizer");
-  const arbRoles = (d.role_keys || []).filter((r) => r === "optimizer");
-  const roleRow = (label, roleKey, fallback) => {
-    const pinned = roles[roleKey];
-    const using = pinned || fallback || "follow chain";
-    const isArb = roleKey === "optimizer";
-    const title = isArb
-      ? `Pinned provider for the fast-lane arbiter. Default = ${arbProv}.`
-      : `Pinned provider for ${roleKey}. Default follows the chain.`;
-    return `<div class="row"><span class="k" title="${esc(title)}">${esc(label)}</span>
+  // Role → provider pin matrix (which agent uses which model). The arbiter
+  // (fast-lane capital reallocation) is NOT in the swarm role list — it is
+  // driven by `config.optimizer.llm_provider` and surfaced separately as
+  // `arbiter_provider` so the operator can answer "is Mistral actually
+  // doing the fast lane right now?" at a glance.
+  const swarmRoles = d.role_keys || [];
+  const arbPinned = roles.optimizer;
+  const arbUsing = arbPinned || arbProv || "mistral";
+  const roleRow = (label, roleKey) => {
+    const using = roles[roleKey] || "follow chain";
+    return `<div class="row"><span class="k" title="Pinned provider for ${roleKey}. Default follows the chain.">${esc(label)}</span>
       <span class="v">${using === "follow chain"
         ? `<span class="badge badge--dim">follow chain</span>`
         : `<span class="badge badge--violet">${esc(using)}</span>`}</span></div>`;
   };
-  const swarmRows = swarmRoles.map((r) => roleRow(r.replace(/_/g, " "), r, null)).join("");
-  const arbRow = arbRoles.length
-    ? roleRow("arbiter (fast lane)", "optimizer", arbProv)
-    : "";
+  const arbRow = `<div class="row"><span class="k" title="Pinned provider for the fast-lane arbiter. Default = ${esc(arbProv || 'mistral')}. Override: config.optimizer.llm_provider.">arbiter (fast lane)</span>
+    <span class="v"><span class="badge badge--violet">${esc(arbUsing)}</span>${arbPinned ? "" : ` <span class="mono" style="color:var(--ink-faint);font-size:10.5px">default</span>`}</span></div>`;
+  const swarmRows = swarmRoles.map((r) => roleRow(r.replace(/_/g, " "), r)).join("");
   box.innerHTML = `
     <div class="readiness-cells" style="margin-bottom:8px">${provRow}</div>
-    <div class="mini-kv">${swarmRows}${arbRow}</div>`;
+    <div class="mini-kv">${arbRow}${swarmRows}</div>`;
 }
 
 function renderSummary(ov) {
@@ -937,6 +1175,11 @@ function renderSummary(ov) {
   const oth = c.other || {}, pre = c.premium || {};
   const lim = r.account_limits || {};
   const dashGrid = lim.gridBots || {};
+  const real = r.real_profiles || [];
+  const realLine = real.length
+    ? `<div class="row"><span class="k" style="color:var(--crimson)">Real-money profiles</span>
+        <span class="v" style="color:var(--crimson)" title="real-money profile(s) loaded — daemon must never route a paper decision here">${real.length} <b>${real.map((p) => esc(p.name || p.code || "?"))}</b></span></div>`
+    : `<div class="row"><span class="k">Real-money profiles</span><span class="v" title="no real-money profile loaded — safe to operate">0 (paper only)</span></div>`;
   const capRow = r.reachable
     ? `<div class="row"><span class="k">Capacity</span><span class="v" title="enforced by grid_bots/upsert per exchange tier">${oth.active}/${oth.max} non-prem · ${pre.active}/${pre.max} prem</span></div>
        <div class="row"><span class="k">Dashboard gridBots</span><span class="v" title="dashboard view — does not reflect the per-tier cap">${esc(dashGrid.active ?? "—")}/${esc(dashGrid.max ?? "—")}</span></div>`
@@ -948,6 +1191,7 @@ function renderSummary(ov) {
     <div class="row"><span class="k">Rescreen cadence</span><span class="v">${esc(cd.rescreen_minutes ?? "—")} min</span></div>
     <div class="row"><span class="k">Health poll</span><span class="v">${esc(cd.watch_interval_s ?? "—")} s</span></div>
     <div class="row"><span class="k">Archetypes tracked</span><span class="v">${Object.keys((ov.reliability || {}).archetypes || {}).length}</span></div>
+    ${realLine}
     ${capRow}`;
 }
 
@@ -989,14 +1233,23 @@ function fleetPnlData(ov, st) {
   return out;
 }
 
+/* max age (ms) we'll trust a journal-derived demo-cap read for. Veto
+   events older than this are ignored so the meter doesn't keep saying
+   "5/5 — deploys blocked" ten minutes after the daemon unstuck. */
+const DEMO_CAP_VETO_TTL_MS = 10 * 60 * 1000;
+
 function demoCapData(st, ov) {
-  /* daemon demo_cap block, else parsed from the demo-cap-veto journal
-     message ("cap 5/5"), else counted actives with unknown cap. */
+  /* daemon demo_cap block, else parsed from a RECENT demo-cap-veto journal
+     message ("cap 5/5"), else counted actives with unknown cap. The veto
+     source is tagged "veto" + a `veto_age_min` so the UI can label the
+     meter "live" vs "veto (Nm ago)" instead of mis-rendering a stale
+     veto as the current cap. */
   const d = (st && typeof st.demo_cap === "object" && st.demo_cap) || null;
   if (d && isNum(d.active)) {
     return { active: Number(d.active),
       cap: isNum(d.cap) ? Number(d.cap) : null,
-      headroom: isNum(d.headroom) ? Number(d.headroom) : null };
+      headroom: isNum(d.headroom) ? Number(d.headroom) : null,
+      source: "live" };
   }
   const active = Object.keys((st && st.active_bots) || {}).length;
   const tail = (st && st.journal_tail) || (ov && ov.journal_tail) || [];
@@ -1004,10 +1257,16 @@ function demoCapData(st, ov) {
     const e = tail[i] || {};
     if (e.kind === "demo-cap-veto") {
       const m = /(\d+)\s*\/\s*(\d+)/.exec(String(e.msg || ""));
-      if (m) return { active: Number(m[1]), cap: Number(m[2]), headroom: Number(m[2]) - Number(m[1]), vetoed: true };
+      if (!m) continue;
+      const at = e.at ? Date.parse(e.at) : 0;
+      if (!at || (Date.now() - at) > DEMO_CAP_VETO_TTL_MS) continue;
+      return { active: Number(m[1]), cap: Number(m[2]),
+        headroom: Number(m[2]) - Number(m[1]), vetoed: true,
+        source: "veto",
+        veto_age_min: Math.round((Date.now() - at) / 60000) };
     }
   }
-  return { active, cap: null, headroom: null, vetoed: false };
+  return { active, cap: null, headroom: null, vetoed: false, source: "count" };
 }
 
 function renderFleetHeader(ov, st) {
@@ -1038,18 +1297,23 @@ function renderFleetHeader(ov, st) {
 
   // demo-cap meter: 5/5 means every new deploy is vetoed at the platform cap
   let capCell;
+  const sourceTag = cap.source === "veto"
+    ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px"> · veto ${cap.veto_age_min}m ago</span>`
+    : cap.source === "count"
+      ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px"> · count only</span>`
+      : "";
   if (cap.cap != null && cap.cap > 0) {
     const full = cap.active >= cap.cap;
     const w = Math.min(100, (cap.active / cap.cap) * 100);
-    capCell = `<div class="pnl-cell cap-meter${full ? " cap-meter--full" : ""}" title="paper/demo grid-bot platform cap${cap.headroom != null ? ` \u00b7 headroom ${cap.headroom}` : ""}">
+    capCell = `<div class="pnl-cell cap-meter${full ? " cap-meter--full" : ""}" title="paper/demo grid-bot platform cap${cap.headroom != null ? ` · headroom ${cap.headroom}` : ""}${cap.source === "veto" ? " · last demo-cap-veto in journal tail" : ""}">
       <div class="m-label">demo cap</div>
       <div class="cap-bar"><div class="cap-fill" style="width:${w.toFixed(1)}%"></div></div>
-      <div class="cap-label">${full ? `<b>demo bots ${cap.active}/${cap.cap} \u2014 deploys blocked</b>` : `demo bots ${cap.active}/${cap.cap}`}</div>
+      <div class="cap-label">${full ? `<b>demo bots ${cap.active}/${cap.cap} — deploys blocked</b>` : `demo bots ${cap.active}/${cap.cap}`}${sourceTag}</div>
     </div>`;
   } else {
     capCell = `<div class="pnl-cell" title="cap not reported by this daemon build">
       <div class="m-label">demo cap</div>
-      <div class="m-value m-value--dim">${cap.active} paper bots \u00b7 cap unknown</div>
+      <div class="m-value m-value--dim">${cap.active} paper bots · cap unknown</div>
       <div class="pnl-sub pnl-sub--faint">demo_cap block arrives with the daemon restart</div></div>`;
   }
 
@@ -1228,6 +1492,7 @@ async function loadPnlTimeline() {
 /* ── decisions ────────────────────────────────────────────────────── */
 
 let decisions = [];
+let decSort = { key: "at", dir: -1 };   // default: newest first
 
 async function loadDecisions() {
   try {
@@ -1236,17 +1501,65 @@ async function loadDecisions() {
   renderDecisions();
 }
 
+function _decValue(r, key) {
+  if (key === "realized") {
+    const o = r.outcome;
+    return (o && isNum(o.realized_pnl)) ? Number(o.realized_pnl) : null;
+  }
+  if (key === "conf") return (r.evidence && isNum(r.evidence.confidence))
+    ? Number(r.evidence.confidence) : null;
+  const v = r[key];
+  return isNum(v) ? Number(v) : (v == null ? null : String(v).toLowerCase());
+}
+
+function _decCompare(a, b, key, dir) {
+  const va = _decValue(a, key);
+  const vb = _decValue(b, key);
+  // nulls always last, regardless of direction
+  if (va == null && vb == null) return 0;
+  if (va == null) return 1;
+  if (vb == null) return -1;
+  if (va < vb) return -1 * dir;
+  if (va > vb) return 1 * dir;
+  return 0;
+}
+
 function renderDecisions() {
   const q = ($("#dec-filter").value || "").toLowerCase();
   const state = $("#dec-state").value;
-  const rows = decisions.filter((r) => {
+  let rows = decisions.filter((r) => {
     if (state === "open" && r.outcome) return false;
     if (state === "closed" && !r.outcome) return false;
     if (!q) return true;
     return [r.symbol, r.venue, r.regime, r.grid_type, r.decision, r.id]
       .some((v) => String(v || "").toLowerCase().includes(q));
   });
+  rows = rows.slice().sort((a, b) => _decCompare(a, b, decSort.key, decSort.dir));
   $("#dec-count").textContent = `${rows.length} shown · ${decisions.length} total`;
+  const arrow = (k) => decSort.key === k
+    ? `<span style="margin-left:4px;color:var(--teal)">${decSort.dir < 0 ? "▾" : "▴"}</span>` : "";
+  const sortable = (k, label) => `<th class="dec-sort" data-key="${k}" role="button" tabindex="0">${label}${arrow(k)}</th>`;
+  const thead = document.querySelector("#view-decisions thead");
+  if (thead) {
+    thead.innerHTML = `<tr>
+      ${sortable("id", "id")}${sortable("at", "at")}${sortable("symbol", "market")}
+      ${sortable("regime", "regime")}${sortable("grid_type", "grid")}
+      ${sortable("decision", "call")}${sortable("score_final", "score")}
+      ${sortable("step_pct", "step")}${sortable("slot", "slot")}${sortable("state", "state")}
+      ${sortable("realized", "realized")}<th>rationale</th></tr>`;
+    for (const th of thead.querySelectorAll(".dec-sort")) {
+      const k = th.dataset.key;
+      const onSort = () => {
+        if (decSort.key === k) decSort.dir = -decSort.dir;
+        else { decSort.key = k; decSort.dir = (k === "at" || k === "id") ? -1 : 1; }
+        renderDecisions();
+      };
+      th.addEventListener("click", onSort);
+      th.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onSort(); }
+      });
+    }
+  }
   $("#dec-body").innerHTML = rows.map((r) => {
     const outcome = r.outcome;
     const stateBadge = outcome
@@ -1257,8 +1570,8 @@ function renderDecisions() {
     const conf = (r.evidence || {}).confidence;
     const confChip = conf != null
       ? `<span class="badge badge--dim" title="facilitator confidence">c ${fmtNum(conf, 2)}</span>` : "";
-    return `<tr class="dec-row${noGo ? " dec-row--nogo" : ""}" data-id="${esc(r.id)}" title="click to expand the evidence the agents evaluated against">
-      <td class="td-mono">${esc(r.id)}</td>
+    return `<tr class="dec-row${noGo ? " dec-row--nogo" : ""}" data-id="${esc(r.id)}" title="click to expand the evidence the agents evaluated against — alt-click on id to copy">
+      <td class="td-mono"><span class="dec-id mono" data-copy="${esc(r.id)}" role="button" tabindex="0" title="alt-click to copy">${esc(r.id)}</span></td>
       <td class="td-mono">${esc(String(r.at || "").replace("T", " ").slice(5, 16))}</td>
       <td class="td-mono"><span class="venue-tag venue-tag--${esc(r.venue)}">${esc(r.venue)}</span>:${esc(r.symbol)}</td>
       <td><div class="regime-cell"><span>${esc(r.regime || "—")}</span>${r.llm_degraded
@@ -1269,12 +1582,54 @@ function renderDecisions() {
       <td class="td-mono">${esc(fmtNum(r.step_pct, 3))}%</td>
       <td class="td-mono">${esc(r.slot ?? "—")}</td>
       <td>${stateBadge}</td>
+      <td class="td-mono ${outcome && isNum(outcome.realized_pnl) ? (outcome.realized_pnl >= 0 ? "m-value--good" : "m-value--bad") : "m-value--dim"}">${outcome && isNum(outcome.realized_pnl) ? fmtSignedUsd(outcome.realized_pnl) : "—"}</td>
       <td><div class="rationale" title="${esc(r.rationale || "")}">${esc(r.rationale || "—")}</div></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="11"><div class="empty-note">No decisions match. The ledger fills as the daemon deliberates.</div></td></tr>`;
+  }).join("") || `<tr><td colspan="12"><div class="empty-note">No decisions match. The ledger fills as the daemon deliberates.</div></td></tr>`;
+}
+
+/* CSV export of the currently-filtered (and currently-sorted) decision
+   list. Browser-side Blob so a 400-row export doesn't round-trip the
+   server; the data is already in the in-memory `decisions` array. */
+function exportDecisionsCSV() {
+  const q = ($("#dec-filter").value || "").toLowerCase();
+  const state = $("#dec-state").value;
+  let rows = decisions.filter((r) => {
+    if (state === "open" && r.outcome) return false;
+    if (state === "closed" && !r.outcome) return false;
+    if (!q) return true;
+    return [r.symbol, r.venue, r.regime, r.grid_type, r.decision, r.id]
+      .some((v) => String(v || "").toLowerCase().includes(q));
+  });
+  rows = rows.slice().sort((a, b) => _decCompare(a, b, decSort.key, decSort.dir));
+  const cols = ["id", "at", "venue", "symbol", "regime", "grid_type",
+    "decision", "score_final", "step_pct", "slot",
+    "rationale", "outcome_realized", "outcome_reason"];
+  const escCsv = (v) => {
+    if (v == null) return "";
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const lines = [cols.join(",")];
+  for (const r of rows) {
+    lines.push(cols.map((c) => {
+      if (c === "outcome_realized") return escCsv((r.outcome || {}).realized_pnl);
+      if (c === "outcome_reason") return escCsv((r.outcome || {}).reason);
+      return escCsv(r[c]);
+    }).join(","));
+  }
+  const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `decisions-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "")}.csv`;
+  document.body.append(a); a.click(); document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  toast(`exported ${rows.length} decision${rows.length === 1 ? "" : "s"} to ${a.download}`);
 }
 $("#dec-filter").addEventListener("input", renderDecisions);
 $("#dec-state").addEventListener("change", renderDecisions);
+$("#dec-export").addEventListener("click", exportDecisionsCSV);
 
 /* ── decision evidence panel (row expansion) ──────────────────────── */
 
@@ -1367,6 +1722,16 @@ function decEvidenceHTML(r) {
 
 $("#dec-body").addEventListener("click", async (e) => {
   if (e.target.closest("a,button")) return;
+  // alt/meta-click on a decision id copies it; otherwise fall through to
+  // the row-expansion logic below.
+  const idNode = e.target.closest("[data-copy]");
+  if (idNode && (e.altKey || e.metaKey || e.ctrlKey)) {
+    e.preventDefault(); e.stopPropagation();
+    const id = idNode.dataset.copy;
+    const ok = await copyText(id);
+    toast(ok ? `copied ${id}` : "copy failed", !ok);
+    return;
+  }
   const tr = e.target.closest("tr.dec-row");
   if (!tr) return;
   const next = tr.nextElementSibling;
@@ -1391,7 +1756,7 @@ $("#dec-body").addEventListener("click", async (e) => {
   }
   const det = document.createElement("tr");
   det.className = "dec-detail";
-  det.innerHTML = `<td colspan="11">${decEvidenceHTML(row)}</td>`;
+  det.innerHTML = `<td colspan="12">${decEvidenceHTML(row)}</td>`;
   tr.after(det);
 });
 
@@ -1453,16 +1818,38 @@ async function openRunCard(stem) {
 }
 
 /* compact "what did the loop DO this cycle?" header for a run card.
-   works for both rescreen and optimizer cards (different schemas:
-   rescreen uses {screen, deliberations, guard, deployments, rotations,
-   observed, reliability, caveats}; optimizer uses
-   {screen, hunt, arbiter, swaps, vetoes, capital, caveats}). */
+   Walks known-alias key paths so the same code renders both the rescreen
+   and optimizer card schemas (and survives daemon-side renames). The
+   alias table is the only place to update when a new schema lands. */
+const RUN_CARD_KEYS = {
+  hunt_stats:        ["screen.hunt_stats", "hunt.stats"],
+  hunt_top:          ["hunt.top3", "screen.top3"],
+  capital_committed: ["capital.committed_usd", "screen.capital.committed_usd"],
+  capital_ceiling:   ["capital.deployable_ceiling_usd", "screen.capital.deployable_ceiling_usd"],
+  capital_idle:      ["capital.idle_committed_usd", "screen.capital.idle_committed_usd"],
+  capital_free:      ["capital.free_slots", "screen.capital.free_slots"],
+  arbiter:           ["arbiter", "fast_arbiter.arbiter"],
+  swaps:             ["swaps", "fast_arbiter.swaps"],
+  vetoes:            ["vetoes", "fast_arbiter.vetoes"],
+};
+function _pick(obj, paths) {
+  for (const p of paths) {
+    const parts = p.split(".");
+    let v = obj;
+    for (const k of parts) {
+      if (v == null || typeof v !== "object") { v = undefined; break; }
+      v = v[k];
+    }
+    if (v !== undefined) return v;
+  }
+  return null;
+}
+
 function renderRunCardStats(j) {
   const parts = [];
-  // tvcli /hunt skill stats — present on both schemas but in different
-  // nesting (rescreen: screen.hunt_stats, optimizer: hunt.stats)
-  const hs = ((j.screen || {}).hunt_stats) || ((j.hunt || {}).stats) || {};
-  const skills = hs.skills || {};
+  // tvcli /hunt skill stats — schema-agnostic via _pick
+  const hs = _pick(j, RUN_CARD_KEYS.hunt_stats) || {};
+  const skills = (hs && typeof hs.skills === "object") ? hs.skills : {};
   const sk = Object.entries(skills);
   if (sk.length) {
     const ok = sk.filter(([, s]) => s.hunted > 0 && s.hunted === s.ok).length;
@@ -1498,20 +1885,25 @@ function renderRunCardStats(j) {
   if (deps.length) {
     parts.push(`<div class="row"><span class="k">deployments</span><span class="v">${deps.length} grid(s) — ${deps.map((d) => `${esc(d.venue || "")}:${esc(d.symbol || "?")} ${esc(d.grid_type || "")}`).join(", ")}</span></div>`);
   }
-  // optimizer card schema — hunt / arbiter / swaps / capital
-  const cap = j.capital || {};
-  if (cap.committed_usd != null) {
-    parts.push(`<div class="row"><span class="k">capital</span><span class="v">${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd || 0)} idle</span></div>`);
+  // optimizer card schema — capital / arbiter / swaps / vetoes (alias-tolerant)
+  const capCommitted = _pick(j, RUN_CARD_KEYS.capital_committed);
+  if (capCommitted != null) {
+    const capCeiling = _pick(j, RUN_CARD_KEYS.capital_ceiling);
+    const capIdle = _pick(j, RUN_CARD_KEYS.capital_idle);
+    const capFree = _pick(j, RUN_CARD_KEYS.capital_free);
+    parts.push(`<div class="row"><span class="k">capital</span><span class="v">${fmtUsd(capCommitted)} committed / ${fmtUsd(capCeiling)} ceiling · ${fmtUsd(capIdle || 0)} idle${capFree != null ? ` · ${esc(capFree)} free slot(s)` : ""}</span></div>`);
   }
-  const ar = j.arbiter;
+  const ar = _pick(j, RUN_CARD_KEYS.arbiter);
   if (ar && typeof ar === "object") {
     parts.push(`<div class="row"><span class="k">arbiter</span><span class="v">${ar.approve === true ? '<span class="badge badge--ok">approve</span>' : '<span class="badge badge--bad">reject</span>'} · ${esc(ar.slot || "—")} → ${esc(ar.challenger || "—")} · ${esc(ar.llm || ar.provider || "mistral")}${ar.llm_degraded === true ? ' · <span class="badge badge--warn">degraded</span>' : ""}</span></div>`);
   }
-  if (Array.isArray(j.swaps) && j.swaps.length) {
-    parts.push(`<div class="row"><span class="k">swaps</span><span class="v">${j.swaps.map((s) => `<span class="badge ${s.ok ? "badge--ok" : "badge--bad"}">${esc(s.slot || "?")}${s.ok ? "" : " veto"}</span>`).join(" ")}</span></div>`);
+  const swaps = _pick(j, RUN_CARD_KEYS.swaps);
+  if (Array.isArray(swaps) && swaps.length) {
+    parts.push(`<div class="row"><span class="k">swaps</span><span class="v">${swaps.map((s) => `<span class="badge ${s.ok ? "badge--ok" : "badge--bad"}">${esc(s.slot || "?")}${s.ok ? "" : " veto"}</span>`).join(" ")}</span></div>`);
   }
-  if (Array.isArray(j.vetoes) && j.vetoes.length) {
-    parts.push(`<div class="row"><span class="k">vetoes</span><span class="v">${j.vetoes.map((v) => `<span class="badge badge--warn">${esc(v.slot || "?")}</span>`).join(" ")}</span></div>`);
+  const vetoes = _pick(j, RUN_CARD_KEYS.vetoes);
+  if (Array.isArray(vetoes) && vetoes.length) {
+    parts.push(`<div class="row"><span class="k">vetoes</span><span class="v">${vetoes.map((v) => `<span class="badge badge--warn">${esc(v.slot || "?")}</span>`).join(" ")}</span></div>`);
   }
   if (!parts.length) {
     return `<div class="empty-note" style="padding:6px 14px">No stats block on this card (older schema — view JSON below).</div>`;
@@ -1638,8 +2030,72 @@ function renderOptimizer(d) {
     </tr>`;
   };
 
-  $("#opt-pending-body").innerHTML = pending.map((r) => row(r, false)).join("") ||
+  // Pending: group by slot (then venue+symbol) so a slot that has been
+  // re-evaluated several times in a row shows ONE row with the latest rec
+  // + an expandable history. Most slots have 0–1 pending; the ones that
+  // have been oscillating across the apply gate are the interesting case.
+  const bySlot = new Map();
+  for (const r of pending) {
+    const key = `${r.slot ?? "—"}|${r.venue}|${r.symbol}`;
+    if (!bySlot.has(key)) bySlot.set(key, []);
+    bySlot.get(key).push(r);
+  }
+  const groupRows = [];
+  for (const [key, recs] of bySlot) {
+    recs.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
+    const [head, ...rest] = recs;
+    const gKey = `g-${key.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+    const latestDelta = isNum(head.expected_delta_pct) ? Number(head.expected_delta_pct) : null;
+    const deltaCls = latestDelta == null ? "m-value--dim"
+      : latestDelta > 0 ? "m-value--good" : "m-value--bad";
+    const latestConf = isNum(head.confidence) ? fmtNum(head.confidence, 2) : "—";
+    const blocked = blockedByBadge(head.blocked_by);
+    const at = esc(String(head.at || "").replace("T", " ").slice(5, 16));
+    const slot = esc(head.slot ?? "—");
+    const market = `<span class="venue-tag venue-tag--${esc(head.venue)}">${esc(head.venue || "")}</span>:${esc(head.symbol || "?")}`;
+    const rec = `<span class="badge badge--violet">${esc(head.recommendation || "?")}</span>`;
+    const delta = `<span class="${deltaCls}">${latestDelta == null ? "—" : `${latestDelta >= 0 ? "+" : ""}${fmtNum(latestDelta, 2)}%`}</span>`;
+    const hasMore = rest.length > 0;
+    const chev = hasMore
+      ? `<span class="rel-chevron" aria-hidden="true">▸</span>`
+      : `<span class="rel-chevron" style="visibility:hidden">▸</span>`;
+    const trigger = esc(head.trigger || "—");
+    const blockedCell = blocked;
+    const rationale = `<div class="rationale" title="${esc(head.rationale || "")}">${esc(head.rationale || "—")}</div>`;
+    groupRows.push(`<tr class="rec-group" data-gkey="${gKey}" data-count="${recs.length}">
+      <td class="td-mono" title="${esc(head.at || "")}">${at}</td>
+      <td class="td-mono">${slot}</td>
+      <td class="td-mono">${market}</td>
+      <td>${rec}</td>
+      <td class="td-mono">${delta}</td>
+      <td class="td-mono">${latestConf}</td>
+      <td class="td-mono">${trigger}</td>
+      <td>${blockedCell}</td>
+      <td>${chev} ${hasMore ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px">+${rest.length} earlier</span>` : ""} ${rationale}</td>
+    </tr>`);
+    if (hasMore) {
+      const hist = rest.map((r) => row(r, false)).join("");
+      groupRows.push(`<tr class="rec-detail" data-gkey="${gKey}" hidden><td colspan="9">
+        <div class="empty-note" style="margin:0 0 6px;font-size:11px">earlier recs for this slot (oldest first)</div>
+        <table class="ledger rec-detail-table">${hist}</table>
+      </td></tr>`);
+    }
+  }
+  $("#opt-pending-body").innerHTML = groupRows.join("") ||
     `<tr><td colspan="9"><div class="empty-note">No pending recommendations \u2014 the position optimizer emits one when a bot\u2019s grid is off-price by more than the drift threshold (15 min cadence).</div></td></tr>`;
+  // expand/collapse for grouped recs
+  for (const head of document.querySelectorAll("#opt-pending-body tr.rec-group")) {
+    head.addEventListener("click", (e) => {
+      // ignore the inner rationale text selection
+      if (window.getSelection && window.getSelection().toString()) return;
+      const det = document.querySelector(`#opt-pending-body tr.rec-detail[data-gkey="${head.dataset.gkey}"]`);
+      if (!det) return;
+      const show = det.hidden;
+      det.hidden = !show;
+      const chev = head.querySelector(".rel-chevron");
+      if (chev) chev.textContent = show ? "▾" : "▸";
+    });
+  }
   $("#opt-applied-body").innerHTML = applied.map((r) => row(r, true)).join("") ||
     `<tr><td colspan="8"><div class="empty-note">Nothing applied yet${applyEnabled ? "" : " \u2014 apply is disabled in config (advisory mode)"}.</div></td></tr>`;
 }
@@ -2011,8 +2467,8 @@ async function loadReliability() {
       : s.tier === "full"
       ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px">top rung</span>`
       : `${s.ladder_progress_pct != null ? `<span class="tier-track-mini"><span class="fill" style="width:${s.ladder_progress_pct.toFixed(1)}%"></span></span>` : ""}<span class="mono" style="font-size:10.5px;color:var(--ink-faint)">→ ${esc(s.ladder_next)} @ ${esc(s.ladder_next_at)}</span>`;
-    return `<tr>
-      <td><b>${esc(name)}</b></td>
+    return `<tr class="rel-row" data-arch="${esc(name)}" role="button" tabindex="0" title="click to expand recent closed round-trips">
+      <td><span class="rel-chevron" aria-hidden="true">▸</span> <b>${esc(name)}</b></td>
       <td class="td-mono">${esc(s.samples ?? 0)}</td>
       <td class="td-mono">${synthCell}</td>
       <td><div class="tier-track" title="${esc(s.samples)} / ${full} samples to full">
@@ -2028,6 +2484,76 @@ async function loadReliability() {
       <td><span class="badge ${tierBadge}">${esc(s.tier)}</span></td>
     </tr>`;
   }).join("") || `<tr><td colspan="11"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
+  wireReliabilityExpansion();
+}
+
+/* Lazy-load /api/reliability/archive and inject a sub-row with the recent
+   closed round-trips. First click fetches; subsequent clicks toggle. */
+function wireReliabilityExpansion() {
+  for (const row of document.querySelectorAll("#rel-body tr.rel-row")) {
+    const open = () => toggleReliabilityRow(row);
+    row.addEventListener("click", open);
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  }
+}
+
+async function toggleReliabilityRow(row) {
+  const next = row.nextElementSibling;
+  if (next && next.classList.contains("rel-detail")) {
+    next.remove();
+    const chev = row.querySelector(".rel-chevron");
+    if (chev) chev.textContent = "▸";
+    return;
+  }
+  const arch = row.dataset.arch;
+  const chev = row.querySelector(".rel-chevron");
+  if (chev) chev.textContent = "▾";
+  const det = document.createElement("tr");
+  det.className = "rel-detail";
+  det.innerHTML = `<td colspan="11"><div class="empty-note">Loading recent closed round-trips…</div></td>`;
+  row.after(det);
+  let resp;
+  try { resp = await api(`/api/reliability/archive?limit=20`); }
+  catch (e) {
+    det.innerHTML = `<td colspan="11"><div class="empty-note">Trip history unavailable (${esc(e.message)})</div></td>`;
+    return;
+  }
+  const trips = ((resp && resp.archetypes) || {})[arch] || [];
+  if (!trips.length) {
+    det.innerHTML = `<td colspan="11"><div class="empty-note">No archived trades for <b>${esc(arch)}</b> yet — archive grows when a bot rotates out.</div></td>`;
+    return;
+  }
+  const rows = trips.map((t) => {
+    const r = isNum(t.realized) ? Number(t.realized) : 0;
+    const cls = r > 0 ? "m-value--good" : r < 0 ? "m-value--bad" : "m-value--dim";
+    const hold = isNum(t.hold_s) ? formatHold(Number(t.hold_s)) : "—";
+    const ts = t.ts ? esc(relTimeEpoch(t.ts / (t.ts > 1e12 ? 1000 : 1))) : "—";
+    return `<tr>
+      <td class="td-mono">${ts}</td>
+      <td class="td-mono">${esc(t.symbol || "—")}</td>
+      <td class="td-mono">${esc(t.venue || "—")}</td>
+      <td class="td-mono ${cls}">${fmtSignedUsd(r)}${t.is_panic ? " <span class=\"badge badge--warn\" title=\"panic-exit\">P</span>" : ""}</td>
+      <td class="td-mono">${hold}</td>
+      <td>${t.is_synthetic ? '<span class="badge badge--bad" title="seeded/backfilled — does not count toward the ladder">synthetic</span>' : ""}</td>
+    </tr>`;
+  }).join("");
+  det.innerHTML = `<td colspan="11">
+    <div class="rel-detail-head">Recent closed round-trips — <b>${esc(arch)}</b> · last ${trips.length}</div>
+    <table class="ledger rel-detail-table">
+      <thead><tr><th>closed</th><th>symbol</th><th>venue</th><th>realized</th><th>hold</th><th>notes</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </td>`;
+}
+
+function formatHold(sec) {
+  if (!isFinite(sec) || sec < 0) return "—";
+  if (sec < 60) return `${Math.round(sec)}s`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m`;
+  if (sec < 86400) return `${(sec / 3600).toFixed(1)}h`;
+  return `${(sec / 86400).toFixed(1)}d`;
 }
 
 /* ── config ───────────────────────────────────────────────────────── */
@@ -2132,6 +2658,7 @@ $("#cfg-save").addEventListener("click", async () => {
 
 const LLM_PROVIDER_LABELS = { cf: "Cloudflare", nvidia: "NVIDIA", openrouter: "OpenRouter", mistral: "Mistral" };
 const LLM_MASK = "•"; // never a real key; empty/sentinel means "keep existing"
+const LLM_CLEAR = "__CLEAR__"; // explicit-delete sentinel for /api/llm
 
 let llmState = null; // last GET /api/llm payload (providers, chain, roles)
 
@@ -2192,6 +2719,21 @@ function renderLlmProviders(p) {
       const v = keyInput.value;
       keyInput.dataset.dirty = (v && v !== LLM_MASK) ? "1" : "";
     });
+    // Per-provider "clear key" — only visible when a key is already stored.
+    // Sets the input to the __CLEAR__ sentinel and marks it dirty so the
+    // next save POSTs an explicit delete; the server's apply_llm strips
+    // the key from the sidecar and the provider falls out of the chain.
+    const clearBtn = prov.key_present
+      ? el("button", { class: "btn btn--ghost llm-key-clear", title: "remove the stored API key",
+          onclick: () => {
+            keyInput.value = LLM_CLEAR;
+            keyInput.dataset.dirty = "1";
+            keyInput.classList.add("llm-key-clearing");
+            clearBtn.disabled = true;
+            clearBtn.textContent = "will clear on save";
+            setTimeout(() => { keyInput.classList.remove("llm-key-clearing"); }, 800);
+          } }, "clear key")
+      : null;
     const validateBtn = el("button", { class: "btn btn--ghost llm-validate-btn",
       onclick: () => validateProvider(name) }, "validate");
     const status = el("span", { class: "mono llm-prov-status", id: `llm-status-${name}` }, "");
@@ -2210,7 +2752,7 @@ function renderLlmProviders(p) {
         el("label", { class: "llm-field" }, el("span", { class: "llm-field-l" }, "model"),
           modelInput),
         el("label", { class: "llm-field" }, el("span", { class: "llm-field-l" }, "API key"),
-          keyInput)));
+          keyInput, clearBtn ? clearBtn : "")));
     wrap.append(row);
   }
 }
@@ -2318,20 +2860,71 @@ $("#llm-save").addEventListener("click", async () => {
 /* ── logs ─────────────────────────────────────────────────────────── */
 
 let logStick = true;
+// append-only diff state: the filter + last rendered line used to decide
+// whether the next poll can append a delta or must re-render the window.
+let logPrevGrep = "";
+let logPrevLines = "";
+let logPrevLast = "";
 
 async function loadLogs(force = false) {
   if (activeView !== "logs" && !force) return;
   const follow = $("#log-follow").checked;
+  const grep = ($("#log-grep").value || "").trim();
+  const lines = $("#log-lines").value;
   const params = new URLSearchParams({
-    lines: $("#log-lines").value,
-    ...( ($("#log-grep").value || "").trim() ? { grep: $("#log-grep").value.trim() } : {}),
+    lines,
+    ...(grep ? { grep } : {}),
   });
   let data;
   try { data = await api(`/api/logs?${params}`); }
   catch (e) { return; }
+  const newLines = data.lines || [];
   const box = $("#logbox");
   const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
-  box.textContent = (data.lines || []).join("\n") || "— no matching lines —";
+  // Append-only diff mode: while following with an unchanged filter, keep
+  // the rendered window and only append the lines that appeared since the
+  // last poll (highlighted), instead of replacing the whole box. Anchor is
+  // the previous last line — if it still occurs in the new window, the
+  // lines after it are the delta; if the tail rolled past it (too much
+  // output, rotation, truncation), fall back to a full re-render.
+  const sameFilter = logPrevGrep === grep && logPrevLines === lines;
+  if (follow && sameFilter && logPrevLast && newLines.length) {
+    const anchor = logPrevLast;
+    const j = newLines.lastIndexOf(anchor);
+    if (j >= 0) {
+      const fresh = newLines.slice(j + 1);
+      if (fresh.length) {
+        const frag = document.createDocumentFragment();
+        for (const ln of fresh) {
+          const div = document.createElement("div");
+          div.className = "log-line log-line--new";
+          div.textContent = ln;
+          frag.append(div);
+        }
+        box.append(frag);
+        $("#log-count").textContent = `${data.total} line(s)`;
+        if (atBottom) box.scrollTop = box.scrollHeight;
+        logPrevLast = newLines[newLines.length - 1];
+        return;
+      }
+      return; // no new lines — nothing to paint
+    }
+  }
+  logPrevGrep = grep; logPrevLines = lines;
+  logPrevLast = newLines.length ? newLines[newLines.length - 1] : "";
+  box.textContent = "";
+  if (!newLines.length) {
+    box.textContent = "— no matching lines —";
+  } else {
+    const frag = document.createDocumentFragment();
+    for (const ln of newLines) {
+      const div = document.createElement("div");
+      div.className = "log-line";
+      div.textContent = ln;
+      frag.append(div);
+    }
+    box.append(frag);
+  }
   $("#log-count").textContent = `${data.total} line(s)`;
   if (follow && (logStick || atBottom)) {
     box.scrollTop = box.scrollHeight;
@@ -2526,6 +3119,7 @@ async function ctlRestart() {
   } catch (e) { toast(`restart failed: ${e.data && e.data.error || e.message}`, true, 6500); }
 }
 $("#ctl-restart").addEventListener("click", ctlRestart);
+$("#ctl-rotate-go").addEventListener("click", ctlRotateFromPanel);
 
 $("#ctl-stop").addEventListener("click", async () => {
   const { ok, checked } = await confirmDialog({

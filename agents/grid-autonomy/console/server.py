@@ -701,6 +701,46 @@ def position_sweeps_payload(limit=25):
     return sweeps[-limit:][::-1]
 
 
+def reliability_archive_payload(limit_per_archetype=20) -> dict:
+    """Recent closed round-trips per archetype, sourced from
+    `state/reliability_archive.json` (rotated-out bots' last legs). Drives
+    the expandable row under each archetype on the Reliability tab — the
+    operator wants to see *which* trades produced the PF/win rate, not
+    just the aggregates.
+
+    Each row is a slim {ts, symbol, realized, hold_s, is_panic,
+    is_synthetic, strategy_id} dict; the daemon's archived shape is
+    richer (gross / fee / hold_s / strategy_id) but the UI only needs
+    the operator-facing columns. Synthetic rows are flagged so the UI
+    can mark them separately (the aggregates above already flag the
+    pollution in bulk via the `synthetic_samples` count)."""
+    try:
+        sys.path.insert(0, os.path.join(GRID_HOME, "execution"))
+        import reliability_grid as _rg
+        arch = _rg.archived_by_archetype() or {}
+    except Exception:
+        arch = {}
+    out = {}
+    for name, rows in arch.items():
+        slim = []
+        for t in rows or []:
+            if not isinstance(t, dict):
+                continue
+            slim.append({
+                "ts": t.get("close_ts") or t.get("ts") or t.get("at_epoch"),
+                "symbol": t.get("symbol") or "",
+                "venue": t.get("venue") or "",
+                "realized": t.get("realized_usd") or t.get("pnl") or t.get("realized"),
+                "hold_s": t.get("hold_s"),
+                "is_panic": bool(t.get("is_panic") or t.get("panic")),
+                "is_synthetic": bool(t.get("synthetic")),
+                "strategy_id": t.get("strategy_id") or t.get("bot_code"),
+            })
+        slim.sort(key=lambda r: r.get("ts") or 0, reverse=True)
+        out[name] = slim[:max(1, min(limit_per_archetype, 100))]
+    return {"archetypes": out, "source": "reliability_archive.json"}
+
+
 def reliability_payload() -> dict:
     path = os.path.join(STATE_DIR, "reliability.json")
     ledger = _read_json(path, {}) or {}
@@ -821,12 +861,18 @@ def _screen_fit_index() -> dict:
         if not isinstance(c, dict):
             continue
         key = f"{c.get('venue')}:{c.get('symbol')}"
+        # tvcli_fit is the per-skill hunt read (squeeze/chop/mtf/vp/sr/dvi
+        # metrics, in a dict). Pass it through verbatim so the slot card
+        # and decision evidence panel show the same data — without it the
+        # slot card's TVCLI confluence strip renders empty chips even
+        # though the screen cache carries the values.
+        fit_obj = c.get("tvcli_fit")
         idx[key] = {
             "score_final": c.get("score_final"),
             "score": c.get("score"),
             "regime": c.get("regime"),
             "archetype": c.get("archetype"),
-            "tvcli_fit": c.get("tvcli_fit"),
+            "tvcli_fit": fit_obj if isinstance(fit_obj, dict) else None,
             "confluence_bonus": c.get("confluence_bonus"),
             "confluence_ok": c.get("confluence_ok"),
             "confluence_notes": c.get("confluence_notes"),
@@ -904,22 +950,62 @@ def _enriched_bots(st: dict) -> list[dict]:
     return out
 
 
-def _latest_report(kind: str):
+def _latest_report_meta(kind: str):
+    """(report, stem) of the most recent run card of this kind, or
+    (None, None). The stem is what the console hands to /api/reports/<stem>
+    for the rail-card deep-link, so the operator can jump from a screen
+    rank to the deliberation that produced it without re-typing the ts."""
     rdir = os.path.join(STATE_DIR, "reports")
     try:
         names = sorted((n for n in os.listdir(rdir)
                         if n.endswith(".json") and f"-{kind}." in n), reverse=True)
-    except Exception:
-        return None
+    except OSError:
+        return None, None
     for name in names:
         rep = _read_json(os.path.join(rdir, name))
         if rep is not None:
-            return rep
-    return None
+            return rep, os.path.splitext(name)[0]
+    return None, None
+
+
+def _latest_report(kind: str):
+    rep, _ = _latest_report_meta(kind)
+    return rep
+
+
+def _screen_score_history(limit: int) -> list[dict]:
+    """Top-of-screen `score_final` over the last N rescreen cards, oldest
+    first. Powers the "last screen" rail's trend sparkline. Returns
+    [{at, score, n_candidates}] for each card; [] when fewer than two
+    rescreens exist (a one-point sparkline is just a dot)."""
+    rdir = os.path.join(STATE_DIR, "reports")
+    try:
+        names = sorted((n for n in os.listdir(rdir)
+                        if n.endswith(".json") and "-rescreen." in n),
+                       reverse=True)[:max(1, limit)]
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        rep = _read_json(os.path.join(rdir, n))
+        if not isinstance(rep, dict):
+            continue
+        scr = rep.get("screen") or {}
+        top = (scr.get("top3") or [])
+        score = top[0].get("score_final") if top and isinstance(top[0], dict) else None
+        out.append({"at": rep.get("at"),
+                    "score": score,
+                    "n_candidates": scr.get("n_candidates")})
+    out.reverse()
+    return [r for r in out if r.get("at") and _is_num(r.get("score"))]
+
+
+def _is_num(v):
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
 def screen_payload() -> dict | None:
-    rep = _latest_report("rescreen")
+    rep, stem = _latest_report_meta("rescreen")
     if not rep:
         return None
     scr = rep.get("screen") or {}
@@ -929,6 +1015,12 @@ def screen_payload() -> dict | None:
         "top": scr.get("top3") or [],
         "hunt_stats": scr.get("hunt_stats") or {},
         "data_sources": rep.get("data_sources") or {},
+        "run_card_stem": stem,
+        # 12-point score history for the rail's "is screening improving?"
+        # sparkline: top-of-screen score_final across the last 12 rescreen
+        # run cards. Cheap (file scan + JSON parse) and powers a glanceable
+        # trend. Empty list = fewer than 2 rescreen cards on disk.
+        "score_history": _screen_score_history(12),
         # the run-card JSON keys are deliberate/guard (singular, as the
         # daemon writes them): pass them through verbatim so the UI can
         # show the per-cycle deliberation + guard verdict
@@ -1422,7 +1514,11 @@ def apply_llm(updates: dict) -> tuple[int, dict]:
             key_var = {"cf": "CLOUDFLARE_API_KEY", "nvidia": "NVIDIA_API_KEY",
                        "openrouter": "OPENROUTER_API_KEY",
                        "mistral": "MISTRAL_API_KEY"}[name]
-            if key_val and key_val != "__KEEP__":
+            if key_val == "__CLEAR__":
+                # explicit delete: drop the key from the sidecar so the
+                # provider falls out of the chain on the next self-heal.
+                side.pop(key_var, None)
+            elif key_val and key_val != "__KEEP__":
                 side[key_var] = key_val
             # "" / "__KEEP__" → leave existing key (or none) untouched.
 
@@ -1556,6 +1652,7 @@ def overview_payload() -> dict:
             "slots_default": portfolio.get("slots_default"),
             "rescreen_minutes": (cfg.get("screen") or {}).get("rescreen_minutes"),
             "watch_interval_s": (cfg.get("watch") or {}).get("interval_s"),
+            "take_profit_pct": (cfg.get("grid_defaults") or {}).get("take_profit_pct"),
         },
     }
 
@@ -1815,6 +1912,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, payload)
         elif route == "/api/reliability":
             self._json(200, reliability_payload())
+        elif route == "/api/reliability/archive":
+            self._json(200, reliability_archive_payload(
+                int(q1("limit", 20))))
         elif route == "/api/recommendations":
             self._json(200, recommendations_payload(
                 int(q1("limit", 100))))

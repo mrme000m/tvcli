@@ -60,6 +60,10 @@
               <button class="btn" id="ctl-unkill" hidden>Clear KILL</button>
               <button class="btn btn--wide" id="ctl-restart">Restart daemon</button>
               <button class="btn btn--wide" id="ctl-stop">Stop daemon (KILL)</button>
+              <div class="ctl-rotate-row" id="ctl-rotate-row" hidden>
+                <select class="ctl-rotate-select" id="ctl-rotate-slot" title="force-rotate one specific slot on the next rescreen"></select>
+                <button class="btn btn--danger" id="ctl-rotate-go" title="queue a rotation for the selected slot — applied on the next rescreen">Rotate slot</button>
+              </div>
             </div>
           </div>
         </div>
@@ -127,13 +131,12 @@
         <option value="closed">closed</option>
       </select>
       <span class="mono" id="dec-count" style="font-size:11px;color:var(--ink-faint)"></span>
+      <span style="flex:1"></span>
+      <button class="btn btn--ghost" id="dec-export" title="export the currently-filtered list as CSV">Export CSV</button>
     </div>
     <div class="card"><div class="card-body--tight table-wrap">
       <table class="ledger">
-        <thead><tr>
-          <th>id</th><th>at</th><th>market</th><th>regime</th><th>grid</th>
-          <th>call</th><th>score</th><th>step</th><th>slot</th><th>state</th><th>rationale</th>
-        </tr></thead>
+        <thead></thead>
         <tbody id="dec-body"></tbody>
       </table>
     </div></div>
