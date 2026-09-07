@@ -12,9 +12,10 @@
 #   NAME       container name                     (default grid-autonomy)
 #   ENV_FILE   BW_* env file for vault_loader     (default /opt/grid-autonomy/.env)
 #   GRID_MODE  dry-run | live-paper | preserve    (default preserve: keep the
-#              running container's mode — pushes must never silently downgrade
-#              a live-paper fleet; a first deploy with no previous container
-#              falls back to dry-run)
+#              running container's mode — pushes must never silently change
+#              a fleet's posture; a first deploy with no previous container
+#              falls back to live-paper, the deployment default — the VPS
+#              runs on its own WunderTrading account)
 #
 # Ports are published on 127.0.0.1 ONLY — the console (:8798) and ctl
 # (:8799) carry no built-in auth; reach them through an SSH tunnel:
@@ -48,7 +49,7 @@ $DOCKER network create grid-net >/dev/null 2>&1 || true
 # down PB/serve/browser/daemon cleanly), then force-remove the leftovers.
 # The running mode is captured FIRST so a preserve (default) redeploy keeps
 # the fleet's live/dry posture — an automatic push deploy must never
-# silently downgrade a live-paper instance to dry-run.
+# silently CHANGE the mode in either direction.
 OLD_MODE=""
 if $DOCKER inspect "$NAME" >/dev/null 2>&1; then
   OLD_MODE="$($DOCKER inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "$NAME" \
@@ -59,7 +60,7 @@ if $DOCKER inspect "$NAME" >/dev/null 2>&1; then
 fi
 
 if [ "$MODE" = "preserve" ]; then
-  MODE="${OLD_MODE:-dry-run}"
+  MODE="${OLD_MODE:-live-paper}"
   echo "vps-run: preserving previous GRID_MODE ($MODE)"
 fi
 case "$MODE" in

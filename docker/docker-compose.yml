@@ -37,9 +37,10 @@ services:
 
     # Environment file — template: docker/env.example.
     #   cp env.example grid.env && chmod 600 grid.env
-    # GRID_MODE=dry-run is the image default; env.example ships
-    # GRID_MODE=live-paper (the intended VPS production mode — read
-    # docker/README.md §e before flipping it).
+    # GRID_MODE=live-paper is now BOTH the image default and the env.example
+    # value (the intended VPS production mode — paper bots on the VPS's OWN
+    # WunderTrading account, separate from the Mac's; read docker/README.md
+    # §e / the two-account note before running dry-run-by-choice).
     env_file:
       - ./grid.env
 

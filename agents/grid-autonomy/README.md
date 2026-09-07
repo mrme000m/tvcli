@@ -16,6 +16,32 @@ Accuracy note: every fact below is verified against the code at
 > Hyperliquid profile is hard-denylisted. Paper-only until you change that on
 > purpose (see “Paper → live escalation”).
 
+## Two WunderTrading accounts (local vs deployment)
+
+The Mac's local instance and the az00 VPS deployment run on **two
+different WunderTrading accounts**:
+
+- **Local (Mac):** the daemon's WT session lives in the headful
+  CloakBrowser profile on CDP `:9222` — the Mac's own account.
+- **Deployment (az00 container):** the entrypoint logs into the vault
+  account (vault item `wundertrading`, folder `grid-autonomy` →
+  `WT_EMAIL`/`WT_PASSWORD` via `wt-login.mjs`) and keeps that session in
+  the `grid-secrets`/browser-profile volumes. On the dev machine the same
+  vault account is reachable with `browser-debug/wt-exchanges-live.py`
+  (CDP `:9223`, profile `profile-vault`) — never point that at `:9222`.
+
+The two fleets are fully independent: separate sessions, separate paper
+profiles (`demo-hype`/`demo-bn` ensured per account), separate bots.
+`dev reset-wt` on the Mac only deletes the local account's paper bots —
+the VPS fleet is untouched, and vice versa. The deployment therefore
+defaults to **live-paper** (`GRID_MODE` image default, `vps-run.sh`
+first-deploy fallback, workflow dispatch default — see
+`docker/README.md`); both fleets may run live-paper simultaneously. The
+mission console surfaces which account the instance trades on: the header
+subtitle and the fleet-summary "WT account" row (`vps (vault account)` in
+the container, `local (Mac account)` on the Mac; `WT_ACCOUNT_LABEL` env
+overrides).
+
 ## Architecture
 
 ```

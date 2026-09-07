@@ -9,20 +9,22 @@ The image itself is built by `docker/Dockerfile` + `docker/entrypoint.sh`
 ## CI/CD deploy (GitHub Actions → az00)
 
 `.github/workflows/grid-autonomy-deploy.yml` (push to main on build-context
-paths — auto-deploys in dry-run — plus manual `workflow_dispatch` with a
-`mode` input)
-builds the image in CI, **streams** it to the VPS
-(`docker save | gzip | ssh … | sudo docker load` — no tarball ever lands
-on the host's small root disk), writes `/opt/grid-autonomy/.env` with the
-`BW_*` vault machine credentials from repo secrets, and (re)starts the
-container via `docker/vps-run.sh` with five named volumes (`grid-state`,
-`grid-pb`, `grid-profile`, `grid-secrets`, `grid-bwcli`) so everything
-survives redeploys; `--restart unless-stopped` survives host reboots.
+paths — auto-deploys, preserving the running mode — plus manual
+`workflow_dispatch` with a `mode` input, `live-paper` default)
+builds the image in CI, pushes it to GHCR (layer-diffed `docker pull` on the
+host; SSH-stream fallback when `GHCR_PULL_TOKEN` is absent), writes
+`/opt/grid-autonomy/.env` with the `BW_*` vault machine credentials from
+repo secrets, and (re)starts the container via `docker/vps-run.sh` with five
+named volumes (`grid-state`, `grid-pb`, `grid-profile`, `grid-secrets`,
+`grid-bwcli`) so everything survives redeploys; `--restart unless-stopped`
+survives host reboots.
 
 SSH host config lives in repo secrets: `SSH_HOST`, `SSH_USER`, `SSH_PORT`,
 `SSH_PRIVATE_KEY` (deploy key for a host user with passwordless sudo +
-docker access). The workflow's `mode` input sets `GRID_MODE` (`dry-run`
-default, `live-paper` deliberate).
+docker access). The workflow's `mode` input sets `GRID_MODE` (`live-paper`
+default, `dry-run` to plan only). Push deploys pass `preserve`: the running
+container's mode is kept (first deploy falls back to `live-paper`, the
+deployment default).
 
 Ports are published on **127.0.0.1 only** — the console (`:8798`) and ctl
 (`:8799`) carry no built-in auth. Reach them through an SSH tunnel:
@@ -30,11 +32,34 @@ Ports are published on **127.0.0.1 only** — the console (`:8798`) and ctl
 ```sh
 ssh -L 8798:localhost:8798 -L 8799:localhost:8799 <host>
 # then http://localhost:8798 (console) / http://localhost:8799 (ctl API)
-```
 
-One WunderTrading account must not run two live instances: the Mac's live
-daemon owns the account, so the VPS runs dry-run unless deliberately
-switched to `live-paper`.
+## Two WunderTrading accounts (deployment vs local)
+
+The az00 deployment and the Mac's local instance run on **two different
+WunderTrading accounts**:
+
+| | Deployment (az00 VPS container) | Local (Mac) |
+|---|---|---|
+| WT account | the vault account — vault item `wundertrading` (folder `grid-autonomy`) → `WT_EMAIL`/`WT_PASSWORD`, driving `wt-login.mjs` inside the container | the Mac's own browser session (CloakBrowser profile, CDP :9222) |
+| Session | container CloakBrowser + `grid-secrets` volume, self-healing via the WT keeper | `minimal-mjs/profile` browser profile |
+| Paper profiles / bots | that account only (`demo-hype`, `demo-bn` ensured there) | the local account's |
+
+Consequences:
+
+- The two fleets **do not collide** — both may run live-paper
+  simultaneously; each acts only on its own account's paper profiles and
+  bots. `dev reset-wt` on the Mac never touches the VPS fleet and vice
+  versa.
+- Deployment therefore defaults to **`GRID_MODE=live-paper`** (image env,
+  entrypoint, `vps-run.sh` first-deploy fallback, and the workflow's
+  dispatch default all agree). `dry-run` is a deliberate plan-only choice.
+- The console makes the split visible: the header subtitle and the
+  fleet-summary "WT account" row show which account the instance trades
+  on (`vps (vault account)` in the container, `local (Mac account)`
+  otherwise; override with `WT_ACCOUNT_LABEL`).
+- On the dev machine, `browser-debug/wt-exchanges-live.py` is the
+  reference tool for the vault account (CDP :9223/profile-vault) — never
+  point it at the Mac's :9222 browser.
 
 ## Public hostnames (Cloudflare tunnel)
 
@@ -66,18 +91,21 @@ policy on `grid-ctl`/`grid-pb` if the deployment goes live-paper.
 Everything the image is built from lives in the repo, so a code update is:
 
 ```sh
-git commit -m "grid-autonomy: <change>" && git push          # auto-deploys
+git commit -m "grid-autonomy: <change>" && git push          # auto-deploys (mode preserved)
 # — or —
-gh workflow run grid-autonomy-deploy.yml --ref main -f mode=dry-run   # manual
-gh run watch     # live progress (build ~4 min + stream + boot ≈ 10-12 min)
+gh workflow run grid-autonomy-deploy.yml --ref main -f mode=live-paper   # manual (default mode)
+gh run watch     # live progress (build ~4 min + pull/stream + boot ≈ 10-12 min)
 ```
 
 Pushes to `main` that touch the build context (`docker/`, `agents/grid-autonomy/`,
 `.agents/skills/`, `browser-debug/wt-login.mjs` + driver deps, Go sources)
-trigger the deploy automatically (dry-run). The workflow is idempotent:
-named volumes keep state across redeploys; the container is replaced with a
-graceful SIGTERM stop; the tunnel connector is untouched. To change the
-deployment mode deliberately, dispatch with `-f mode=live-paper`.
+trigger the deploy automatically, **preserving the running container's
+GRID_MODE** (first deploy falls back to `live-paper`, the deployment
+default — the VPS runs on its own WunderTrading account, see the
+two-account note above). The workflow is idempotent: named volumes keep
+state across redeploys; the container is replaced with a graceful SIGTERM
+stop; the tunnel connector is untouched. To run plan-only instead, dispatch
+with `-f mode=dry-run`.
 
 
 grid-autonomy is an autonomous grid-trading daemon that runs the whole loop
@@ -88,9 +116,12 @@ config). Full operating manual: `agents/grid-autonomy/README.md`. Operating
 semantics (control plane, journal kinds, safety rails): the
 `grid-autonomy` skill (`.agents/skills/grid-autonomy/SKILL.md`).
 
-> **`GRID_MODE=live-paper` is the intended VPS production mode.** It
-> creates real bots on WunderTrading *paper* profiles only. `dry-run` (the
-> image default) is planning-only: screens, deliberates and journals
+> **`GRID_MODE=live-paper` is the deployment default and the intended VPS
+> production mode.** It creates real bots on WunderTrading *paper* profiles
+> only — on the deployment's own WunderTrading account (vault item
+> `wundertrading`, folder `grid-autonomy`), separate from the Mac's local
+> account, so both fleets may run live-paper at once. `dry-run` (a
+> deliberate choice) is planning-only: screens, deliberates and journals
 > everything, creates nothing.
 
 ---
@@ -330,14 +361,14 @@ $EDITOR grid.env      # fill CLOUDFLARE_ACCOUNT_ID + CLOUDFLARE_API_KEY
 
 ## (e) First boot
 
-The image default is **dry-run**: plan-only, zero WunderTrading mutations.
-Start there even though `env.example` ships `GRID_MODE=live-paper` (the
-intended production value) — set `GRID_MODE=dry-run` in your fresh
-`grid.env` for the first boot:
+The default is **`GRID_MODE=live-paper`** (image env, `env.example`, and
+this guide agree — the intended VPS production mode; the VPS runs on its
+own WunderTrading account, see the two-account note). Prefer watching the
+first boot in **dry-run** (plan-only, zero WunderTrading mutations) before
+letting it deploy? Set `GRID_MODE=dry-run` in your fresh `grid.env`:
 
 ```sh
-cd docker/
-# grid.env: GRID_MODE=dry-run (image default — unset works too)
+# grid.env: GRID_MODE=dry-run (plan-only first boot — live-paper is the default)
 docker compose up -d
 docker compose ps           # wait for (healthy) — image healthcheck curls :8799/health
 docker compose logs -f     # Ctrl-C to detach; logs stay in the container/volumes
@@ -364,7 +395,7 @@ docker compose exec grid-autonomy sh -c   "cd /app/agents/grid-autonomy && pytho
 ./verify.sh
 ```
 
-Then switch to paper deploys — edit `grid.env`:
+Then switch to paper deploys (the default posture) — edit `grid.env`:
 
 ```
 GRID_MODE=live-paper
@@ -379,8 +410,9 @@ docker compose up -d --force-recreate
 (Use `--force-recreate`, not `restart`: compose only reads `env_file`
 (`grid.env`) when it (re)creates the container.) From now on the daemon
 creates real bots on the allowlisted WunderTrading **paper** profiles
-(`demo-hype`, `demo-bn`). Real money stays refused:
-`autonomy.live_profiles: []`.
+(`demo-hype`, `demo-bn`) on this deployment's **own** WunderTrading account
+(vault item `wundertrading`, folder `grid-autonomy`). Real money stays
+refused: `autonomy.live_profiles: []`.
 
 ## (f) Operations runbook
 
@@ -548,8 +580,9 @@ ssh -L 8798:localhost:8798 -L 8799:localhost:8799 user@vps   # then use localhos
   escalation"); the Docker layer does not change any of it.
 - **VPS datacenter IP + Cloudflare risk**: the WunderTrading browser
   session originates from a datacenter IP and Cloudflare may challenge it
-  harder than a residential one. Mitigations: keep the
-  `grid-browser-profile` volume warm (never delete it casually — the
+  harder than a residential one (note: this is the **vault WT account's**
+  session, not the Mac's — see the two-account note). Mitigations: keep
+  the `grid-browser-profile` volume warm (never delete it casually — the
   account/session reputation lives there); if you route through a proxy,
   a `--proxy-server=…` launch flag is the supported hook (browser
   relaunch command in config) — keep the exit IP stable and, ideally, in

@@ -11,6 +11,21 @@ reflect**. Full
 operating manual: `agents/grid-autonomy/README.md`. It executes on
 WunderTrading **paper profiles only** unless an operator lifts the live gate.
 
+**Deployment (az00 VPS) vs local — two WunderTrading accounts.** The
+container logs into the vault WT account (vault item `wundertrading`,
+folder `grid-autonomy`) via `wt-login.mjs`; the Mac's daemon uses its own
+browser session (CDP :9222). Fleets, paper profiles, and bots are fully
+independent per account — `dev reset-wt` is account-scoped, and both
+fleets may run live-paper at once. Deployment therefore defaults to
+`GRID_MODE=live-paper` (Dockerfile ENV, entrypoint, `vps-run.sh`
+first-deploy fallback, workflow dispatch default). The mission console
+shows which account an instance trades on (header subtitle + fleet-summary
+"WT account" row: `vps (vault account)` in the container, `local (Mac
+account)` otherwise; `WT_ACCOUNT_LABEL` env overrides). Dev-side access to
+the vault account: `browser-debug/wt-exchanges-live.py` (CDP :9223) —
+never point it at the Mac's :9222 browser. Deployment guide:
+`docker/README.md`.
+
 ## What it does
 
 - **Screen (10m):** `screen/merge.py` screens Hyperliquid perps + Binance

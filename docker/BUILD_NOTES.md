@@ -353,3 +353,41 @@ each redeploy (per-SHA tags would otherwise accumulate ~2GB versions on the
 **Setup needed once:** create a GitHub PAT with `read:packages` and add it
 as repo secret `GHCR_PULL_TOKEN`. Until then every deploy automatically
 uses the SSH stream (with a `::warning::` in the log) — nothing breaks.
+
+## Phase 7 — two-account split made explicit; live-paper deployment default (2026-09-08)
+
+**Facts codified.** The az00 deployment and the Mac's local daemon run on
+**two separate WunderTrading accounts**: the container authenticates with
+the vault item `wundertrading` (folder `grid-autonomy` → WT_EMAIL/
+WT_PASSWORD, wt-login.mjs + the WT keeper keep that session alive in the
+`grid-secrets`/browser-profile volumes), while the Mac uses its own
+CloakBrowser session on CDP :9222. The split was already load-bearing
+(`browser-debug/wt-exchanges-live.py` — vault account on :9223 — says
+"NEVER point this at port 9222"), but the docs still claimed "one WT
+account must not run two live instances" and defaulted the VPS to
+dry-run.
+
+**Changes:**
+- `GRID_MODE=live-paper` is now the deployment default everywhere:
+  Dockerfile `ENV GRID_MODE`, entrypoint fallback, `vps-run.sh` preserve
+  fallback (first deploy), `env.example` (unchanged value, corrected
+  comment), compose comment, and the workflow's `workflow_dispatch` mode
+  default. Push deploys still pass `preserve` — a push never changes a
+  running fleet's mode in either direction.
+- Console surfaces the account identity: `/api/meta` + overview payload
+  carry `wt_account` (`vps (vault account)` inside the container via
+  `/.dockerenv`, `local (Mac account)` otherwise; `WT_ACCOUNT_LABEL`
+  override). Header subtitle, page footnote, and a fleet-summary "WT
+  account" row render it.
+- Docs: docker/README.md gained a "Two WunderTrading accounts (deployment
+  vs local)" section + rewritten mode guidance (§ CI/CD, §e, §g);
+  agents/grid-autonomy/README.md gained the same section after the safety
+  callout; AGENTS.md grid-autonomy table gained a deployment-note row;
+  the grid-autonomy SKILL.md opens with the two-account note;
+  console/README.md documents the label.
+
+**Safety posture unchanged:** paper profiles only, `autonomy.
+live_profiles: []`, denylist, 8 fail-closed gates. Only the *dry-run
+default for the deployment* changed — each fleet still acts exclusively
+on its own account's paper profiles/bots, and `dev reset-wt` remains
+account-scoped.

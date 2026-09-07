@@ -121,7 +121,7 @@ COPY docker/vault_loader.sh /app/docker/vault_loader.sh
 RUN chmod +x /usr/local/bin/grid-entrypoint /usr/local/bin/grid-healthcheck \
              /app/docker/patch_config.py /app/docker/vault_loader.sh
 
-ENV GRID_MODE=dry-run \
+ENV GRID_MODE=live-paper \
     GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console \
     GRID_STRICT_ENV=0 \
     WT_KEEPER_INTERVAL=1800 \

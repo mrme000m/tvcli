@@ -12,7 +12,7 @@ set -uo pipefail
 
 APP=/app
 GRID="${APP}/agents/grid-autonomy"
-export GRID_MODE="${GRID_MODE:-dry-run}"
+export GRID_MODE="${GRID_MODE:-live-paper}"
 export GRID_STRICT_ENV="${GRID_STRICT_ENV:-0}"
 export CB_PROFILE="${CB_PROFILE:-/data/browser-profile}"
 export DISPLAY="${DISPLAY:-:99}"
