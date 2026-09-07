@@ -14,9 +14,9 @@ sys.path.insert(0, HERE)
 
 import position_optimizer as po  # noqa: E402
 from position_optimizer import (  # noqa: E402
-    POSITION_OPTIMIZER_DEFAULTS, PositionOptimizer, evaluate_exits,
-    expected_delta_for_channel, expected_profit_delta, make_recommendation,
-    revalue_grid,
+    POSITION_OPTIMIZER_DEFAULTS, PositionOptimizer, current_exits,
+    evaluate_exits, exit_edit_kwargs, expected_delta_for_channel,
+    expected_profit_delta, make_recommendation, revalue_grid,
 )
 
 NOW = time.time()
@@ -566,6 +566,343 @@ class TestLastBotFields(unittest.TestCase):
         opt.analyze_bot(bot, "3", now=NOW)
         self.assertEqual(bot["position_optimizer"]["last_fetch_hop"],
                          "vision")
+
+
+# ── current_exits + exit-aware recommendations ─────────────────────────
+
+# the real enriched grid_list shape (GridClient.list, verified 2026-09-07)
+ENRICHED_EXITS = {"takeProfit": 5, "stopLoss": 3,
+                  "stopLossPnlCompareType": "total",
+                  "trailingStopActivation": 5, "trailingStopExecute": 2,
+                  "trailingStopPnlCompareType": "total",
+                  "strategyProfitCondition": "trailing_stop",
+                  "strategyStopLossFixedPercentRatio": 0.05,
+                  "pumpProtectionOrderType": "market"}
+
+
+def no_exits():
+    return {"take_profit_usd": None, "stop_loss_usd": None,
+            "trailing_activation_pct": None, "trailing_execute_pct": None,
+            "positions_trailing": False, "reasons": []}
+
+
+class TestCurrentExits(unittest.TestCase):
+    def test_extracts_from_bot_exits_projection(self):
+        bot = flat_bot(exits=dict(ENRICHED_EXITS))
+        cur = current_exits(bot)
+        self.assertEqual(cur["takeProfit"], 5)
+        self.assertEqual(cur["stopLoss"], 3)
+        self.assertEqual(cur["trailingStopActivation"], 5)
+        self.assertEqual(cur["trailingStopExecute"], 2)
+        self.assertEqual(cur["strategyProfitCondition"], "trailing_stop")
+        self.assertEqual(cur["strategyStopLossFixedPercentRatio"], 0.05)
+        self.assertEqual(cur["pumpProtectionOrderType"], "market")
+
+    def test_extracts_from_observed_exits(self):
+        bot = flat_bot()
+        bot["observed"]["exits"] = dict(ENRICHED_EXITS)
+        self.assertEqual(current_exits(bot)["takeProfit"], 5)
+
+    def test_extracts_from_top_level_grid_list_fields(self):
+        bot = flat_bot()
+        bot.update({"takeProfit": 7, "stopLoss": None})
+        cur = current_exits(bot)
+        self.assertEqual(cur["takeProfit"], 7)
+        self.assertIsNone(cur["stopLoss"])
+
+    def test_unknown_when_no_exit_fields(self):
+        self.assertEqual(current_exits(flat_bot()), {})
+        self.assertEqual(current_exits(None), {})
+        self.assertEqual(current_exits({}), {})
+
+
+class TestExitAwareRecommendations(unittest.TestCase):
+    """A bot whose CURRENT exit config already has the field must NOT get
+    a redundant add-* rec — the rec falls through to keep (priority order
+    untouched); a materially different value still escalates."""
+
+    def _exits_ready(self, tp=True, trail=False):
+        """exits dict with the requested targets computed (TP $10,
+        trail 5/2). Only what a real evaluate_exits would set for that
+        trigger — so 'covered' tests are unambiguous."""
+        return {"take_profit_usd": 10.0 if tp else None,
+                "stop_loss_usd": None,
+                "trailing_activation_pct": 5.0 if trail else None,
+                "trailing_execute_pct": 2.0 if trail else None,
+                "positions_trailing": False, "reasons": []}
+
+    def _rec(self, current, **kw):
+        bot = flat_bot()
+        return make_recommendation(bot, fresh_revalue(),
+                                   {"price": 100.0, "atr_pct": 1.0},
+                                   bot["observed"],
+                                   self._exits_ready(**kw), CFG,
+                                   current=current)
+
+    def test_take_profit_already_set_stays_keep(self):
+        rec = self._rec(current={"takeProfit": 10.0})
+        self.assertEqual(rec["recommendation"], "keep")
+        self.assertEqual(rec["expected_delta_pct"], 0.0)
+        self.assertIn("already configured", rec["rationale"])
+
+    def test_take_profit_materially_different_still_recommends(self):
+        rec = self._rec(current={"takeProfit": 2.0})   # target is 10
+        self.assertEqual(rec["recommendation"], "add-take-profit")
+
+    def test_trailing_already_set_falls_through_to_keep(self):
+        cur = {"trailingStopActivation": 5.0, "trailingStopExecute": 2.0}
+        rec = self._rec(current=cur, tp=False, trail=True)
+        self.assertEqual(rec["recommendation"], "keep")
+
+    def test_positions_sl_ratio_covers_add_stop_loss(self):
+        cfg = dict(CFG, stop_loss_enabled=True)
+        exits = {"take_profit_usd": None, "stop_loss_usd": -15.0,
+                 "trailing_activation_pct": None,
+                 "trailing_execute_pct": None, "positions_trailing": False,
+                 "reasons": []}
+        bot = flat_bot()
+        rec = make_recommendation(bot, fresh_revalue(),
+                                  {"price": 100.0, "atr_pct": 1.0},
+                                  bot["observed"], exits, cfg,
+                                  current={"strategyStopLossFixedPercentRatio":
+                                           0.05})
+        self.assertEqual(rec["recommendation"], "keep")
+
+    def test_cumulative_stop_loss_match_covers_add_stop_loss(self):
+        cfg = dict(CFG, stop_loss_enabled=True)
+        exits = {"take_profit_usd": None, "stop_loss_usd": -15.0,
+                 "trailing_activation_pct": None,
+                 "trailing_execute_pct": None, "positions_trailing": False,
+                 "reasons": []}
+        bot = flat_bot()
+        rec = make_recommendation(bot, fresh_revalue(),
+                                  {"price": 100.0, "atr_pct": 1.0},
+                                  bot["observed"], exits, cfg,
+                                  current={"stopLoss": 15.0})
+        self.assertEqual(rec["recommendation"], "keep")
+
+    def test_no_current_recommends_as_before(self):
+        rec = self._rec(current={})
+        self.assertEqual(rec["recommendation"], "add-take-profit")
+
+    def test_auto_extraction_from_bot_record(self):
+        # make_recommendation without `current` still sees the bot's
+        # observed.exits (daemon projection) — no redundant add rec
+        bot = flat_bot()
+        bot["observed"]["exits"] = {"takeProfit": 10.0}
+        rec = make_recommendation(bot, fresh_revalue(),
+                                  {"price": 100.0, "atr_pct": 1.0},
+                                  bot["observed"],
+                                  self._exits_ready(tp=True, trail=False),
+                                  CFG)
+        self.assertEqual(rec["recommendation"], "keep")
+        self.assertEqual(rec["current_exits"]["takeProfit"], 10.0)
+
+    def test_geometry_priority_unchanged_with_exits_present(self):
+        # drift dominates any exit add, covered or not
+        bot = flat_bot()
+        bot["observed"]["exits"] = {"takeProfit": 10.0}
+        rv = fresh_revalue(delta_drift_pct=3.0)
+        rec = make_recommendation(bot, rv, {"price": 103.0, "atr_pct": 1.0},
+                                  bot["observed"], self._exits_ready(), CFG)
+        self.assertEqual(rec["recommendation"], "recenter")
+
+    def test_evaluate_exits_reports_covered(self):
+        bot = flat_bot()
+        obs = dict(bot["observed"], realized_pnl=6.0)   # TP target computed
+        out = evaluate_exits(bot, {}, obs, CFG,
+                             current={"takeProfit": 10.0})
+        self.assertEqual(out["take_profit_usd"], 10.0)  # still computed
+        self.assertTrue(out["covered"]["take_profit"])
+        self.assertTrue(any("already configured" in r for r in out["reasons"]))
+        # and without current: not covered
+        out = evaluate_exits(bot, {}, obs, CFG)
+        self.assertFalse(out["covered"]["take_profit"])
+
+
+class TestExitEditKwargs(unittest.TestCase):
+    def test_take_profit_rec(self):
+        kw = exit_edit_kwargs({"take_profit_usd": 10.0},
+                              recommendation="add-take-profit")
+        self.assertEqual(kw, {"take_profit": 10.0})
+
+    def test_trailing_rec_includes_positions_trailing(self):
+        kw = exit_edit_kwargs({"trailing_activation_pct": 5.0,
+                               "trailing_execute_pct": 2.0,
+                               "positions_trailing": True},
+                              recommendation="add-trailing")
+        self.assertEqual(kw, {"trailing_activation": 5.0,
+                              "trailing_execute": 2.0,
+                              "positions_trailing_stop": True})
+
+    def test_trailing_rec_skips_positions_when_already_on(self):
+        kw = exit_edit_kwargs({"trailing_activation_pct": 5.0,
+                               "trailing_execute_pct": 2.0,
+                               "positions_trailing": True},
+                              recommendation="add-trailing",
+                              current={"strategyProfitCondition":
+                                       "trailing_stop"})
+        self.assertEqual(kw, {"trailing_activation": 5.0,
+                              "trailing_execute": 2.0})
+
+    def test_stop_loss_rec_sends_positive_magnitude_and_total(self):
+        kw = exit_edit_kwargs({"stop_loss_usd": -15.0},
+                              recommendation="add-stop-loss")
+        self.assertEqual(kw, {"stop_loss": 15.0,
+                             "pnl_compare_type": "total"})
+
+
+# ── opt-in exit apply path (set_exits seam) ────────────────────────────
+
+class TestExitApplyPath(unittest.TestCase):
+    """apply=False (default) or apply_fn None → advisory, byte-for-byte
+    today's behavior; apply=True + apply_fn → the seam fires with the
+    right kwargs and the outcome lands on the rec. Never raises."""
+
+    def _tp_bot(self):
+        # aligned channel + realized $7 >= 60% of the $10 target →
+        # add-take-profit (trailing + positions trailing also armed, but
+        # TP wins the priority chain)
+        bot = flat_bot()
+        bot["observed"]["realized_pnl"] = 7.0
+        return bot
+
+    def test_default_advisory_unchanged_without_apply_fn(self):
+        opt, journal, persist = make_optimizer()
+        rec = opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        self.assertEqual(rec["recommendation"], "add-take-profit")
+        self.assertFalse(rec["applied"])
+        self.assertIsNone(rec["applied_at"])
+        self.assertNotIn("apply_error", rec)
+        self.assertEqual(opt.apply_fn, None)
+        kinds = [e["kind"] for e in journal.events]
+        self.assertNotIn("position-optimizer-applied", kinds)
+        self.assertNotIn("position-optimizer-error", kinds)
+
+    def test_apply_true_but_no_fn_still_advisory(self):
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        rec = opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        self.assertEqual(rec["recommendation"], "add-take-profit")
+        self.assertFalse(rec["applied"])
+
+    def test_apply_fn_called_with_set_exits_kwargs(self):
+        calls = []
+
+        def fake_apply(code, kwargs):
+            calls.append((code, dict(kwargs)))
+            return {"ok": True}
+
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        opt.apply_fn = fake_apply
+        bot = self._tp_bot()
+        rec = opt.analyze_bot(bot, "7", now=NOW)
+        self.assertEqual(calls, [("wt-42", {"take_profit": 10.0})])
+        self.assertTrue(rec["applied"])
+        self.assertTrue(rec["applied_at"])
+        self.assertIsNone(rec.get("apply_error"))
+        # the advisory action payload carries the ready-to-run kwargs
+        self.assertEqual(rec["action"]["exit_kwargs"], {"take_profit": 10.0})
+        ev = [e for e in journal.events
+              if e["kind"] == "position-optimizer-applied"]
+        self.assertEqual(len(ev), 1)
+        self.assertEqual(ev[0]["bot_code"], "wt-42")
+        self.assertEqual(ev[0]["recommendation"], "add-take-profit")
+        self.assertEqual(ev[0]["outcome"], "applied")
+        self.assertEqual(ev[0]["exit_kwargs"], {"take_profit": 10.0})
+
+    def test_apply_fn_raising_is_caught_and_recorded(self):
+        def boom(code, kwargs):
+            raise RuntimeError("set_exits exploded")
+
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        opt.apply_fn = boom
+        rec = opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        self.assertFalse(rec["applied"])
+        self.assertIsNone(rec["applied_at"])
+        self.assertIn("set_exits exploded", rec["apply_error"])
+        ev = [e for e in journal.events
+              if e["kind"] == "position-optimizer-error"]
+        self.assertEqual(len(ev), 1)
+        self.assertIn("FAILED", ev[0]["msg"])
+
+    def test_apply_fn_bad_envelope_recorded(self):
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        opt.apply_fn = lambda code, kw: {"ok": False, "error": "WT said no"}
+        rec = opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        self.assertFalse(rec["applied"])
+        self.assertEqual(rec["apply_error"], "WT said no")
+
+    def test_dry_run_envelope_does_not_burn_daily_cap(self):
+        opt, journal, _ = make_optimizer(
+            cfg={"apply": True, "max_apply_per_day": 1})
+        opt.apply_fn = lambda code, kw: {"ok": True, "dry_run": True}
+        b1 = self._tp_bot()
+        rec1 = opt.analyze_bot(b1, "7", now=NOW)
+        self.assertTrue(rec1["applied"])           # journaled as planned
+        self.assertTrue(rec1["applied_at"])
+        self.assertEqual(opt._applied_today[1], 0)  # rehearsal: not counted
+        b2 = self._tp_bot()
+        rec2 = opt.analyze_bot(b2, "8", now=NOW)
+        self.assertTrue(rec2["applied"])           # cap untouched
+
+    def test_max_apply_per_day_respected(self):
+        opt, journal, _ = make_optimizer(
+            cfg={"apply": True, "max_apply_per_day": 1})
+        opt.apply_fn = lambda code, kw: {"ok": True}
+        rec1 = opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        self.assertTrue(rec1["applied"])
+        self.assertEqual(opt._applied_today[1], 1)
+        rec2 = opt.analyze_bot(self._tp_bot(), "8", now=NOW)
+        self.assertFalse(rec2["applied"])          # capped
+        self.assertNotIn("apply_error", rec2)
+        kinds = [e["kind"] for e in journal.events]
+        cap_msgs = [e for e in journal.events
+                    if e["kind"] == "position-optimizer"
+                    and "cap reached" in e.get("msg", "")]
+        self.assertEqual(len(cap_msgs), 1)
+
+    def test_cap_resets_next_day(self):
+        opt, _, _ = make_optimizer(
+            cfg={"apply": True, "max_apply_per_day": 1})
+        opt.apply_fn = lambda code, kw: {"ok": True}
+        opt.analyze_bot(self._tp_bot(), "7", now=NOW)
+        day2 = NOW + 26 * 3600
+        opt.now_fn = lambda: day2
+        rec = opt.analyze_bot(self._tp_bot(), "8", now=day2)
+        self.assertTrue(rec["applied"])
+
+    def test_geometry_recs_never_apply(self):
+        # a recenter rec (drift) with apply=True + apply_fn present must
+        # NOT ride the exit seam — the daemon's grid_edit path owns it
+        calls = []
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        opt.apply_fn = lambda code, kw: calls.append((code, kw)) or {"ok": True}
+        bot = flat_bot()
+        bot["channel"]["mid"] = 90.0
+        bot["observed"]["fills_24h"] = 5
+        rec = opt.analyze_bot(bot, "7", now=NOW)
+        self.assertEqual(rec["recommendation"], "recenter")
+        self.assertEqual(calls, [])
+        self.assertFalse(rec["applied"])
+
+    def test_apply_only_for_exit_recs_on_covered_bot(self):
+        # exit-aware + apply: a bot whose CURRENT exits already cover the
+        # computed targets stays "keep" and nothing is applied even with
+        # apply=True (the engine computes TP $10 + trail 5/2 + positions
+        # trailing for this bot — cover all of them)
+        calls = []
+        opt, journal, _ = make_optimizer(cfg={"apply": True})
+        opt.apply_fn = lambda code, kw: calls.append((code, kw)) or {"ok": True}
+        bot = self._tp_bot()
+        bot["observed"]["exits"] = {"takeProfit": 10.0,
+                                    "trailingStopActivation": 5.0,
+                                    "trailingStopExecute": 2.0,
+                                    "strategyProfitCondition":
+                                        "trailing_stop"}
+        rec = opt.analyze_bot(bot, "7", now=NOW)
+        self.assertEqual(rec["recommendation"], "keep")
+        self.assertEqual(calls, [])
+        self.assertFalse(rec["applied"])
 
 
 class TestSweepJournal(unittest.TestCase):

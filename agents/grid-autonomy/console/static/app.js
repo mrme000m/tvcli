@@ -205,6 +205,7 @@ for (const v of VIEWS) $(`#tab-${v}`).addEventListener("click", () => selectView
 let lastOverview = null;
 let lastStatus = null;       // proxied daemon /status (fail-soft: null when down)
 let lastPnlPoints = null;   // /api/pnl points (newest-first)
+let wtAccountLabel = "…";   // from /api/meta
 
 async function loadOverview() {
   let ov;
@@ -292,6 +293,10 @@ function renderStatusbar(ov) {
     chips.push(`<span class="chip" style="border-color:${col};color:${col}" title="${esc(title)}">♥ ${s}</span>`);
   }
   bar.innerHTML = chips.join("");
+  // keep the header subtitle in sync with the actual daemon mode
+  const modeLabel = (ov && ov.daemon && ov.daemon.mode) || "—";
+  $("#wt-account").textContent =
+    `mission console · ${esc(modeLabel)} · WT: ${esc(wtAccountLabel)}`;
 }
 
 /* the signature: an ATR-channel strip with geometric grid rungs and a
@@ -371,6 +376,30 @@ function tvcliFitHTML(bot) {
   return `<div class="slot-tvcli" title="${esc(tip)}">
     <div class="slot-tvcli-row">${bonusChip} ${okChip} ${ageChip}</div>
     ${chips ? `<div class="slot-tvcli-notes">${chips}</div>` : ""}
+  </div>`;
+}
+
+/* Current exit profile — the enriched grid_list fields the daemon now
+   projects (bot.exits / observed.exits). Compact one-line badge on the
+   fleet card when any exit is configured. */
+function exitProfileHTML(bot) {
+  const ex = bot.exits || (bot.observed && bot.observed.exits) || null;
+  if (!ex || typeof ex !== "object") return "";
+  const parts = [];
+  if (isNum(ex.takeProfit)) parts.push(`TP ${fmtUsd(ex.takeProfit)}`);
+  if (isNum(ex.stopLoss)) parts.push(`SL ${fmtUsd(ex.stopLoss)}`);
+  if (isNum(ex.trailingStopActivation))
+    parts.push(`trail ${fmtNum(ex.trailingStopActivation, 2)}/${fmtNum(ex.trailingStopExecute, 2)}`);
+  if (isNum(ex.strategyStopLossFixedPercentRatio))
+    parts.push(`posSL ${fmtNum(ex.strategyStopLossFixedPercentRatio * 100, 1)}%`);
+  if (ex.strategyProfitCondition === "trailing_stop") parts.push("pos trail");
+  if (!parts.length) return "";
+  const cmp = [];
+  if (ex.stopLossPnlCompareType) cmp.push(`SL@${ex.stopLossPnlCompareType}`);
+  if (ex.pumpProtectionOrderType) cmp.push(`pp ${ex.pumpProtectionOrderType}`);
+  const tip = `server-side exit config${cmp.length ? ` (${cmp.join(" · ")})` : ""} — the fields GridClient.set_exits edits`;
+  return `<div class="slot-exits" title="${esc(tip)}">
+    <span class="mono" style="font-size:11px;color:var(--ink-faint)">${esc(parts.join(" · "))}</span>
   </div>`;
 }
 
@@ -480,6 +509,7 @@ function slotCard(bot) {
     </div>
     ${ladderHTML(bot)}
     ${tvcliFitHTML(bot)}
+    ${exitProfileHTML(bot)}
     <div class="slot-metrics">
       <div class="metric"><div class="m-label">price</div><div class="m-value">${fmtPrice(obs.price)}</div></div>
       <div class="metric"><div class="m-label">fills 24h</div>
@@ -953,7 +983,12 @@ function renderFleet(ov, st) {
       <button class="btn" id="b-unkill" style="margin-left:auto">Clear KILL</button></div>`);
   } else if (d.mode === "dry-run") {
     banners.push(`<div class="banner banner--info">
-      <div><div class="banner-title">Dry-run mode</div>The daemon plans and journals everything but creates no bots. Restart with live-paper to deploy.</div></div>`);
+      <div><div class="banner-title">Dry-run mode</div>The daemon plans and journals everything but creates no bots. Switch to live-paper to deploy paper bots.</div>
+      <button class="btn btn--primary" id="b-switch-paper" style="margin-left:auto;flex:none">Switch to live-paper</button></div>`);
+  } else if (d.mode === "live-paper") {
+    banners.push(`<div class="banner banner--ok">
+      <div><div class="banner-title">Live-paper mode</div>The daemon is creating and managing WunderTrading paper bots.</div>
+      <button class="btn" id="b-switch-dry" style="margin-left:auto;flex:none">Switch to dry-run</button></div>`);
   }
   const bn = $("#fleet-banner");
   bn.innerHTML = banners.join("");
@@ -961,6 +996,8 @@ function renderFleet(ov, st) {
   wire("#b-unkill", ctlUnkill);
   wire("#b-start-dry", () => ctlStart(false));
   wire("#b-start-paper", () => ctlStart(true));
+  wire("#b-switch-paper", () => ctlRestart(true));
+  wire("#b-switch-dry", () => ctlRestart(false));
 }
 
 /* Wire the global "Rotate slot" control once — the button is a fixed
@@ -3120,24 +3157,32 @@ async function ctlStart(livePaper) {
   } catch (e) { toast(`start failed: ${e.data && e.data.error || e.message}`, true, 6500); }
 }
 
-async function ctlRestart() {
+async function ctlRestart(livePaper) {
   const killArmed = lastOverview && lastOverview.daemon && lastOverview.daemon.kill_file;
+  const toPaper = livePaper === true;
+  const toDry = livePaper === false;
   const { ok, checked } = await confirmDialog({
-    title: "Restart daemon",
-    body: [el("div", {}, "Under launchd this is a supervised kickstart; otherwise stop + start. Unapplied config takes effect after restart.")],
-    label: "Restart",
+    title: toPaper ? "Switch to live-paper" : toDry ? "Switch to dry-run" : "Restart daemon",
+    body: [el("div", {}, toPaper
+      ? "Restart the daemon in live-paper mode: it will create and manage real WunderTrading paper bots."
+      : toDry
+        ? "Restart the daemon in dry-run mode: it will plan and journal but create no bots."
+        : "Under launchd this is a supervised kickstart; otherwise stop + start. Unapplied config takes effect after restart.")],
+    label: toPaper || toDry ? "Switch mode" : "Restart",
     checkbox: killArmed ? "Clear the KILL file first" : null,
   });
   if (!ok) return;
   try {
-    await api("/api/daemon/restart", {
-      method: "POST", body: { confirm: true, clear_kill: checked },
-    });
-    toast("Restarting — daemon back within ~30s.");
+    const body = { confirm: true, clear_kill: checked };
+    if (toPaper || toDry) body.live_paper = toPaper;
+    await api("/api/daemon/restart", { method: "POST", body });
+    toast(toPaper ? "Switching to live-paper — back within ~30s."
+                  : toDry ? "Switching to dry-run — back within ~30s."
+                          : "Restarting — daemon back within ~30s.");
     setTimeout(loadOverview, 4000);
   } catch (e) { toast(`restart failed: ${e.data && e.data.error || e.message}`, true, 6500); }
 }
-$("#ctl-restart").addEventListener("click", ctlRestart);
+$("#ctl-restart").addEventListener("click", () => ctlRestart());
 $("#ctl-rotate-go").addEventListener("click", ctlRotateFromPanel);
 
 $("#ctl-stop").addEventListener("click", async () => {
@@ -3177,8 +3222,12 @@ async function boot() {
   loadPnlTimeline();
   try {
     const meta = await api("/api/meta");
+    wtAccountLabel = meta.wt_account || "…";
+    const modeLabel = (lastOverview && lastOverview.daemon && lastOverview.daemon.mode) || "—";
+    $("#wt-account").textContent =
+      `mission console · ${esc(modeLabel)} · WT: ${esc(wtAccountLabel)}`;
     $("#footnote").textContent =
-      `grid/autonomy console · paper fleet · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
-  } catch { /* footnote stays default */ }
+      `grid/autonomy console · ${esc(modeLabel)} · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
+  } catch { /* header/footnote stay default */ }
 }
 boot();

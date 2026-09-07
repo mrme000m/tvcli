@@ -87,6 +87,83 @@ class TestLiveCallsUseWtclient(unittest.TestCase):
         self.assertIn("nope", result["error"])
 
 
+class TestGridSetExits(unittest.TestCase):
+    """grid_set_exits — the exit-only live-edit wrapper over
+    wtclient.GridClient.set_exits (verified 2026-09-07)."""
+
+    def test_dry_run_envelope_shape(self):
+        result = wt_library.grid_set_exits(
+            "bot1", take_profit=10.0, stop_loss=15.0,
+            pnl_compare_type="total", trailing_activation=5.0,
+            trailing_execute=2.0, positions_trailing_stop=True,
+            positions_stop_loss_pct=5, order_type="market")
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["transport"], "wtclient.GridClient.set_exits")
+        self.assertEqual(result["code"], "bot1")
+        self.assertEqual(result["payload"], {
+            "take_profit": 10.0, "stop_loss": 15.0,
+            "pnl_compare_type": "total", "trailing_activation": 5.0,
+            "trailing_execute": 2.0, "positions_trailing_stop": True,
+            "positions_stop_loss_pct": 5, "order_type": "market"})
+        # dry-run must not touch wtclient at all
+        with patch("execution.wt_library.get_wun") as gw:
+            wt_library.grid_set_exits("bot1", take_profit=1.0)
+            gw.assert_not_called()
+
+    def test_dry_run_drops_unset_kwargs(self):
+        result = wt_library.grid_set_exits("bot1")
+        self.assertEqual(result["payload"], {})
+
+    def test_live_success_wraps_result(self):
+        with patch("execution.wt_library.get_wun") as gw:
+            fake_wun = MagicMock()
+            fake_wun.grid.set_exits.return_value = {"code": "bot1", "ok": 1}
+            gw.return_value = fake_wun
+            result = wt_library.grid_set_exits(
+                "bot1", take_profit=10.0, dry_run=False)
+        self.assertTrue(result["ok"])
+        self.assertFalse(result.get("dry_run", False))
+        self.assertEqual(result["transport"], "wtclient.GridClient.set_exits")
+        self.assertEqual(result["result"], {"code": "bot1", "ok": 1})
+        fake_wun.grid.set_exits.assert_called_once_with(
+            "bot1", take_profit=10.0)
+
+    def test_live_only_sends_provided_kwargs(self):
+        with patch("execution.wt_library.get_wun") as gw:
+            fake_wun = MagicMock()
+            fake_wun.grid.set_exits.return_value = {}
+            gw.return_value = fake_wun
+            wt_library.grid_set_exits("bot1", stop_loss=3.0, dry_run=False)
+        fake_wun.grid.set_exits.assert_called_once_with("bot1", stop_loss=3.0)
+
+    def test_live_wun_error_returns_ok_false(self):
+        from wtclient.errors import WunApiError
+
+        with patch("execution.wt_library.get_wun") as gw:
+            fake_wun = MagicMock()
+            fake_wun.grid.set_exits.side_effect = WunApiError(
+                "bad exit", status_code=400)
+            gw.return_value = fake_wun
+            result = wt_library.grid_set_exits("bot1", take_profit=1,
+                                               dry_run=False)
+        self.assertFalse(result["ok"])
+        self.assertIn("bad exit", result["error"])
+
+    def test_live_generic_exception_returns_ok_false(self):
+        with patch("execution.wt_library.get_wun") as gw:
+            fake_wun = MagicMock()
+            fake_wun.grid.set_exits.side_effect = RuntimeError("transport died")
+            gw.return_value = fake_wun
+            result = wt_library.grid_set_exits("bot1", take_profit=1,
+                                               dry_run=False)
+        self.assertFalse(result["ok"])
+        self.assertIn("transport died", result["error"])
+
+    def test_exported_in_all(self):
+        self.assertIn("grid_set_exits", wt_library.__all__)
+
+
 class TestRecorderAndCatalog(unittest.TestCase):
     def setUp(self):
         wt_library.reset_wun()

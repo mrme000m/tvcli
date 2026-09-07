@@ -159,6 +159,49 @@ position_optimizer:            # as shipped in config.yaml
   stop_loss_enabled: false         # never by default (never-close-at-a-loss)
 ```
 
+## 4b. Exit awareness + the opt-in set_exits apply path (2026-09-08)
+
+`wtclient.GridClient.set_exits` (live-verified 2026-09-07) edits ONLY the
+exit/risk fields of an ACTIVE grid bot through the upsert path — the bot
+is **not** stopped or restarted; the edit applies live
+(`wt_library.grid_set_exits` is the never-raise daemon wrapper, dry-run
+by default). The position optimizer now uses it in two ways:
+
+- **Exit awareness (always on, advisory-side):** `current_exits(bot)`
+  extracts the bot's CURRENT exit config from the enriched grid_list
+  fields the observe layer projects (`observed.exits` → `bot.exits`,
+  mirrored into the console fleet cards). `evaluate_exits` /
+  `make_recommendation` suppress an `add-take-profit` / `add-trailing` /
+  `add-stop-loss` rec when the corresponding field is already set and
+  materially matches the target (within `EXIT_MATCH_TOL` = 10%); a set
+  but materially different value still escalates per the normal
+  priority. No more "add take-profit" recs for bots that already have
+  one.
+- **Opt-in apply (apply: true only):** with
+  `position_optimizer.apply: true` the daemon injects
+  `wt_library.grid_set_exits` (dry-run gated by the daemon's own
+  live-paper flag) as the engine's `apply_fn` seam. An exit-add rec —
+  and ONLY an exit-add rec, geometry still goes through the grid-edit
+  path with its own gates — is then executed live, the outcome recorded
+  on the recommendation (`applied` / `apply_error` / `applied_at`) and
+  journaled as `position-optimizer-applied` (success, carrying bot code
+  + action + exit kwargs + outcome) or `position-optimizer-error`
+  (failure). `max_apply_per_day` counts SUCCESSFUL applications that
+  actually executed — a dry-run daemon's ok envelope is journaled as a
+  rehearsal but does not burn the cap. The engine default stays
+  `apply: false` (advisory only, zero WT mutation); the config comment
+  documents that `apply: true` now covers both geometry AND exit edits.
+
+Kwarg mapping (engine target → `set_exits`): `take_profit_usd →
+take_profit`; `trailing_activation_pct`/`trailing_execute_pct →
+trailing_activation`/`trailing_execute` (+ `positions_trailing_stop:
+true` when the engine flagged per-position trailing and the bot is not
+already in `strategyProfitCondition: "trailing_stop"`); `stop_loss_usd
+→ stop_loss` as a POSITIVE magnitude with `pnl_compare_type: "total"`
+(the engine models the risk cap as a negative USD level; WT stores the
+threshold as a positive $ compared against cumulative PnL — same
+convention as `grid_adapter.compute_upsert`).
+
 ## 5. How to validate
 
 `browser-debug/wt-backtest.mjs` is the verbatim Node port of the

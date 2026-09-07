@@ -286,15 +286,20 @@ position_optimizer:           # slow-loop position revaluation (position_optimiz
   cooldown_min: 60            # per-bot re-analysis cooldown
   min_improvement_pct: 2.0    # journal/persist gate on expected_delta —
                                # AND the daemon-side apply gate
-  apply: true                  # edit-type GEOMETRY recs only (recenter/
-                               # widen/narrow/resize/revalue-grid): applied
-                               # via the existing grid-edit path when the
-                               # improvement gate, the shared 2 h adjust
-                               # rate limit and the daily cap allow. Exit
-                               # recs (add-take-profit/add-trailing/add-
-                               # stop-loss) stay advisory + journal-only,
-                               # never auto-applied, and exit keys are
-                               # stripped from applied geometry payloads.
+  apply: true                  # auto-edits when the gates allow:
+                               # GEOMETRY recs (recenter/widen/narrow/
+                               # resize/revalue-grid) via the existing
+                               # grid-edit path (improvement gate, shared
+                               # 2 h adjust rate limit, daily cap), and
+                               # EXIT-ADD recs (add-take-profit/
+                               # add-trailing/add-stop-loss) via the
+                               # wtclient set_exits seam — the exit-only
+                               # live edit of an ACTIVE bot (no stop/
+                               # restart, verified 2026-09-07). Exit keys
+                               # are still stripped from applied geometry
+                               # payloads. false (the engine default)
+                               # keeps EVERYTHING advisory — journal +
+                               # PB records only, zero WT mutation.
   max_apply_per_day: 4        # daemon-side auto-edits per calendar day
   stop_loss_enabled: false     # grids are mean-reversion: off by default
   take_profit_pct: 0.04        # × slot balance = USD profit-exit target

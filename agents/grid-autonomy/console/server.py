@@ -76,7 +76,7 @@ API (all JSON):
     POST /api/daemon/start    scripts/start.sh [--live-paper]   {confirm,
                               live_paper, clear_kill}
     POST /api/daemon/restart  launchd kickstart or stop+start   {confirm,
-                              clear_kill}
+                              clear_kill, live_paper}
     POST /api/dev/reset       run `dev reset` (detached; wipes runtime
                               state, stops the stack; --keep-decisions /
                               --wt / --start)   {confirm, keep_decisions,
@@ -122,6 +122,11 @@ LAUNCHD_LABEL = "com.tvcli.grid-autonomy"
 # shows a stale/empty file in the normal (supervised) production case.
 LAUNCHD_LOG = os.path.join(STATE_DIR, "logs", "daemon-launchd.log")
 PB_URL = os.environ.get("PB_URL", "http://127.0.0.1:8090").rstrip("/")
+
+# WT account label surfaced in the UI header + fleet summary. The VPS
+# container uses the vault item; the Mac uses its own browser session.
+WT_ACCOUNT_LABEL = os.environ.get("WT_ACCOUNT_LABEL") or (
+    "vps (vault account)" if os.path.isfile("/.dockerenv") else "local (Mac account)")
 
 # LLM provider sidecar (set/choose/validate from the console). Mirrors the
 # .pocketbase/pb.env "export KEY=\"val\"" format; the daemon sources it via
@@ -953,6 +958,12 @@ def _enriched_bots(st: dict) -> list[dict]:
             "stagnant": stagnant,
             "position_optimizer": po,
             "optimizer_tracker": bot.get("optimizer"),
+            # current exit profile (enriched grid_list fields projected
+            # by the daemon health cycle / observe layer) — renders the
+            # exit badge on the fleet card when present
+            "exits": (bot.get("exits") if isinstance(bot.get("exits"), dict)
+                      else (obs.get("exits")
+                            if isinstance(obs.get("exits"), dict) else None)),
             "take_profit_usd": bot.get("take_profit_usd"),
             "loss_veto": obs.get("loss_veto") if isinstance(obs, dict) else None,
         })
@@ -1851,7 +1862,7 @@ def daemon_start(live_paper=False, clear_kill=False) -> tuple[int, dict]:
                           "CLOUDFLARE_* keys from `dsh web`)"}
 
 
-def daemon_restart(clear_kill=False) -> tuple[int, dict]:
+def daemon_restart(clear_kill=False, live_paper=None) -> tuple[int, dict]:
     if os.path.exists(KILL_FILE) and not clear_kill:
         return 409, {"error": "KILL file present — pass clear_kill to remove it",
                      "kill_present": True}
@@ -1874,13 +1885,24 @@ def daemon_restart(clear_kill=False) -> tuple[int, dict]:
             time.sleep(1.0)
             pid = _pid()
             if pid is not None:
-                return 200, {"restarted": True, "pid": pid, "supervisor": "launchd"}
+                return 200, {"restarted": True, "pid": pid, "supervisor": "launchd",
+                             "mode": "live-paper",
+                             "note": "launchd supervisor always starts --live-paper"}
         return 504, {"error": "kickstart issued but daemon not up after 40s"}
+    # Manual/supervised restart: honor requested mode, or preserve the current
+    # mode when the caller does not specify one. This lets the console switch
+    # a running dry-run daemon to live-paper (or vice versa) with one restart.
+    current_mode = None
+    pid = _pid()
+    if pid is not None:
+        current_mode = _mode(pid)
     code, body = daemon_stop()
     if code != 200:
         return code, body
     time.sleep(1.0)
-    return daemon_start(live_paper=True)
+    if live_paper is None:
+        live_paper = current_mode == "live-paper"
+    return daemon_start(live_paper=live_paper)
 
 
 # ── HTTP handler ───────────────────────────────────────────────────────
@@ -2048,6 +2070,7 @@ class Handler(BaseHTTPRequestHandler):
                 "pocketbase": PB_URL, "state_dir": STATE_DIR,
                 "grid_home": GRID_HOME, "launchd_label": LAUNCHD_LABEL,
                 "pid": os.getpid(), "started": getattr(SERVER, "started", None),
+                "wt_account": WT_ACCOUNT_LABEL,
             })
         else:
             self._json(404, {"error": "unknown path"})
@@ -2132,7 +2155,12 @@ class Handler(BaseHTTPRequestHandler):
             if not confirmed:
                 self._json(400, {"error": 'pass {"confirm": true}'})
                 return
-            self._json(*daemon_restart(clear_kill=bool(body.get("clear_kill"))))
+            # live_paper: True/False forces the mode; null/omitted preserves
+            # the current mode on manual restarts (launchd always uses
+            # --live-paper regardless of this flag).
+            self._json(*daemon_restart(
+                clear_kill=bool(body.get("clear_kill")),
+                live_paper=body.get("live_paper")))
         elif route in ("/api/dev/reset", "/api/dev/reset-wt", "/api/dev/clean"):
             if not confirmed:
                 self._json(400, {"error": 'pass {"confirm": true}'})

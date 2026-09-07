@@ -140,6 +140,45 @@ class TestObserveAll(unittest.TestCase):
         self.assertEqual(out["0"]["open_losing"], 0)
 
 
+class TestExitFields(unittest.TestCase):
+    """Enriched exit fields (the GridClient.set_exits surface) projected
+    by grid_status() and observe_all() — additive, from the same grid
+    resource both already fetch."""
+
+    def test_grid_status_carries_exit_fields(self):
+        with mock.patch.object(observe, "_api_json", side_effect=_router):
+            st = observe.grid_status()
+        b = st[0]
+        for key in ("takeProfit", "stopLoss", "stopLossPnlCompareType",
+                    "trailingStopActivation", "trailingStopExecute",
+                    "trailingStopPnlCompareType",
+                    "strategyProfitCondition",
+                    "strategyStopLossFixedPercentRatio",
+                    "pumpProtectionOrderType"):
+            self.assertIn(key, b)
+        # fixture values (tests/fixtures/grid_resource.json)
+        self.assertIsNone(b["takeProfit"])
+        self.assertIsNone(b["stopLoss"])
+        self.assertEqual(b["stopLossPnlCompareType"], "total")
+        self.assertEqual(b["strategyProfitCondition"], "take_profit")
+
+    def test_observe_all_carries_current_exits(self):
+        with mock.patch.object(observe, "_api_json", side_effect=_router), \
+             mock.patch.object(observe.time, "time", return_value=NOW):
+            out = observe.observe_all({"0": BOT})
+        ex = out["0"]["exits"]
+        self.assertIsNone(ex["takeProfit"])
+        self.assertIsNone(ex["trailingStopActivation"])
+        self.assertIsNone(ex["strategyStopLossFixedPercentRatio"])
+        self.assertEqual(ex["stopLossPnlCompareType"], "total")
+        self.assertEqual(ex["strategyProfitCondition"], "take_profit")
+        self.assertEqual(ex["pumpProtectionOrderType"], "market")
+
+    def test_observe_one_no_resource_has_no_exits(self):
+        out = observe.observe_all({"1": {"venue": "binance"}})
+        self.assertNotIn("exits", out["1"])
+
+
 class TestLinePnl(unittest.TestCase):
     """_line_pnl — the per-line PnL the never-close-at-a-loss gate uses."""
 

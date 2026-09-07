@@ -83,8 +83,32 @@ def _grid_resources():
     return _grid_resources_ex()[0]
 
 
+def _exit_fields(res):
+    """Enriched exit/risk fields from a grid resource (additive projection).
+
+    Mirrors wtclient ``GridClient.list()`` — exactly the fields
+    ``GridClient.set_exits`` edits (live-verified 2026-09-07) — so
+    daemon-side bot records can carry the bot's CURRENT exit profile.
+    """
+    return {
+        "takeProfit": res.get("takeProfit"),
+        "stopLoss": res.get("stopLoss"),
+        "stopLossPnlCompareType": res.get("stopLossPnlCompareType"),
+        "trailingStopActivation": res.get("trailingStopActivation"),
+        "trailingStopExecute": res.get("trailingStopExecute"),
+        "trailingStopPnlCompareType": res.get("trailingStopPnlCompareType"),
+        "strategyProfitCondition": res.get("strategyProfitCondition"),
+        "strategyStopLossFixedPercentRatio":
+            res.get("strategyStopLossFixedPercentRatio"),
+        "pumpProtection": res.get("pumpProtection"),
+        "pumpProtectionOrderType": res.get("pumpProtectionOrderType"),
+    }
+
+
 def grid_status():
-    """List of active bots: code/status/paperTrading/exchange/pair/pairCode."""
+    """List of active bots: code/status/paperTrading/exchange/pair/pairCode
+    + the enriched exit fields (_exit_fields — takeProfit / stopLoss /
+    trailing / positions exits) so callers see the CURRENT exit profile."""
     out = []
     for res in _grid_resources():
         pair = res.get("pair") or {}
@@ -96,6 +120,7 @@ def grid_status():
             "exchange": exchange.get("code"),
             "pair": pair.get("viewSymbol") or pair.get("unifiedCode"),
             "pairCode": pair.get("code"),
+            **_exit_fields(res),
         })
     return out
 
@@ -491,7 +516,12 @@ def _observe_one(bot, by_code, list_ok=True):
         "realized_pnl_completed": realized_pnl_completed,
         "realized_pnl_panic": realized_pnl_panic,
     }
-    if not res:
+    if res:
+        # current exit profile (additive) — consumed by the position
+        # optimizer's exit awareness and projected onto the bot record
+        # by the daemon's health cycle
+        obs["exits"] = _exit_fields(res)
+    else:
         obs["error"] = ("grid status list unavailable (browser/session down)"
                         if not list_ok
                         else "grid resource not found in status list")

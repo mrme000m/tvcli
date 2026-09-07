@@ -1106,6 +1106,7 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
 
 .banner--bad { border-color: var(--crimson); background: var(--crimson-wash); }
 .banner--info { border-color: var(--teal); background: var(--teal-wash); }
+.banner--ok { border-color: var(--teal-deep); background: var(--teal-wash); }
 
 .banner .banner-title { font-weight: 700; margin-bottom: 2px; }
 .banner .btn { margin-left: auto; flex: none; }

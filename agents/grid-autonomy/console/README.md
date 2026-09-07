@@ -49,6 +49,14 @@ The console can run (and show last-persisted state) whether the daemon is
 up or down; live values (status chips, ladder cursors, feed) update every
 5s while the page is visible.
 
+**Two WunderTrading accounts.** The header subtitle and the fleet-summary
+"WT account" row show which WT account this instance trades on: the
+deployment (VPS container — vault item `wundertrading` in folder
+`grid-autonomy`) and the Mac's local daemon run on **two separate
+WunderTrading accounts**. Override the label with `WT_ACCOUNT_LABEL` env;
+default is `vps (vault account)` inside the container (detected via
+`/.dockerenv`) and `local (Mac account)` otherwise.
+
 ## The UI
 
 | View | What it shows / does |
@@ -77,7 +85,7 @@ Everything the UI does is a plain JSON endpoint (safe to curl):
 | GET | `/api/logs?lines=&grep=` | `daemon.log` tail. |
 | GET | `/api/config` | Parsed `config.yaml` + editable whitelist. |
 | GET | `/api/observe` | Proxy of daemon ctl `/observe`. |
-| GET | `/api/meta` | Ports, paths. |
+| GET | `/api/meta` | Ports, paths, `wt_account` (WT account label — VPS/vault vs local). |
 | POST | `/api/ctl/rescreen` | Queue immediate rescreen. |
 | POST | `/api/ctl/reliability` | Queue reliability refresh. |
 | POST | `/api/ctl/rotate` `{"slot": n}` | Force-rotate a slot. |

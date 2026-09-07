@@ -193,6 +193,34 @@ class TestShaping(ConsoleTestCase):
         self.assertEqual(bots[0]["committed"], 37.5)
         self.assertEqual(bots[0]["grid_type"], "long")
 
+    def test_enriched_bots_carries_current_exits(self):
+        # the exit-profile fields the daemon health cycle projects
+        # (bot.exits / observed.exits) must reach the console-facing
+        # enriched bot record — the fleet card exit badge renders from it
+        self.write_state({
+            "active_bots": {
+                "1": {"symbol": "PUMP", "venue": "hyperliquid",
+                      "ticket": {"grid_type": "long"},
+                      "observed": {"price": 0.004, "status": "active",
+                                   "exits": {"takeProfit": 5,
+                                             "stopLoss": None}},
+                      "exits": {"takeProfit": 5, "stopLoss": 3,
+                                "trailingStopActivation": 5,
+                                "trailingStopExecute": 2,
+                                "strategyStopLossFixedPercentRatio": 0.05}},
+                "2": {"symbol": "DOGE", "venue": "binance",
+                      "ticket": {"grid_type": "neutral"},
+                      "observed": {"price": 0.10, "status": "active"}},
+            },
+        })
+        bots = server._enriched_bots(server._load_state())
+        by_slot = {str(b["slot"]): b for b in bots}
+        self.assertEqual(by_slot["1"]["exits"]["takeProfit"], 5)
+        self.assertEqual(by_slot["1"]["exits"]["strategyStopLossFixedPercentRatio"], 0.05)
+        # bot.exits wins over observed.exits; bots without exits get None
+        self.assertEqual(by_slot["1"]["exits"]["stopLoss"], 3)
+        self.assertIsNone(by_slot["2"]["exits"])
+
     def test_enriched_bots_attaches_tvcli_fit_from_cache(self):
         # When the bot's symbol/venue appears in state.screen_cache, the
         # enriched record should carry the tvcli_fit block + notes — the
@@ -522,6 +550,32 @@ class TestHTTP(ConsoleTestCase):
         self.assertEqual(code, 409)
         self.assertTrue(body.get("kill_present"))
 
+    def test_daemon_restart_passes_live_paper_flag(self):
+        # The restart endpoint must forward live_paper to daemon_restart.
+        called = {}
+        real = server.daemon_restart
+        def spy(clear_kill=False, live_paper=None):
+            called["clear_kill"] = clear_kill
+            called["live_paper"] = live_paper
+            return 200, {"restarted": True, "mode": "live-paper" if live_paper else "dry-run"}
+        server.daemon_restart = spy
+        try:
+            code, body = self.call("/api/daemon/restart", "POST",
+                                   {"confirm": True, "live_paper": True})
+            self.assertEqual(code, 200)
+            self.assertFalse(called.get("clear_kill"))
+            self.assertTrue(called.get("live_paper"))
+            code, body = self.call("/api/daemon/restart", "POST",
+                                   {"confirm": True, "live_paper": False})
+            self.assertEqual(code, 200)
+            self.assertFalse(called.get("live_paper"))
+            code, body = self.call("/api/daemon/restart", "POST",
+                                   {"confirm": True})
+            self.assertEqual(code, 200)
+            self.assertIsNone(called.get("live_paper"))
+        finally:
+            server.daemon_restart = real
+
     def test_position_sweeps_endpoint(self):
         self.write_state({"journal": [
             {"kind": "position-optimizer", "msg": "keep binance:AAA",
@@ -542,6 +596,12 @@ class TestHTTP(ConsoleTestCase):
                 f"http://127.0.0.1:{self.port}/", timeout=5) as resp:
             self.assertEqual(resp.status, 200)
             self.assertIn("mission console", resp.read().decode())
+
+    def test_meta_includes_wt_account(self):
+        code, body = self.call("/api/meta")
+        self.assertEqual(code, 200)
+        self.assertIn("wt_account", body)
+        self.assertIn(body["wt_account"], ("local (Mac account)", "vps (vault account)"))
 
     def test_path_traversal_refused(self):
         code, body = self.call("/api/../console/server.py")

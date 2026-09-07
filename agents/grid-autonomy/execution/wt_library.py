@@ -297,6 +297,77 @@ def grid_edit(
         return {"ok": False, "transport": "wtclient.GridClient.edit", "error": str(exc)}
 
 
+def grid_set_exits(
+    code: str,
+    *,
+    take_profit: float | None = None,
+    stop_loss: float | None = None,
+    pnl_compare_type: str | None = None,
+    trailing_activation: float | None = None,
+    trailing_execute: float | None = None,
+    positions_trailing_stop: bool | None = None,
+    positions_stop_loss_pct: float | None = None,
+    order_type: str | None = None,
+    dry_run: bool = True,
+) -> dict[str, Any]:
+    """Edit ONLY the exit/risk fields of an existing (active) grid bot.
+
+    Thin wrapper over ``wtclient.GridClient.set_exits`` (live-verified
+    2026-09-07): the edit goes through the same upsert path as
+    :func:`grid_edit` but overlays only the provided exit fields, so the
+    bot is NOT stopped/restarted — exit edits apply live to an active bot.
+    KWarg semantics (mirrors wtclient):
+
+    * ``take_profit`` / ``stop_loss`` — $ thresholds on cumulative Total
+      PnL (``stop_loss`` is a POSITIVE magnitude; the engine models risk
+      as a negative USD level and sends ``abs()``),
+    * ``pnl_compare_type`` — "total" | "unrealized", sets both
+      ``stopLossPnlCompareType`` and ``trailingStopPnlCompareType``,
+    * ``trailing_activation`` / ``trailing_execute`` — trailing arm /
+      give-back thresholds (passed through verbatim, same convention as
+      grid_adapter.compute_upsert),
+    * ``positions_trailing_stop`` — True maps ``strategyProfitCondition``
+      to "trailing_stop" (per-position trailing), False to "take_profit",
+    * ``positions_stop_loss_pct`` — UI percent (5 → 0.05 ratio) per-line
+      stop loss,
+    * ``order_type`` — "market" | "limit" (pump protection order type).
+
+    ``dry_run=True`` (the default) returns the planned call envelope
+    WITHOUT touching wtclient; never raises (WunError / any exception →
+    ``{"ok": False, "error": ...}``, same shape as grid_edit).
+    """
+    kwargs = {
+        "take_profit": take_profit,
+        "stop_loss": stop_loss,
+        "pnl_compare_type": pnl_compare_type,
+        "trailing_activation": trailing_activation,
+        "trailing_execute": trailing_execute,
+        "positions_trailing_stop": positions_trailing_stop,
+        "positions_stop_loss_pct": positions_stop_loss_pct,
+        "order_type": order_type,
+    }
+    payload = {k: v for k, v in kwargs.items() if v is not None}
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "transport": "wtclient.GridClient.set_exits",
+            "code": code,
+            "payload": payload,
+        }
+    wun = get_wun()
+    try:
+        result = wun.grid.set_exits(code, **payload)
+        return {"ok": True, "transport": "wtclient.GridClient.set_exits",
+                "result": result}
+    except WunError as exc:
+        return {"ok": False, "transport": "wtclient.GridClient.set_exits",
+                "error": str(exc)}
+    except Exception as exc:  # belt-and-braces: never raise (grid_edit shape)
+        return {"ok": False, "transport": "wtclient.GridClient.set_exits",
+                "error": f"{type(exc).__name__}: {exc}"}
+
+
 # -- discovery/debug helpers --------------------------------------------------
 
 
@@ -369,6 +440,7 @@ __all__ = [
     "grid_stop",
     "grid_delete",
     "grid_edit",
+    "grid_set_exits",
     "api_profiles",
     "live_strategies",
     "exchanges_list_profiles",

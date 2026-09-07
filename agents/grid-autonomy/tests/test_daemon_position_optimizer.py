@@ -204,6 +204,155 @@ class TestDemoCapRelearn(PositionOptimizerHarness):
         self.assertNotIn("demo-cap-relearn", kinds)
 
 
+class TestExitApplySeam(PositionOptimizerHarness):
+    """Daemon-side wiring of the opt-in exit-apply path: the engine's
+    apply_fn seam → wt_library.grid_set_exits, with the daemon-level
+    dry-run gate (live_paper) baked into the closure."""
+
+    def test_apply_fn_wired_to_daemon_method(self):
+        d = self.make_daemon()
+        fn = d.position_optimizer.apply_fn
+        self.assertIsNotNone(fn)
+        self.assertEqual(fn.__name__, "_po_apply_exit")
+        self.assertIs(fn.__self__, d)
+
+    def test_dry_run_daemon_passes_dry_run_true(self):
+        d = self.make_daemon()
+        with mock.patch("daemon.wt_library.grid_set_exits",
+                        return_value={"ok": True, "dry_run": True}) as gs:
+            out = d._po_apply_exit("B1", {"take_profit": 10.0})
+        gs.assert_called_once_with("B1", dry_run=True, take_profit=10.0)
+        self.assertTrue(out["ok"])
+        self.assertTrue(out["dry_run"])
+
+    def test_live_paper_daemon_executes(self):
+        d = self.make_daemon()
+        d._live_paper = True
+        with mock.patch("daemon.wt_library.grid_set_exits",
+                        return_value={"ok": True}) as gs:
+            out = d._po_apply_exit("B1", {"stop_loss": 15.0,
+                                           "pnl_compare_type": "total"})
+        gs.assert_called_once_with("B1", dry_run=False, stop_loss=15.0,
+                                   pnl_compare_type="total")
+        self.assertTrue(out["ok"])
+
+    def test_seam_never_raises(self):
+        d = self.make_daemon()
+        with mock.patch("daemon.wt_library.grid_set_exits",
+                        side_effect=RuntimeError("boom")) as gs:
+            out = d._po_apply_exit("B1", {"take_profit": 1.0})
+        self.assertFalse(out["ok"])
+        self.assertIn("boom", out["error"])
+
+    def test_seam_fail_soft_when_wt_library_missing(self):
+        d = self.make_daemon()
+        with mock.patch.object(daemon, "HAS_WT_LIBRARY", False):
+            out = d._po_apply_exit("B1", {"take_profit": 1.0})
+        self.assertFalse(out["ok"])
+        self.assertIn("unavailable", out["error"])
+
+    def test_engine_end_to_end_exit_apply_dry_run_daemon(self):
+        """The full opt-in path on the real engine + real daemon seam:
+        apply=True, dry-run daemon → the set_exits envelope is journaled
+        (position-optimizer-applied, dry_run: true), never executed."""
+        d = self.make_daemon()
+        # pin the ENGINE's merged cfg (built at __init__ from the live,
+        # operator-editable config.yaml — do not depend on its values)
+        d.position_optimizer.cfg.update(
+            {"apply": True, "cooldown_min": 0, "take_profit_pct": 0.10,
+             "min_improvement_pct": 2.0})
+        bot = {
+            "symbol": "DOGE", "venue": "hyperliquid", "bot_code": "B1",
+            "slot_balance": 100.0,
+            "channel": {"low": 97.0, "mid": 100.0, "high": 103.0,
+                        "step_pct": 0.5, "grids": 12},
+            "upsert": {"amountPerTrade": 5.0, "gridLevels": 12,
+                       "gridPercentStep": 0.005},
+            "ticket": {"regime": "neutral", "grid_type": "neutral"},
+            "stagnation_policy": {"regime": "neutral", "step": 0.005,
+                                  "expected_fills_per_24h": 40.0},
+            "observed": {"status": "active", "price": 100.0,
+                         "realized_pnl": 7.0, "unrealized_pnl": 0.0,
+                         "fills_24h": 40, "realized_ratio": 0.5},
+        }
+        d.state["active_bots"]["1"] = bot
+        # oscillating candles centered on 100 (same shape as the engine's
+        # own test fixtures) → aligned channel → keep geometry, so the
+        # realized $7 >= 60% of the $10 target drives add-take-profit
+        import math
+        rows = []
+        for i in range(300):
+            c = 100.0 + 2.0 * math.sin(2 * math.pi * i * 10 / 300)
+            rows.append((c, c * 1.005, c * 0.995, c))
+        d.position_optimizer.fetch_candles_fn = lambda *a, **k: rows
+        with mock.patch(
+                "daemon.wt_library.grid_set_exits",
+                return_value={"ok": True, "dry_run": True,
+                              "payload": {"take_profit": 10.0}}) as gs:
+            recs = d.position_optimizer.cycle({"1": bot}, dry_run=True,
+                                              now=1000.0)
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0]["recommendation"], "add-take-profit")
+        gs.assert_called_once_with("B1", dry_run=True, take_profit=10.0)
+        self.assertTrue(recs[0]["applied"])
+        kinds = [e.get("kind") for e in d.state["journal"]]
+        self.assertIn("position-optimizer-applied", kinds)
+        ev = [e for e in d.state["journal"]
+              if e.get("kind") == "position-optimizer-applied"][-1]
+        self.assertEqual(ev["bot_code"], "B1")
+        self.assertEqual(ev["outcome"], "applied")
+        self.assertTrue(ev["dry_run"])
+        self.assertEqual(ev["exit_kwargs"], {"take_profit": 10.0})
+
+
+class TestExitProjection(PositionOptimizerHarness):
+    """The enriched exit fields reach the state bots (observed.exits →
+    bot.exits), additively, and are dropped when the resource has none."""
+
+    EXITS = {"takeProfit": 5, "stopLoss": 3,
+             "stopLossPnlCompareType": "total",
+             "trailingStopActivation": 5, "trailingStopExecute": 2,
+             "trailingStopPnlCompareType": "total",
+             "strategyProfitCondition": "trailing_stop",
+             "strategyStopLossFixedPercentRatio": 0.05,
+             "pumpProtectionOrderType": "market"}
+
+    def test_exits_projected_onto_state_bot(self):
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {"symbol": "DOGE",
+                                       "venue": "hyperliquid",
+                                       "bot_code": "B1",
+                                       "channel": {"low": 0.09,
+                                                   "mid": 0.10,
+                                                   "high": 0.11},
+                                       "stagnation_policy": {}}
+        obs = {"status": "active", "error": "offline test",
+               "exits": dict(self.EXITS)}
+        with mock.patch("daemon.observe_all_safe", lambda bots: {"1": obs}):
+            d.health_cycle(dry_run=True)
+        bot = d.state["active_bots"]["1"]
+        self.assertEqual(bot["exits"]["takeProfit"], 5)
+        self.assertEqual(bot["exits"]["strategyStopLossFixedPercentRatio"],
+                         0.05)
+        self.assertEqual(bot["observed"]["exits"]["stopLoss"], 3)
+
+    def test_stale_exits_dropped_when_resource_has_none(self):
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = {"symbol": "DOGE",
+                                       "venue": "hyperliquid",
+                                       "bot_code": "B1",
+                                       "exits": {"takeProfit": 5},
+                                       "channel": {"low": 0.09,
+                                                   "mid": 0.10,
+                                                   "high": 0.11},
+                                       "stagnation_policy": {}}
+        with mock.patch("daemon.observe_all_safe",
+                        lambda bots: {"1": {"status": "active",
+                                            "error": "offline test"}}):
+            d.health_cycle(dry_run=True)
+        self.assertNotIn("exits", d.state["active_bots"]["1"])
+
+
 class TestPBRecommendation(unittest.TestCase):
     # (e) client method: id → recommendation_id rename, into "recommendations"
     def test_recommendation_renames_id(self):
