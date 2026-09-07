@@ -81,6 +81,26 @@
           </div>
           <ul class="feed" id="feed"></ul>
         </div>
+        <div class="card" id="mb-card">
+          <div class="card-head">
+            <span class="card-title">Market brief</span>
+            <span class="spacer"></span>
+            <span class="chip chip--ok" style="padding:2px 8px;" id="mb-prov" hidden><span class="dot"></span><span id="mb-prov-name">llm</span></span>
+          </div>
+          <div id="market-brief" style="padding:10px 14px;">
+            <div class="empty-note">No brief yet — the daemon&rsquo;s LLM lane writes one per rescreen (30&nbsp;min cadence, advisory only).</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <span class="card-title">LLM brains</span>
+            <span class="spacer"></span>
+            <span class="mono" style="font-size:10.5px;color:var(--ink-faint)" id="llm-brains-at">—</span>
+          </div>
+          <div id="llm-brains" style="padding:8px 14px;">
+            <div class="empty-note">Provider pings + role routing come up after the first <code class="mono">/api/llm/health</code> round-trip.</div>
+          </div>
+        </div>
         <div class="card">
           <div class="card-head"><span class="card-title">Last screen</span><span class="spacer"></span><span class="mono" id="screen-at" style="font-size:10.5px;color:var(--ink-faint)"></span></div>
           <div id="screen-list" style="padding:6px 0;"><div class="empty-note" style="padding:14px;">No rescreen run card yet.</div></div>
@@ -97,7 +117,7 @@
   <section class="view" id="view-decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden>
     <div class="view-head">
       <h2>Decision ledger</h2>
-      <span class="sub">Every deliberate → guard → deploy decision, with outcomes attached on close.</span>
+      <span class="sub">Every deliberate → guard → deploy decision, with outcomes attached on close. Click a row for the evidence the agents evaluated it against.</span>
     </div>
     <div class="filter-row">
       <input type="text" id="dec-filter" placeholder="filter by symbol, venue, regime…">
@@ -127,8 +147,11 @@
       <span class="spacer"></span>
       <button class="btn" id="rc-back" hidden>← All cards</button>
     </div>
+    <div class="filter-row" id="rc-kinds-row"><div class="rc-kinds" id="rc-kinds"></div></div>
     <div id="rc-list" class="runcard-list"></div>
     <div id="rc-detail" hidden>
+      <div id="rc-stats" class="card"></div>
+      <p></p>
       <div class="card"><div class="card-body md" id="rc-md"></div></div>
       <p></p>
       <details><summary class="mono" style="font-size:11px;cursor:pointer;color:var(--ink-soft)">raw JSON</summary>
@@ -148,6 +171,10 @@
     <div class="card" id="opt-latest-analysis"></div>
     <p></p>
     <div class="card" id="opt-data-sources"></div>
+    <p></p>
+    <div class="card" id="opt-trackers"></div>
+    <p></p>
+    <div class="card" id="opt-swaps"></div>
     <p></p>
     <div id="opt-banner"></div>
     <div class="card">
@@ -190,8 +217,8 @@
     <div class="card"><div class="card-body--tight table-wrap">
       <table class="ledger">
         <thead><tr>
-          <th>archetype</th><th>samples</th><th>real / synth</th><th>progress → full</th><th>profit factor</th>
-          <th>recent PF</th><th>win rate</th><th>expectancy</th><th>max DD</th><th>tier</th>
+          <th>archetype</th><th>samples</th><th>real / synth</th><th>progress → full</th><th>next rung</th>
+          <th>profit factor</th><th>recent PF</th><th>win rate</th><th>expectancy</th><th>max DD</th><th>tier</th>
         </tr></thead>
         <tbody id="rel-body"></tbody>
       </table>

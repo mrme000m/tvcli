@@ -172,8 +172,11 @@ async function loadOverview() {
     renderHeartbeatCard(st);
     renderFeed(ov.journal_tail || []);
     renderScreen(ov.screen);
+    renderMarketBrief(st);
     renderSummary(ov);
     drawPnlChart(lastPnlPoints || []);
+    loadSlotCharts(ov);
+    renderLlmBrains();   // live ping, ~9s; fire-and-forget (idempotent)
   }
 }
 
@@ -243,6 +246,100 @@ function ladderHTML(bot) {
   </div>`;
 }
 
+/* tvcli confluence strip — the screen-time fitness read that decided
+   THIS bot's deploy. Empty when the bot isn't in the latest screen cache
+   (adopted bots, or bots from an older rescreen). Designed to make the
+   slot card answer "what did tvcli say at deploy time?" without leaving
+   the Fleet view. */
+function tvcliFitHTML(bot) {
+  const fit = bot.tvcli_fit;
+  if (!fit || typeof fit !== "object") return "";
+  const notes = (bot.tvcli_notes || []).slice(0, 3);
+  const bonus = isNum(bot.tvcli_bonus) ? Number(bot.tvcli_bonus) : null;
+  const ok = isNum(bot.tvcli_ok) ? Number(bot.tvcli_ok) : null;
+  const age = isNum(bot.screen_age_min) ? Number(bot.screen_age_min) : null;
+  const stale = age != null && age > 120;
+  const vah = isNum(fit.vp_vah) ? fmtPrice(fit.vp_vah) : null;
+  const val = isNum(fit.vp_val) ? fmtPrice(fit.vp_val) : null;
+  const poc = isNum(fit.vp_poc) ? fmtPrice(fit.vp_poc) : null;
+  const mtf = isNum(fit.mtf_composite) ? fmtNum(fit.mtf_composite, 1) : null;
+  const chop = isNum(fit.chop) ? fmtNum(fit.chop, 1) : null;
+  const sqmom = isNum(fit.squeeze_momentum_pct) ? `${fmtNum(fit.squeeze_momentum_pct, 2)}%` : null;
+  const sr = fit.sr_last_break && isNum(fit.sr_break_bars_ago)
+    ? `${fit.sr_last_break === "bullish" ? "↑" : "↓"} ${fmtNum(fit.sr_break_bars_ago, 0)}b`
+    : null;
+  const tipParts = [];
+  if (vah && val && poc) tipParts.push(`VA ${val}–${vah} (POC ${poc})`);
+  if (mtf) tipParts.push(`MTF ${mtf}`);
+  if (chop) tipParts.push(`CHOP ${chop}`);
+  if (sqmom) tipParts.push(`SqMom ${sqmom}`);
+  if (sr) tipParts.push(`S/R ${sr}`);
+  const tip = tipParts.join(" · ");
+  const chips = notes.map((n) =>
+    `<span class="badge badge--violet" title="tvcli confluence note">${esc(n)}</span>`).join(" ");
+  const bonusChip = bonus != null
+    ? `<span class="badge ${bonus > 0 ? "badge--ok" : bonus < 0 ? "badge--bad" : "badge--dim"}" title="confluence bonus applied to score_final">tvcli ${bonus >= 0 ? "+" : ""}${fmtNum(bonus, 1)}</span>`
+    : "";
+  const okChip = ok != null
+    ? `<span class="badge badge--dim" title="tvcli skills that returned a result">${ok}/6</span>` : "";
+  const ageChip = age != null
+    ? `<span class="badge ${stale ? "badge--warn" : "badge--dim"}" title="screen-cache age">${fmtNum(age, 0)}m old</span>` : "";
+  return `<div class="slot-tvcli" title="${esc(tip)}">
+    <div class="slot-tvcli-row">${bonusChip} ${okChip} ${ageChip}</div>
+    ${chips ? `<div class="slot-tvcli-notes">${chips}</div>` : ""}
+  </div>`;
+}
+
+/* position_optimizer last-pass summary — slow lane (15 min + on-entry)
+   revalues each active bot. Rec / Δ% / confidence / when / candle hop. */
+function positionOptimizerHTML(bot) {
+  const po = bot.position_optimizer;
+  if (!po || typeof po !== "object") return "";
+  const rec = po.last_recommendation;
+  const delta = isNum(po.last_delta_pct) ? Number(po.last_delta_pct) : null;
+  const conf = isNum(po.last_confidence) ? Number(po.last_confidence) : null;
+  const trig = po.last_trigger;
+  const at = po.last_analyzed_at;
+  const hop = po.last_fetch_hop;
+  if (!rec && !at) return "";
+  const recBadge = rec === "keep"
+    ? `<span class="badge badge--dim">keep</span>`
+    : `<span class="badge badge--violet">${esc(rec || "?")}</span>`;
+  const deltaCls = delta == null ? "m-value--dim"
+    : delta > 0 ? "m-value--good" : delta < 0 ? "m-value--bad" : "m-value--dim";
+  const deltaStr = delta == null ? "\u2014"
+    : `${delta >= 0 ? "+" : ""}${fmtNum(delta, 2)}%`;
+  return `<div class="slot-po" title="position-optimizer slow lane (15m cadence + on-entry pass)">
+    <div class="slot-po-row">${recBadge}
+      <span class="m-value ${deltaCls}">${deltaStr}</span>
+      <span class="mono" style="color:var(--ink-faint)">conf ${conf == null ? "—" : fmtNum(conf, 2)}</span>
+      <span class="spacer"></span>
+      <span class="mono" style="color:var(--ink-faint);font-size:10.5px">${esc(relTimeEpoch(at))}${trig ? ` · ${esc(trig)}` : ""}${hop ? ` · ${esc(hop)}` : ""}</span>
+    </div>
+  </div>`;
+}
+
+/* optimizer fast-lane idle tracker — when did this slot last see fills?
+   empty when the slot was just opened and no health poll has populated
+   the tracker yet. */
+function optimizerTrackerHTML(bot) {
+  const tr = bot.optimizer_tracker;
+  if (!tr || typeof tr !== "object") return "";
+  const at = tr.last_increase_at;
+  const fills = tr.last_fills;
+  if (!at && fills == null) return "";
+  const idleMin = isNum(at) && at > 0
+    ? Math.round((Date.now() / 1000 - Number(at)) / 60) : null;
+  const idleCls = idleMin == null ? "m-value--dim"
+    : idleMin >= 60 ? "m-value--bad"
+    : idleMin >= 15 ? "m-value--warn" : "m-value--dim";
+  return `<div class="slot-opt" title="fast-optimizer idle tracker — minutes since this slot's last fill">
+    <span class="mono" style="color:var(--ink-faint);font-size:10.5px">opt idle</span>
+    <span class="m-value ${idleCls}">${idleMin == null ? "—" : `${idleMin}m`}</span>
+    ${isNum(fills) ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px">fills ${fmtNum(fills, 0)}</span>` : ""}
+  </div>`;
+}
+
 function slotCard(bot) {
   const obs = bot.observed || {};
   const unrl = obs.unrealized_pnl;
@@ -289,8 +386,16 @@ function slotCard(bot) {
     <div class="symbol-line">
       <span class="symbol">${esc(bot.symbol || "?")}</span>
       <span class="gridtype">${esc(bot.grid_type || "—")} grid</span>
+      ${bot.decision_id ? `<span class="slot-decision-link mono" data-did="${esc(bot.decision_id)}" role="button" tabindex="0" title="View the deliberation evidence the bot was deployed on">${esc(bot.decision_id)} \u2192</span>` : ""}
+    </div>
+    <div class="slot-spark" data-key="${esc(bot.venue)}:${esc(bot.symbol)}"
+         data-slot="${esc(bot.slot)}" role="button" tabindex="0"
+         title="1h price window — click to enlarge">
+      <span class="spark-delta mono">Δ —</span>
+      <span class="spark-slot"><span class="spark-ph">chart…</span></span>
     </div>
     ${ladderHTML(bot)}
+    ${tvcliFitHTML(bot)}
     <div class="slot-metrics">
       <div class="metric"><div class="m-label">price</div><div class="m-value">${fmtPrice(obs.price)}</div></div>
       <div class="metric"><div class="m-label">fills 24h</div>
@@ -309,6 +414,8 @@ function slotCard(bot) {
       <div class="metric"><div class="m-label" title="model-based expected grid income per 24h, net of round-trip fees">proj /24h</div>
         <div class="m-value ${bot.projected_24h_usd > 0 ? "m-value--good" : "m-value--dim"}">${bot.projected_24h_usd == null ? "\u2014" : fmtUsd(bot.projected_24h_usd)}</div></div>
     </div>
+    ${positionOptimizerHTML(bot)}
+    ${optimizerTrackerHTML(bot)}
     <div class="slot-foot">
       <span class="slot-since">held ${esc(heldFor(bot.since) ?? "—")}</span>
       <span style="margin-left:auto"></span>
@@ -316,7 +423,48 @@ function slotCard(bot) {
     </div>`;
 
   card.querySelector("[data-rotate]").addEventListener("click", () => rotateSlot(bot));
+  const spark = card.querySelector(".slot-spark");
+  if (spark) spark.addEventListener("click", () =>
+    openMarketModal(spark.dataset.key, spark.dataset.slot));
+  if (spark) spark.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openMarketModal(spark.dataset.key, spark.dataset.slot);
+    }
+  });
+  // decision-evidence deep link — opens the Decisions tab with the row
+  // pre-expanded so the operator can audit what the swarm evaluated
+  const decLink = card.querySelector(".slot-decision-link");
+  if (decLink) {
+    const open = () => openDecisionFromSlot(decLink.dataset.did);
+    decLink.addEventListener("click", open);
+    decLink.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+    });
+  }
   return card;
+}
+
+/* jump to Decisions tab + auto-expand the row for this decision id.
+   Lazy-loads the decisions ledger if the operator hasn't opened it yet. */
+async function openDecisionFromSlot(did) {
+  selectView("decisions");
+  // ensure the ledger is populated before we try to scroll/expand
+  if (!decisions.length) await loadDecisions();
+  const row = document.querySelector(`tr.dec-row[data-id="${CSS.escape(did)}"]`);
+  if (!row) {
+    toast(`decision ${did} not in the loaded ledger`, true);
+    return;
+  }
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  // expand if not already
+  const next = row.nextElementSibling;
+  if (!(next && next.classList.contains("dec-detail"))) {
+    const det = document.createElement("tr");
+    det.className = "dec-detail";
+    det.innerHTML = `<td colspan="11">${decEvidenceHTML(decisions.find((d) => d.id === did))}</td>`;
+    row.after(det);
+  }
 }
 
 function emptySlotCard(slot) {
@@ -327,6 +475,196 @@ function emptySlotCard(slot) {
     <span class="empty-title">awaiting deploy</span>
     <span class="empty-note">Free slot — the next rescreen fills it with the best eligible candidate.</span>`;
   return c;
+}
+
+/* ── slot market charts (tvcli /api/chart proxy) ───────────────────── */
+
+const chartCache = {};   // "venue:symbol:interval" -> {at (epoch ms), data}
+const CHART_TTL_MS = 5 * 60 * 1000;
+const chartInflight = {};   // same key -> promise, dedupes parallel polls
+let slotChartsBusy = false;
+
+async function fetchChart(venue, symbol, interval = "1h", bars = 96) {
+  const key = `${venue}:${symbol}:${interval}`;
+  const hit = chartCache[key];
+  if (hit && Date.now() - hit.at < CHART_TTL_MS) return hit.data;
+  if (chartInflight[key]) return chartInflight[key];
+  chartInflight[key] = (async () => {
+    try {
+      const data = await api(`/api/chart?venue=${encodeURIComponent(venue)}`
+        + `&symbol=${encodeURIComponent(symbol)}`
+        + `&interval=${encodeURIComponent(interval)}&bars=${bars}`);
+      if (!data || data.error || !Array.isArray(data.bars) || !data.bars.length)
+        throw new Error((data && data.error) || "no bars");
+      chartCache[key] = { at: Date.now(), data };
+      return data;
+    } finally { delete chartInflight[key]; }
+  })();
+  return chartInflight[key];
+}
+
+/* fetch /api/chart (1h × 96 bars) for each distinct venue:symbol on the
+   fleet in parallel; then paint whatever is cached. Fail-soft: a rejected
+   fetch keeps the previous sparkline / placeholder untouched. */
+async function loadSlotCharts(ov) {
+  if (slotChartsBusy) return;
+  slotChartsBusy = true;
+  try {
+    const seen = new Set();
+    const jobs = [];
+    for (const b of (ov.bots || [])) {
+      if (!b || !b.venue || !b.symbol) continue;
+      const key = `${b.venue}:${b.symbol}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      jobs.push(fetchChart(b.venue, b.symbol));
+    }
+    await Promise.allSettled(jobs);
+    renderSlotSparklines();
+  } finally { slotChartsBusy = false; }
+}
+
+/* inline sparkline per .slot-spark node: closes min-max scaled (3px pad),
+   teal when the window is up, crimson when down, plus dashed channel
+   high/low refs when the bot carries a channel. Idempotent per data
+   epoch (dataset.at) so re-renders don't thrash. */
+function renderSlotSparklines() {
+  const bots = (lastOverview && lastOverview.bots) || [];
+  for (const node of document.querySelectorAll(".slot-spark")) {
+    const key = node.dataset.key || "";
+    const hit = chartCache[`${key}:1h`];
+    if (!hit || !hit.data) continue;
+    const bars = hit.data.bars || [];
+    if (bars.length < 2) continue;
+    const stamp = String(hit.at);
+    if (node.dataset.at === stamp) continue;
+    node.dataset.at = stamp;
+    const closes = [];
+    for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
+    if (closes.length < 2) continue;
+    const W = 220, H = 48, P = 3;
+    let lo = Math.min(...closes), hi = Math.max(...closes);
+    if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
+    const X = (i) => P + (i / (bars.length - 1)) * (W - 2 * P);
+    const Y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - 2 * P);
+    let pts = "";
+    bars.forEach((b, i) => {
+      const c = Number(b && b.c);
+      if (isFinite(c)) pts += `${X(i).toFixed(2)},${Y(c).toFixed(2)} `;
+    });
+    const first = closes[0], last = closes[closes.length - 1];
+    const up = last >= first;
+    const delta = first ? ((last - first) / first) * 100 : 0;
+    let refs = "";
+    const bot = bots.find((b) => String(b.slot) === String(node.dataset.slot));
+    const ch = (bot && bot.channel) || null;
+    if (ch && isNum(ch.high) && isNum(ch.low)) {
+      const yH = Math.max(P, Math.min(H - P, Y(Number(ch.high)))).toFixed(1);
+      const yL = Math.max(P, Math.min(H - P, Y(Number(ch.low)))).toFixed(1);
+      refs = `<line x1="0" y1="${yH}" x2="${W}" y2="${yH}" class="spark-ref"/>`
+        + `<line x1="0" y1="${yL}" x2="${W}" y2="${yL}" class="spark-ref"/>`;
+    }
+    const slot = node.querySelector(".spark-slot");
+    if (slot) slot.innerHTML = `
+      <svg class="spark-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+        ${refs}
+        <polyline class="spark-line${up ? "" : " spark-line--down"}" points="${pts.trim()}"/>
+      </svg>`;
+    const d = node.querySelector(".spark-delta");
+    if (d) {
+      d.className = `spark-delta mono ${up ? "spark-delta--up" : "spark-delta--down"}`;
+      d.textContent = `\u0394 ${up ? "+" : "\u2212"}${Math.abs(delta).toFixed(2)}%`;
+    }
+  }
+}
+
+/* the big chart modal: 96×1h closes as a line + light area fill, dashed
+   channel high/mid/low with right-edge labels, lo/hi/last captions and
+   the bar window. Reuses #modal-root; Escape/backdrop/Close all clean
+   the key listener up (confirmDialog's onKey pattern). */
+function openMarketModal(key, slot) {
+  const parts = String(key).split(":");
+  const venue = parts[0] || "?", symbol = parts.slice(1).join(":") || "?";
+  const hit = chartCache[`${key}:1h`];
+  const bars = (hit && hit.data && hit.data.bars) || [];
+  const bots = (lastOverview && lastOverview.bots) || [];
+  const bot = bots.find((b) => String(b.slot) === String(slot)) || null;
+  const ch = (bot && bot.channel) || null;
+  const root = $("#modal-root");
+  const box = el("div", { class: "modal-backdrop" });
+
+  const W = Math.max(320, Math.min(window.innerWidth * 0.9, 900)), H = 360;
+  const RX = 62;   // right gutter for channel labels
+  let chartHTML = `<div class="mk-empty">no chart data cached for ${esc(venue)}:${esc(symbol)} yet</div>`;
+  let captions = "";
+  if (bars.length >= 2) {
+    const closes = [];
+    for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
+    if (closes.length >= 2) {
+      let lo = Math.min(...closes), hi = Math.max(...closes);
+      if (isNum(ch && ch.low)) lo = Math.min(lo, Number(ch.low));
+      if (isNum(ch && ch.high)) hi = Math.max(hi, Number(ch.high));
+      if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
+      const padY = (hi - lo) * 0.08;
+      lo -= padY; hi += padY;
+      const T = 10, B = 10;
+      const X = (i) => 8 + (i / (bars.length - 1)) * (W - RX - 14);
+      const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+      let pts = "", area = `M ${X(0).toFixed(1)},${(H - B).toFixed(1)}`;
+      bars.forEach((b, i) => {
+        const c = Number(b && b.c);
+        if (!isFinite(c)) return;
+        pts += `${X(i).toFixed(1)},${Y(c).toFixed(1)} `;
+        area += ` L ${X(i).toFixed(1)},${Y(c).toFixed(1)}`;
+      });
+      area += ` L ${X(bars.length - 1).toFixed(1)},${(H - B).toFixed(1)} Z`;
+      const first = closes[0], last = closes[closes.length - 1];
+      const up = last >= first;
+      let refs = "";
+      const chLine = (v, label) => {
+        if (!isNum(v)) return "";
+        const y = Y(Number(v)).toFixed(1);
+        const lbl = label ? `${esc(label)} ${fmtPrice(v)}` : fmtPrice(v);
+        return `<line x1="8" y1="${y}" x2="${W - RX}" y2="${y}" class="mk-ch"/>`
+          + `<text x="${W - RX + 6}" y="${Number(y) + 3}" class="mk-label">${lbl}</text>`;
+      };
+      if (ch) refs = chLine(ch.high, "hi") + chLine(ch.mid, "mid") + chLine(ch.low, "lo");
+      chartHTML = `
+        <svg class="mk-svg" viewBox="0 0 ${W.toFixed(0)} ${H}" role="img"
+             aria-label="1h closes for ${esc(venue)}:${esc(symbol)}">
+          <path class="mk-area${up ? "" : " mk-area--down"}" d="${area}"/>
+          ${refs}
+          <polyline class="mk-line${up ? "" : " mk-line--down"}" points="${pts.trim()}"/>
+        </svg>`;
+      const t0 = Number(bars[0] && bars[0].t), tN = Number(bars[bars.length - 1] && bars[bars.length - 1].t);
+      captions = `
+        <div class="mk-captions mono">
+          <span>lo <b>${fmtPrice(Math.min(...closes))}</b></span>
+          <span>hi <b>${fmtPrice(Math.max(...closes))}</b></span>
+          <span>last <b>${fmtPrice(last)}</b></span>
+          <span class="mk-delta ${up ? "mk-delta--up" : "mk-delta--down"}">
+            \u0394 ${up ? "+" : "\u2212"}${Math.abs(first ? ((last - first) / first) * 100 : 0).toFixed(2)}%</span>
+          <span class="mk-window">${bars.length} \u00d7 1h bars \u00b7 ${relTimeEpoch(t0)} \u2192 ${relTimeEpoch(tN)}</span>
+        </div>`;
+    }
+  }
+
+  const modal = el("div", { class: "modal modal--chart", role: "dialog", "aria-modal": "true" },
+    el("h3", {}, `MARKET — ${esc(venue)}:${esc(symbol)}`),
+    el("div", { class: "modal-body" },
+      el("div", { class: "mk-chart", html: chartHTML + captions })),
+    el("div", { class: "modal-actions" },
+      el("button", { class: "btn", onclick: () => done() }, "Close")));
+  function done() {
+    root.innerHTML = "";
+    document.removeEventListener("keydown", onKey);
+  }
+  function onKey(e) { if (e.key === "Escape") done(); }
+  document.addEventListener("keydown", onKey);
+  box.append(modal);
+  box.addEventListener("mousedown", (e) => { if (e.target === box) done(); });
+  root.append(box);
+  modal.querySelector(".modal-actions .btn").focus();
 }
 
 /* the readiness strip: the daemon's own dependency + capacity diagnostics,
@@ -498,6 +836,97 @@ function renderScreen(screen) {
       <span class="score">${esc(fmtNum(c.score_final, 1))}</span>
     </div>`;
   }).join("");
+}
+
+/* the LLM intelligence lane: the daemon's periodic market brief over the
+   fresh screen + live fleet evidence (Mistral-first chain). Advisory
+   only — it never gates or deploys; this is the "what does the model
+   think right now" companion to the numeric boards. */
+function renderMarketBrief(st) {
+  const box = $("#market-brief");
+  if (!box) return;
+  const prov = $("#mb-prov"), provName = $("#mb-prov-name");
+  const mb = (st && typeof st.market_brief === "object" && st.market_brief) || null;
+  if (!mb) {
+    if (st === null) {
+      box.innerHTML = `<div class="empty-note">Daemon ctl plane down — the last brief is unavailable (fail-soft).</div>`;
+    } else {
+      box.innerHTML = `<div class="empty-note">No brief yet — one lands per rescreen (llm.brief_interval_min cadence).</div>`;
+    }
+    if (prov) prov.hidden = true;
+    return;
+  }
+  const bias = String(mb.bias || "mixed");
+  const biasBadge = bias === "risk-on"
+    ? '<span class="badge badge--ok">risk-on</span>'
+    : bias === "risk-off"
+      ? '<span class="badge badge--bad">risk-off</span>'
+      : '<span class="badge badge--dim">mixed</span>';
+  const watch = (mb.watch || []).map((w) =>
+    `<li><span class="f-kind">watch</span><span class="f-msg">${esc(w)}</span></li>`).join("");
+  const risks = (mb.risks || []).map((w) =>
+    `<li><span class="f-kind k--health-warn">risk</span><span class="f-msg">${esc(w)}</span></li>`).join("");
+  box.innerHTML = `
+    <div class="mb-top">${biasBadge}
+      <span class="mb-summary">${esc(mb.summary || "—")}</span></div>
+    ${(watch || risks) ? `<ul class="feed" style="margin-top:8px">${watch}${risks}</ul>` : ""}
+    <div class="mono" style="font-size:10.5px;color:var(--ink-faint);margin-top:6px" title="advisory only — never gates, deploys or edits">${esc(relTime(mb.at))} · advisory</div>`;
+  if (prov && provName) {
+    provName.textContent = String(mb.provider || "llm");
+    prov.hidden = false;
+  }
+}
+
+/* "LLM brains" — small panel that maps the operator's headline question
+   ("is Mistral actually driving the fast lane right now?") onto one
+   block. Live ping + role routing, updated on every overview poll but
+   lazy-loaded so the first paint isn't blocked on a 9s subprocess. */
+async function renderLlmBrains() {
+  const box = $("#llm-brains");
+  const atEl = $("#llm-brains-at");
+  if (!box) return;
+  let d;
+  try { d = await api("/api/llm/health"); }
+  catch (e) { box.innerHTML = `<div class="empty-note">Provider health unreachable.</div>`; return; }
+  const results = d.results || [];
+  const roles = d.roles || {};
+  const arbProv = d.arbiter_provider || "mistral";
+  if (atEl && d.at) atEl.textContent = `pinged ${relTime(d.at)}`;
+  const dot = (ok) => ok ? "●" : "○";
+  const cls = (ok) => ok ? "ready-cell--on" : "ready-cell--off";
+  const provRow = results.map((r) => {
+    const name = r.provider;
+    const labelMap = { cf: "CF Workers AI", nvidia: "NVIDIA", openrouter: "OpenRouter", mistral: "Mistral" };
+    const lbl = labelMap[name] || name;
+    const err = r.ok ? "" : (r.error || "FAIL");
+    return `<div class="ready-cell ${cls(r.ok)}" title="${esc(err || 'ok')}">
+      <span class="ready-dot">${dot(r.ok)}</span>
+      <span class="ready-key">${esc(lbl)}</span>
+      <span class="ready-val">${r.ok ? `${r.latency_ms}ms` : "down"}</span>
+    </div>`;
+  }).join("");
+  // Role → provider pin matrix (which agent uses which model)
+  const swarmRoles = (d.role_keys || []).filter((r) => r !== "optimizer");
+  const arbRoles = (d.role_keys || []).filter((r) => r === "optimizer");
+  const roleRow = (label, roleKey, fallback) => {
+    const pinned = roles[roleKey];
+    const using = pinned || fallback || "follow chain";
+    const isArb = roleKey === "optimizer";
+    const title = isArb
+      ? `Pinned provider for the fast-lane arbiter. Default = ${arbProv}.`
+      : `Pinned provider for ${roleKey}. Default follows the chain.`;
+    return `<div class="row"><span class="k" title="${esc(title)}">${esc(label)}</span>
+      <span class="v">${using === "follow chain"
+        ? `<span class="badge badge--dim">follow chain</span>`
+        : `<span class="badge badge--violet">${esc(using)}</span>`}</span></div>`;
+  };
+  const swarmRows = swarmRoles.map((r) => roleRow(r.replace(/_/g, " "), r, null)).join("");
+  const arbRow = arbRoles.length
+    ? roleRow("arbiter (fast lane)", "optimizer", arbProv)
+    : "";
+  box.innerHTML = `
+    <div class="readiness-cells" style="margin-bottom:8px">${provRow}</div>
+    <div class="mini-kv">${swarmRows}${arbRow}</div>`;
 }
 
 function renderSummary(ov) {
@@ -824,14 +1253,18 @@ function renderDecisions() {
       ? `<span class="badge ${outcome.realized_pnl >= 0 ? "badge--ok" : "badge--bad"}" title="${esc(outcome.reason || "")}">closed ${fmtUsd(outcome.realized_pnl)}</span>`
       : `<span class="badge badge--dim">open</span>`;
     const go = String(r.decision || "").toUpperCase().includes("GO");
-    return `<tr>
+    const noGo = String(r.decision || "").toUpperCase().includes("NO_GO");
+    const conf = (r.evidence || {}).confidence;
+    const confChip = conf != null
+      ? `<span class="badge badge--dim" title="facilitator confidence">c ${fmtNum(conf, 2)}</span>` : "";
+    return `<tr class="dec-row${noGo ? " dec-row--nogo" : ""}" data-id="${esc(r.id)}" title="click to expand the evidence the agents evaluated against">
       <td class="td-mono">${esc(r.id)}</td>
       <td class="td-mono">${esc(String(r.at || "").replace("T", " ").slice(5, 16))}</td>
       <td class="td-mono"><span class="venue-tag venue-tag--${esc(r.venue)}">${esc(r.venue)}</span>:${esc(r.symbol)}</td>
       <td><div class="regime-cell"><span>${esc(r.regime || "—")}</span>${r.llm_degraded
         ? '<span class="badge badge--warn" title="LLM chain unavailable; rule fallback">degraded</span>' : ""}</div></td>
       <td class="td-mono">${esc(r.grid_type || "—")}</td>
-      <td><span class="badge ${go ? "badge--ok" : "badge--bad"}">${esc(r.decision || "?")}</span></td>
+      <td><span class="badge ${go ? "badge--ok" : noGo ? "badge--bad" : "badge--dim"}">${esc(r.decision || "?")}</span>${confChip ? ` ${confChip}` : ""}</td>
       <td class="td-mono">${esc(fmtNum(r.score_final, 1))}</td>
       <td class="td-mono">${esc(fmtNum(r.step_pct, 3))}%</td>
       <td class="td-mono">${esc(r.slot ?? "—")}</td>
@@ -843,19 +1276,156 @@ function renderDecisions() {
 $("#dec-filter").addEventListener("input", renderDecisions);
 $("#dec-state").addEventListener("change", renderDecisions);
 
+/* ── decision evidence panel (row expansion) ──────────────────────── */
+
+/* What the agents actually evaluated the decision against: debate
+   theses + per-agent LLM provider, risk-team stances, the tvcli /hunt
+   confluence in hand, injected memories, and the fill/harvest model.
+   Rows predating the evidence block degrade to a note. */
+function decEvidenceHTML(r) {
+  const ev = r.evidence;
+  if (!ev || typeof ev !== "object") {
+    return `<div class="empty-note">No evidence recorded — this decision predates the evidence block (rows after the daemon restart carry it).</div>`;
+  }
+  // Provider tag: violets for LLMs, dim for "no provider", amber for
+  // rule-fallback. Mistral deserves its own tinted variant so the
+  // operator can spot it at a glance.
+  const provBadge = (p) => {
+    if (!p) return `<span class="badge badge--dim">—</span>`;
+    if (p === "rule-fallback") return `<span class="badge badge--warn" title="LLM chain unavailable; rules answered">rule-fallback</span>`;
+    const klass = p === "mistral" ? "badge--mistral" : "badge--violet";
+    const title = p === "mistral" ? "Mistral served this agent"
+      : p === "cf" ? "Cloudflare Workers AI"
+      : p === "nvidia" ? "NVIDIA NIM" : "OpenRouter";
+    return `<span class="badge ${klass}" title="${esc(title)}">${esc(p)}</span>`;
+  };
+  const llm = ev.llm || {};
+  const debate = ev.debate || {};
+  const con = ev.confluence || {};
+  const fit = con.fit || {};
+  const fitKeys = ["atr_pct", "chop", "squeeze_momentum_pct", "squeeze_on",
+    "squeeze_bars", "mtf_composite", "vol_ratio", "dvi_trend", "vp_poc",
+    "vp_vah", "vp_val", "sr_last_break", "sr_break_bars_ago"];
+  const fitChips = fitKeys.filter((k) => fit[k] !== undefined && fit[k] !== null)
+    .map((k) => `<span class="badge badge--dim mono" title="tvcli /hunt read">${esc(k)} ${esc(typeof fit[k] === "boolean" ? (fit[k] ? "on" : "off") : fmtNum(fit[k], 2))}</span>`)
+    .join(" ");
+  const stances = Object.entries(ev.risk_stances || {}).map(([s, st]) => `
+    <div class="row"><span class="k">${esc(s)}</span>
+      <span class="v">${st.approve ? '<span class="badge badge--ok">approve</span>' : '<span class="badge badge--bad">veto</span>'}
+        ${provBadge(st.llm)}
+        <span class="mono" style="font-size:11px">mult ${esc(fmtNum(st.max_alloc_mult, 2))} · step ×${esc(fmtNum(st.step_mult, 2))}</span>
+        ${st.note ? `<span class="rationale" title="${esc(st.note)}">— ${esc(st.note.slice(0, 90))}${st.note.length > 90 ? "…" : ""}</span>` : ""}</span></div>`).join("");
+  const memories = (ev.memories || []).map((m) => `
+    <li><span class="f-kind">${esc(String(m.at || "").slice(5, 10))}</span>
+        <span class="f-msg">${esc(m.venue || "")}:${esc(m.symbol || "?")} ${esc(m.regime || "")} → ${esc(m.reason || "?")}
+        ${m.outcome_pnl != null ? `<b class="${Number(m.outcome_pnl) >= 0 ? "m-value--good" : "m-value--bad"}">${fmtSignedUsd(m.outcome_pnl)}</b>` : ""}</span></li>`).join("");
+  // Cohort context: same symbol+regime decisions, surfaced by the
+  // /api/decisions/<id> endpoint. Empty for a fresh symbol; otherwise
+  // it shows whether prior trips at this archetype made money.
+  const cohort = r.cohort;
+  const cohortLine = cohort && isNum(cohort.cohort_size) && cohort.cohort_size > 0
+    ? `<div class="dec-ev-h" style="margin-top:8px">Cohort (same ${esc(r.symbol)} ${esc(r.regime || "")} prior decisions)</div>
+       <div class="mini-kv">
+         <div class="row"><span class="k">count</span><span class="v">${esc(cohort.cohort_size)} prior decision(s)</span></div>
+         <div class="row"><span class="k">cohort realized PnL</span><span class="v"><span class="${(cohort.cohort_realized || 0) >= 0 ? "m-value--good" : "m-value--bad"}">${fmtSignedUsd(cohort.cohort_realized || 0)}</span></span></div>
+       </div>` : "";
+  return `
+    <div class="dec-ev">
+      <div class="dec-ev-grid">
+        <div>
+          <div class="dec-ev-h">Deliberation</div>
+          <div class="dec-ev-agents">
+            <span class="badge badge--dim">bull</span>${provBadge(llm.bull)}
+            <span class="badge badge--dim">bear</span>${provBadge(llm.bear)}
+            <span class="badge badge--dim">facilitator</span>${provBadge(llm.facilitator)}
+            ${llm.degraded ? '<span class="badge badge--warn" title="one or more agents fell back to rules">degraded</span>' : ""}
+          </div>
+          ${debate.bull_thesis ? `<div class="dec-ev-quote"><b>bull</b> ${esc(debate.bull_thesis)}</div>` : ""}
+          ${(debate.bear_risks || []).length ? `<div class="dec-ev-quote"><b>bear</b> ${esc(debate.bear_risks.join(" · "))}</div>` : ""}
+          ${(debate.kill_triggers || []).length ? `<div class="dec-ev-quote"><b>kill</b> ${esc(debate.kill_triggers.join(" · "))}</div>` : ""}
+          ${stances ? `<div class="dec-ev-h" style="margin-top:8px">Risk team</div><div class="mini-kv">${stances}</div>` : ""}
+          ${cohortLine}
+        </div>
+        <div>
+          <div class="dec-ev-h">tvcli confluence in hand</div>
+          <div class="dec-ev-agents">
+            <span class="badge ${Number(con.bonus) > 0 ? "badge--ok" : "badge--dim"}" title="score bonus from the tvcli /hunt pass">bonus +${fmtNum(con.bonus ?? 0, 1)}</span>
+            <span class="badge badge--dim" title="skills that returned a result / hunted">${esc(con.ok ?? "?")} ok</span>
+            ${(con.notes || []).map((n) => `<span class="badge badge--violet">${esc(n)}</span>`).join(" ")}
+          </div>
+          ${fitChips ? `<div class="dec-ev-agents" style="margin-top:6px">${fitChips}</div>` : ""}
+          <div class="dec-ev-h" style="margin-top:8px">Fill / harvest model</div>
+          <div class="mini-kv">
+            <div class="row"><span class="k">expected fills /24h</span><span class="v">${ev.expected_fills_24h == null ? "—" : esc(fmtNum(ev.expected_fills_24h, 2))}</span></div>
+            <div class="row"><span class="k">harvest net /24h</span><span class="v">${ev.harvest_net_pct_24h == null ? "—" : `${esc(fmtNum(ev.harvest_net_pct_24h, 2))}%`}</span></div>
+          </div>
+        </div>
+      </div>
+      ${memories ? `<div class="dec-ev-h">Memories injected (past outcomes)</div><ul class="feed">${memories}</ul>` : ""}
+    </div>`;
+}
+
+$("#dec-body").addEventListener("click", async (e) => {
+  if (e.target.closest("a,button")) return;
+  const tr = e.target.closest("tr.dec-row");
+  if (!tr) return;
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains("dec-detail")) { next.remove(); return; }
+  let row = decisions.find((d) => d.id === tr.dataset.id);
+  if (!row) return;
+  // First expansion: lazy-fetch the cohort context from /api/decisions/<id>
+  // so the evidence panel can show "prior trips at this archetype". After
+  // that the cohort lives on `row.cohort` and the panel renders offline.
+  if (row.cohort === undefined) {
+    try {
+      const detail = await api(`/api/decisions/${encodeURIComponent(row.id)}`);
+      if (detail && detail.decision) {
+        row = { ...row, cohort: { cohort_size: detail.cohort_size,
+                                  cohort_realized: detail.cohort_realized } };
+        const idx = decisions.findIndex((d) => d.id === row.id);
+        if (idx >= 0) decisions[idx] = row;
+      } else {
+        row.cohort = { cohort_size: 0, cohort_realized: 0 };
+      }
+    } catch (e) { row.cohort = { cohort_size: 0, cohort_realized: 0 }; }
+  }
+  const det = document.createElement("tr");
+  det.className = "dec-detail";
+  det.innerHTML = `<td colspan="11">${decEvidenceHTML(row)}</td>`;
+  tr.after(det);
+});
+
 /* ── run cards ────────────────────────────────────────────────────── */
+
+let rcKind = "all";   // active kind filter for the run-card list
 
 async function loadReports() {
   let list;
   try { list = (await api("/api/reports")).reports || []; }
   catch (e) { toast(`run cards: ${e.message}`, true); return; }
+  // kind chips: rescreen (hourly-ish), optimizer (fast-loop, interesting
+  // cycles only), audits + anything else — the mix tells the operator at
+  // a glance which lanes are actually producing evidence
+  const kinds = [...new Set(list.map((r) => r.kind || "other"))].sort();
+  const chipBox = $("#rc-kinds");
+  if (chipBox) {
+    const counts = {};
+    for (const r of list) counts[r.kind || "other"] = (counts[r.kind || "other"] || 0) + 1;
+    if (!kinds.includes(rcKind)) rcKind = "all";
+    chipBox.innerHTML = ["all", ...kinds].map((k) =>
+      `<button class="rc-chip${rcKind === k ? " rc-chip--on" : ""}" data-kind="${esc(k)}">${esc(k)}${k === "all" ? ` (${list.length})` : ` (${counts[k] || 0})`}</button>`).join("");
+    for (const chip of chipBox.querySelectorAll(".rc-chip")) {
+      chip.addEventListener("click", () => { rcKind = chip.dataset.kind; loadReports(); });
+    }
+  }
+  const shown = list.filter((r) => rcKind === "all" || (r.kind || "other") === rcKind);
   const box = $("#rc-list");
-  box.innerHTML = list.map((r) => `
+  box.innerHTML = shown.map((r) => `
     <div class="runcard-item" data-stem="${esc(r.stem)}" role="button" tabindex="0">
       <span class="rc-kind">${esc(r.kind)}</span>
       <span class="rc-stamp">${esc(String(r.at || r.stem).replace("T", " ").slice(0, 16))}</span>
       <span style="margin-left:auto" class="mono">${r.json ? "json" : ""}${r.md ? " md" : ""}</span>
-    </div>`).join("") || `<div class="empty-note">No run cards yet — one lands here after every cycle.</div>`;
+    </div>`).join("") || `<div class="empty-note">No run cards of this kind yet — one lands here after every cycle.</div>`;
   for (const item of box.querySelectorAll(".runcard-item")) {
     const open = () => openRunCard(item.dataset.stem);
     item.addEventListener("click", open);
@@ -871,7 +1441,83 @@ async function openRunCard(stem) {
   $("#rc-back").hidden = false;
   $("#rc-detail").hidden = false;
   $("#rc-md").innerHTML = renderMarkdown(card.md || "*(no markdown body)*");
+  // Stats header — surfaces hunt_stats + deliberation verdict + guard
+  // vetoes at a glance so the operator doesn't have to scroll the JSON
+  // just to confirm what tvcli/skills were queried and whether the
+  // swarm actually returned a decision.
+  const statsEl = $("#rc-stats");
+  if (statsEl) {
+    statsEl.innerHTML = renderRunCardStats(card.json || {});
+  }
   $("#rc-json").textContent = JSON.stringify(card.json, null, 2);
+}
+
+/* compact "what did the loop DO this cycle?" header for a run card.
+   works for both rescreen and optimizer cards (different schemas:
+   rescreen uses {screen, deliberations, guard, deployments, rotations,
+   observed, reliability, caveats}; optimizer uses
+   {screen, hunt, arbiter, swaps, vetoes, capital, caveats}). */
+function renderRunCardStats(j) {
+  const parts = [];
+  // tvcli /hunt skill stats — present on both schemas but in different
+  // nesting (rescreen: screen.hunt_stats, optimizer: hunt.stats)
+  const hs = ((j.screen || {}).hunt_stats) || ((j.hunt || {}).stats) || {};
+  const skills = hs.skills || {};
+  const sk = Object.entries(skills);
+  if (sk.length) {
+    const ok = sk.filter(([, s]) => s.hunted > 0 && s.hunted === s.ok).length;
+    const fail = sk.filter(([, s]) => s.hunted > 0 && s.ok < s.hunted).length;
+    const missed = sk.filter(([, s]) => s.hunted === 0).length;
+    parts.push(`<div class="row"><span class="k">tvcli /hunt</span><span class="v">
+      <span class="badge badge--ok">${ok}/${sk.length} skills all-ok</span>
+      ${fail ? `<span class="badge badge--warn">${fail} failed</span>` : ""}
+      ${missed ? `<span class="badge badge--dim">${missed} not hunted</span>` : ""}
+      ${hs.candidates_boosted != null ? ` · <span class="mono">${esc(hs.candidates_boosted)} candidate(s) boosted</span>` : ""}
+    </span></div>`);
+  }
+  // rescreen deliberations — bull/bear/facilitator verdicts
+  const dels = j.deliberations || [];
+  if (dels.length) {
+    const go = dels.filter((d) => (d && (d.decision || "")).includes("GO")).length;
+    parts.push(`<div class="row"><span class="k">deliberation</span><span class="v">
+      <span class="badge badge--ok">${go} GO</span>
+      <span class="mono" style="color:var(--ink-faint)">${dels.length} candidate(s)</span>
+      ${dels.some((d) => d.llm_degraded) ? '<span class="badge badge--warn">degraded</span>' : ""}
+    </span></div>`);
+  }
+  // guard — list of veto entries on rescreen
+  const g = j.guard;
+  if (Array.isArray(g) && g.length) {
+    parts.push(`<div class="row"><span class="k">guard</span><span class="v">
+      <span class="badge badge--bad">${g.length} veto(es)</span>
+      <span class="mono" style="color:var(--ink-faint)">${esc(g.map((v) => v.symbol || v.reason || "?").slice(0, 4).join(", "))}${g.length > 4 ? "…" : ""}</span>
+    </span></div>`);
+  }
+  // deployments + observed counts (rescreen)
+  const deps = j.deployments || [];
+  if (deps.length) {
+    parts.push(`<div class="row"><span class="k">deployments</span><span class="v">${deps.length} grid(s) — ${deps.map((d) => `${esc(d.venue || "")}:${esc(d.symbol || "?")} ${esc(d.grid_type || "")}`).join(", ")}</span></div>`);
+  }
+  // optimizer card schema — hunt / arbiter / swaps / capital
+  const cap = j.capital || {};
+  if (cap.committed_usd != null) {
+    parts.push(`<div class="row"><span class="k">capital</span><span class="v">${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd || 0)} idle</span></div>`);
+  }
+  const ar = j.arbiter;
+  if (ar && typeof ar === "object") {
+    parts.push(`<div class="row"><span class="k">arbiter</span><span class="v">${ar.approve === true ? '<span class="badge badge--ok">approve</span>' : '<span class="badge badge--bad">reject</span>'} · ${esc(ar.slot || "—")} → ${esc(ar.challenger || "—")} · ${esc(ar.llm || ar.provider || "mistral")}${ar.llm_degraded === true ? ' · <span class="badge badge--warn">degraded</span>' : ""}</span></div>`);
+  }
+  if (Array.isArray(j.swaps) && j.swaps.length) {
+    parts.push(`<div class="row"><span class="k">swaps</span><span class="v">${j.swaps.map((s) => `<span class="badge ${s.ok ? "badge--ok" : "badge--bad"}">${esc(s.slot || "?")}${s.ok ? "" : " veto"}</span>`).join(" ")}</span></div>`);
+  }
+  if (Array.isArray(j.vetoes) && j.vetoes.length) {
+    parts.push(`<div class="row"><span class="k">vetoes</span><span class="v">${j.vetoes.map((v) => `<span class="badge badge--warn">${esc(v.slot || "?")}</span>`).join(" ")}</span></div>`);
+  }
+  if (!parts.length) {
+    return `<div class="empty-note" style="padding:6px 14px">No stats block on this card (older schema — view JSON below).</div>`;
+  }
+  return `<div class="card-head"><span class="card-title" style="font-size:12.5px">Quick stats</span></div>
+    <div class="card-body"><div class="mini-kv">${parts.join("")}</div></div>`;
 }
 $("#rc-back").addEventListener("click", () => {
   $("#rc-list").hidden = false;
@@ -926,7 +1572,9 @@ async function loadOptimizer() {
   try { f = await api("/api/optimizer"); }
   catch (e) { f = null; }
   // fail-soft companions: the ctl /status block (per-bot position
-  // analysis + the fleet pnl projection) and the sweep-history log
+  // analysis + the fleet pnl projection), the journal sweep log, and
+  // the swap-log/tracker rollup (per-slot idle timing + last arbiter
+  // verdict — surfaced so the operator can see WHY every cycle passed)
   let st = null;
   try { st = await api("/api/status"); }
   catch (e) { st = null; }
@@ -934,9 +1582,13 @@ async function loadOptimizer() {
   let sweeps = null;
   try { sweeps = await api("/api/position-sweeps"); }
   catch (e) { sweeps = null; }
+  let swapLog = null;
+  try { swapLog = await api("/api/optimizer/swap-log"); }
+  catch (e) { swapLog = null; }
   renderFastOptimizer(f, st);
   renderPositionAnalysis(st, sweeps);
   renderDataSources(st);
+  renderSwapLog(swapLog);
 }
 
 function blockedByBadge(b) {
@@ -1061,7 +1713,36 @@ function renderFastOptimizer(f, st) {
           </tr>`).join("") || `<tr><td colspan="2"><div class="empty-note">No recent vetoes — nothing blocked by the guard/churn bounds.</div></td></tr>`}
         </tbody>
       </table>
-    </div>`;
+    </div>
+    ${arbiterVerdictHTML(rep.arbiter)}`;
+}
+
+/* Last arbiter verdict (Mistral by default) — when the fast loop DID
+   consult the model and what it said. Hidden when the loop has not
+   needed an arbiter call yet (the band pre-filter skips the call when
+   no swap is numerically possible — a healthy steady-state). */
+function arbiterVerdictHTML(arb) {
+  if (!arb || typeof arb !== "object") return "";
+  const slot = arb.slot;
+  const approve = arb.approve === true;
+  const conf = isNum(arb.confidence) ? fmtNum(arb.confidence, 2) : "—";
+  const pick = arb.challenger || "—";
+  const reason = arb.reason || "";
+  const degraded = arb.llm_degraded === true;
+  const llm = arb.llm || (arb.provider || "mistral");
+  const verdictBadge = approve
+    ? `<span class="badge badge--ok">approve</span>`
+    : `<span class="badge badge--bad">reject</span>`;
+  return `<div class="card-body--tight table-wrap" style="border-top:1px solid var(--rule)">
+    <div class="card-head" style="padding:6px 0 4px"><span class="card-title" style="font-size:12.5px">Last arbiter verdict</span>
+      <span class="spacer"></span>
+      ${degraded ? '<span class="badge badge--warn" title="LLM chain unavailable — rule fallback was used instead of the model">degraded</span>' : `<span class="mono" style="font-size:10.5px;color:var(--ink-faint)">${esc(llm)}</span>`}
+    </div>
+    <div class="mini-kv" style="padding:4px 0">
+      <div class="row"><span class="k">verdict</span><span class="v">${verdictBadge} · slot ${esc(slot ?? "—")} → ${esc(pick)} · conf ${conf}</span></div>
+      ${reason ? `<div class="row"><span class="k">reason</span><span class="v" title="${esc(reason)}">${esc(reason.slice(0, 200))}${reason.length > 200 ? "…" : ""}</span></div>` : ""}
+    </div>
+  </div>`;
 }
 
 /* ── position optimizer: latest per-bot analysis + sweep log ──────── */
@@ -1192,6 +1873,76 @@ function renderDataSources(st) {
     </details>`;
 }
 
+/* ── fast-optimizer swap log + per-slot idle trackers ─────────────── */
+
+/* Two tables: (1) per-slot idle timing — when each slot last saw a
+   fill (the dials that drive the optimizer's idle flag), and (2) the
+   swap_log itself — every swap the loop has ATTEMPTED with the ok/not
+   verdict (a single cycle can record both a veto and the eventual
+   succeed once a different challenger cleared). The last arbiter
+   verdict is repeated here too in case the operator opened the tab
+   directly without seeing renderFastOptimizer. */
+function renderSwapLog(sl) {
+  const idTrack = $("#opt-trackers");
+  const idSwaps = $("#opt-swaps");
+  if (!idTrack && !idSwaps) return;
+  const trackers = (sl && sl.trackers) || [];
+  const swaps = (sl && sl.swaps) || [];
+  const arb = sl && sl.last_arbiter;
+  const meta = `<span class="mono" style="font-size:10.5px;color:var(--ink-faint)">${esc(sl ? (sl.cycles || 0) : 0)} cycles · ${esc(sl ? (sl.swaps_total || 0) : 0)} swaps total</span>`;
+  if (idTrack) {
+    idTrack.innerHTML = `
+      <div class="card-head"><span class="card-title">Per-slot idle trackers</span>
+        <span class="spacer"></span>${meta}</div>
+      <div class="card-body--tight table-wrap">
+        <table class="ledger">
+          <thead><tr><th>slot</th><th>last fills</th><th>idle (min)</th><th>last increase</th></tr></thead>
+          <tbody>
+            ${trackers.map((t) => {
+              const idle = t.idle_min;
+              const cls = idle == null ? "m-value--dim"
+                : idle >= 60 ? "m-value--bad"
+                : idle >= 15 ? "m-value--warn" : "m-value--dim";
+              return `<tr>
+                <td class="td-mono">${esc(t.slot ?? "—")}</td>
+                <td class="td-mono">${isNum(t.last_fills) ? fmtNum(t.last_fills, 1) : "—"}</td>
+                <td class="td-mono"><span class="${cls}">${idle == null ? "—" : fmtNum(idle, 0)}</span></td>
+                <td class="td-mono">${t.last_increase_at ? esc(relTimeEpoch(t.last_increase_at)) : "—"}</td>
+              </tr>`;
+            }).join("") || `<tr><td colspan="4"><div class="empty-note">No slot trackers yet — the first optimize cycle populates them.</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>`;
+  }
+  if (idSwaps) {
+    const arbHead = arb && typeof arb === "object"
+      ? `<div class="card-head" style="padding:6px 0 0"><span class="card-title" style="font-size:12.5px">Last arbiter verdict</span>
+          <span class="spacer"></span>
+          ${arb.llm_degraded === true ? '<span class="badge badge--warn">degraded</span>' : `<span class="mono" style="font-size:10.5px;color:var(--ink-faint)">${esc(arb.llm || arb.provider || "mistral")}</span>`}
+        </div>
+        <div class="mini-kv" style="padding:4px 0 8px">
+          <div class="row"><span class="k">verdict</span><span class="v">${arb.approve === true ? '<span class="badge badge--ok">approve</span>' : '<span class="badge badge--bad">reject</span>'} · slot ${esc(arb.slot ?? "—")} → ${esc(arb.challenger || "—")} · conf ${isNum(arb.confidence) ? fmtNum(arb.confidence, 2) : "—"}</span></div>
+          ${arb.reason ? `<div class="row"><span class="k">reason</span><span class="v" title="${esc(arb.reason)}">${esc(arb.reason.slice(0, 200))}${arb.reason.length > 200 ? "…" : ""}</span></div>` : ""}
+        </div>` : "";
+    idSwaps.innerHTML = `
+      ${arbHead}
+      <div class="card-head"><span class="card-title">Swap log</span>
+        <span class="spacer"></span><span class="mono" style="font-size:10.5px;color:var(--ink-faint)">last ${swaps.length}</span></div>
+      <div class="card-body--tight table-wrap">
+        <table class="ledger">
+          <thead><tr><th>at</th><th>slot</th><th>verdict</th></tr></thead>
+          <tbody>
+            ${swaps.map((s) => `<tr>
+              <td class="td-mono" title="${esc(s.at_iso || String(s.at || ""))}">${s.at_iso ? esc(String(s.at_iso).replace("T", " ").slice(5, 16)) : esc(relTimeEpoch(s.at))}</td>
+              <td class="td-mono">${esc(s.slot ?? "—")}</td>
+              <td>${s.ok ? '<span class="badge badge--ok">swapped</span>' : '<span class="badge badge--bad">vetoed</span>'}</td>
+            </tr>`).join("") || `<tr><td colspan="3"><div class="empty-note">No swaps yet — the optimizer cycles every ${esc("2–5")} min; a swap only happens when the arbiter approves one inside the relaxed Δscore band.</div></td></tr>`}
+          </tbody>
+        </table>
+      </div>`;
+  }
+}
+
 /* ── reliability ──────────────────────────────────────────────────── */
 
 async function loadReliability() {
@@ -1221,6 +1972,20 @@ async function loadReliability() {
       notes.push(`<div class="banner banner--bad"><div><div class="banner-title">Synthetic/seeded samples pollute the ledger</div>
         Archetypes below carry seeded or backfilled samples (see the “real / synth” column). Expectancy and profit factor include them — they are not evidence from live round-trips.</div></div>`);
     }
+    // Ladder thresholds card — pinned at the top so an operator can read
+    // OFF the page exactly what an archetype needs to climb (or what
+    // would kill it).
+    const kt = (rel.kill_thresholds) || {};
+    const full = ladder.full_samples || 30, probe = ladder.probe_samples || 10;
+    notes.push(`<div class="banner banner--info" style="margin:8px 0 0"><div>
+      <div class="banner-title">Sizing ladder thresholds</div>
+      <div class="mini-kv" style="font-size:12px">
+        <div class="row"><span class="k">base → probe</span><span class="v"><b>${probe}</b> closed samples</span></div>
+        <div class="row"><span class="k">probe → full</span><span class="v"><b>${full}</b> closed samples AND PF ≥ <b>${ladder.pf_pass ?? 1.3}</b></span></div>
+        <div class="row"><span class="k">recent PF kills archetype</span><span class="v">PF &lt; <b>${ladder.pf_kill ?? 1.0}</b> on last <b>${kt.recent_window ?? 20}</b> trips (binding only with ≥ <b>${kt.kill_min_samples ?? 10}</b> samples)</span></div>
+        <div class="row"><span class="k">live gate</span><span class="v">≥ <b>${kt.live_min_samples ?? 30}</b> samples AND PF ≥ <b>${ladder.pf_pass ?? 1.3}</b> AND recent PF ≥ <b>${ladder.pf_kill ?? 1.0}</b></span></div>
+      </div>
+    </div></div>`);
     noteBox.innerHTML = notes.join("");
   }
   $("#rel-body").innerHTML = archs.map(([name, s]) => {
@@ -1238,6 +2003,14 @@ async function loadReliability() {
     const pfReal = s.profit_factor_real ?? s.profit_factor;
     const recentReal = s.recent_pf_real ?? s.recent_pf;
     const expReal = s.expectancy_usd_real ?? s.expectancy_usd;
+    // ladder_next cell — tells the operator how many samples to the
+    // NEXT tier, so the table answers "what unlocks the next ladder
+    // rung" without clicking into a card.
+    const ladderCell = s.tier === "killed"
+      ? `<span class="badge badge--bad" title="recent PF &lt; 1.0 with ≥ kill_min_samples trips — refuses new deployments">kill-flagged</span>`
+      : s.tier === "full"
+      ? `<span class="mono" style="color:var(--ink-faint);font-size:10.5px">top rung</span>`
+      : `${s.ladder_progress_pct != null ? `<span class="tier-track-mini"><span class="fill" style="width:${s.ladder_progress_pct.toFixed(1)}%"></span></span>` : ""}<span class="mono" style="font-size:10.5px;color:var(--ink-faint)">→ ${esc(s.ladder_next)} @ ${esc(s.ladder_next_at)}</span>`;
     return `<tr>
       <td><b>${esc(name)}</b></td>
       <td class="td-mono">${esc(s.samples ?? 0)}</td>
@@ -1246,6 +2019,7 @@ async function loadReliability() {
         <div class="fill${s.tier === "killed" ? " fill--killed" : ""}" style="width:${pctFull.toFixed(1)}%"></div>
         <div class="mark" style="left:${(probe / full * 100).toFixed(1)}%" title="probe @${probe}"></div>
       </div></td>
+      <td class="td-mono">${ladderCell}</td>
       <td class="td-mono ${(pfReal || 0) >= (ladder.pf_pass || 1.3) ? "m-value--good" : ""}"${synth ? ` title="includes ${synth} synthetic samples"` : ""}>${esc(fmtNum(pfReal, 2))}${synth ? "†" : ""}</td>
       <td class="td-mono ${(recentReal || 0) < (ladder.pf_kill || 1.0) ? "m-value--bad" : ""}">${esc(fmtNum(recentReal, 2))}</td>
       <td class="td-mono">${esc(fmtPct(s.win_rate))}</td>
@@ -1253,7 +2027,7 @@ async function loadReliability() {
       <td class="td-mono">${fmtUsd(s.max_dd_usd)}</td>
       <td><span class="badge ${tierBadge}">${esc(s.tier)}</span></td>
     </tr>`;
-  }).join("") || `<tr><td colspan="10"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
+  }).join("") || `<tr><td colspan="11"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
 }
 
 /* ── config ───────────────────────────────────────────────────────── */

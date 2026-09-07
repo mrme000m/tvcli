@@ -236,3 +236,131 @@ class TestSwarmBrief(ReflectCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EvidenceBlockCase(unittest.TestCase):
+    """record_decision's `evidence` block — the console's decision-detail
+    view renders this verbatim, so the contract is pinned here: debate
+    theses + per-agent LLM provider attribution, risk stances, tvcli
+    confluence, injected memories, fill/harvest model. Degraded tickets
+    must surface rule-fallback providers, never look LLM-served."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self._old_env = os.environ.get("GRID_STATE_DIR")
+        os.environ["GRID_STATE_DIR"] = self.tmp.name
+        self.addCleanup(self._restore_env)
+
+    def _restore_env(self):
+        if self._old_env is None:
+            os.environ.pop("GRID_STATE_DIR", None)
+        else:
+            os.environ["GRID_STATE_DIR"] = self._old_env
+
+    def _decisions_path(self):
+        return os.path.join(self.tmp.name, "decisions.jsonl")
+
+    def test_evidence_block_shape(self):
+        ticket = _ticket(
+            confidence=0.72, facilitator_llm="mistral",
+            debate={"bull": {"thesis": "wide ATR range pays the grid",
+                             "confidence": 0.8, "_llm": "mistral"},
+                    "bear": {"risks": ["regime flip to trend", "spread blowout"],
+                             "confidence": 0.4, "_llm": "mistral"}},
+            risk={"conservative": {"approve": True, "max_alloc_mult": 0.7,
+                                   "step_mult": 1.0, "notes": "cap exposure",
+                                   "_llm": "nvidia"}})
+        brief = _brief(confluence_bonus=2.5,
+                       confluence_notes=["high-chop-harvest", "moves-large"],
+                       confluence={"choppiness": True, "squeeze": True,
+                                   "vp": False, "errors": {}},
+                       tvcli_fit={"chop": 66.1, "atr_pct": 2.7,
+                                  "squeeze_on": False},
+                       memories=[{"symbol": "PUMP", "venue": "hyperliquid",
+                                  "regime": "chop_high_volatility",
+                                  "outcome_pnl": 3.21, "reason": "rotated",
+                                  "at": "2026-09-01T00:00:00+00:00"}],
+                       expected_fills_per_24h=7.8,
+                       harvest_net_pct_24h=4.2)
+        reflect.record_decision(ticket, brief, {"kind": "NO-GO"})
+        with open(self._decisions_path()) as f:
+            line = json.loads(f.readline())
+        ev = line["evidence"]
+        self.assertEqual(ev["confidence"], 0.72)
+        self.assertEqual(ev["llm"]["facilitator"], "mistral")
+        self.assertEqual(ev["llm"]["bull"], "mistral")
+        self.assertFalse(ev["llm"]["degraded"])
+        self.assertEqual(ev["debate"]["bull_thesis"],
+                         "wide ATR range pays the grid")
+        self.assertEqual(len(ev["debate"]["bear_risks"]), 2)
+        st = ev["risk_stances"]["conservative"]
+        self.assertTrue(st["approve"])
+        self.assertEqual(st["llm"], "nvidia")
+        self.assertEqual(ev["confluence"]["bonus"], 2.5)
+        self.assertEqual(ev["confluence"]["ok"], 2)
+        self.assertEqual(ev["confluence"]["notes"],
+                         ["high-chop-harvest", "moves-large"])
+        self.assertEqual(ev["confluence"]["fit"]["chop"], 66.1)
+        self.assertEqual(ev["memories"][0]["outcome_pnl"], 3.21)
+        self.assertEqual(ev["expected_fills_24h"], 7.8)
+        self.assertEqual(ev["harvest_net_pct_24h"], 4.2)
+
+    def test_evidence_block_degrades_to_rule_fallback(self):
+        # rule-fallback debate objects carry no _llm markers beyond the
+        # fallback itself; nothing may raise, nothing may be fabricated
+        reflect.record_decision(_ticket(), _brief(), {"kind": "NO-GO"})
+        with open(self._decisions_path()) as f:
+            line = json.loads(f.readline())
+        ev = line["evidence"]
+        self.assertEqual(ev["llm"]["bull"], None)
+        self.assertEqual(ev["confluence"]["bonus"], None)
+        self.assertEqual(ev["confluence"]["ok"], 0)
+        self.assertEqual(ev["memories"], [])
+
+    def test_evidence_block_reads_openings_after_rebuttal(self):
+        # deliberate() replaces the debate bull/bear with rebuttal dicts
+        # ({"refined","concedes"}) — the evidence block must surface the
+        # stashed openings (bull_open/bear_open), which hold the actual
+        # thesis/risks/kill_triggers the agents argued from
+        ticket = _ticket(
+            confidence=0.81, facilitator_llm="mistral",
+            debate={"bull": {"refined": "post-rebuttal refinement",
+                             "concedes": ["thin OI"], "confidence": 0.81,
+                             "_llm": "mistral"},
+                    "bear": {"refined": "post-rebuttal caution",
+                             "concedes": ["harvest model"],
+                             "confidence": 0.3, "_llm": "mistral"},
+                    "bull_open": {"thesis": "EMA stack 20>50>200 confirms",
+                                  "invalidation": "regime flip",
+                                  "confidence": 0.82, "_llm": "mistral"},
+                    "bear_open": {"risks": ["thin OI slippage",
+                                            "ADX near threshold"],
+                                  "kill_triggers": ["PF<1.0 over last 20"],
+                                  "confidence": 0.3, "_llm": "mistral"}})
+        brief = _brief(confluence={"squeeze": True, "choppiness": False,
+                                   "vp": True, "errors": {}},
+                       confluence_bonus=3.0,
+                       confluence_notes=["moves-large"])
+        reflect.record_decision(ticket, brief, {"kind": "NO-GO"})
+        with open(self._decisions_path()) as f:
+            line = json.loads(f.readline())
+        ev = line["evidence"]
+        self.assertEqual(ev["debate"]["bull_thesis"],
+                         "EMA stack 20>50>200 confirms")
+        self.assertEqual(len(ev["debate"]["bear_risks"]), 2)
+        self.assertEqual(ev["debate"]["bear_risks"][0], "thin OI slippage")
+        self.assertEqual(ev["debate"]["kill_triggers"],
+                         ["PF<1.0 over last 20"])
+        self.assertEqual(ev["confluence"]["ok"], 2)
+        # without stashed openings, falls back to the rebuttal dict — never
+        # crashes, never fabricates
+        ticket["debate"].pop("bull_open")
+        ticket["debate"].pop("bear_open")
+        reflect.record_decision(ticket, brief, {"kind": "NO-GO"})
+        with open(self._decisions_path()) as f:
+            lines = [json.loads(l) for l in f if l.strip()]
+        ev2 = lines[1]["evidence"]
+        self.assertEqual(ev2["debate"]["bull_thesis"],
+                         "post-rebuttal refinement")
+        self.assertEqual(ev2["debate"]["bear_risks"], [])

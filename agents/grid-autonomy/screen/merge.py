@@ -47,7 +47,7 @@ WUN_SCRIPTS = os.path.normpath(os.path.join(
     HERE, "..", "..", "..", ".agents", "skills", "wundertrading", "scripts"))
 sys.path.insert(0, WUN_SCRIPTS)
 
-from market_regime import fetch_candles, compute_metrics, classify, ssl_context  # noqa: E402
+from market_regime import fetch_candles, fetch_events_tail, compute_metrics, classify, ssl_context  # noqa: E402
 from universe_screen import (load_presets, screen, hyperliquid_spreads,  # noqa: E402
                              derived_step, ARCHETYPE, flags_of, score)
 
@@ -820,6 +820,12 @@ def main():
         "results": cands,
         "screen_errors": screen_errors,
         "hunt_stats": report_hunt_stats,
+        # candle-hop attribution (direct/vision/tvcli) from THIS subprocess's
+        # fetch ring — the screen fetches the bulk of the candles (4h confirms
+        # + harvest EV) in a child whose in-memory ring dies with it, so the
+        # tail rides the report; the daemon persists it for the console's
+        # data-sources panel (fail-soft)
+        "fetch_events": fetch_events_tail(50),
         "dropped_dead_tape": dropped_floor,
         "disclaimer": "screening only — execution blocked until guardrails pass.",
     }

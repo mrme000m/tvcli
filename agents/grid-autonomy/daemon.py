@@ -349,6 +349,21 @@ def resolve_cmd(cmd):
     if "/" in parts[0]:
         return parts
     exe = shutil.which(parts[0])
+    if exe is None:
+        # launchd's minimal PATH hides homebrew/mise binaries, so the
+        # watchdog's relaunch commands (node, …) would always fail — scan
+        # the usual install roots an interactive shell would find them in
+        for root in ("/opt/homebrew/bin", "/usr/local/bin",
+                     "/opt/homebrew/sbin", "/usr/local/sbin"):
+            if os.path.isfile(os.path.join(root, parts[0])):
+                exe = os.path.join(root, parts[0])
+                break
+        if exe is None:
+            import glob
+            for base in glob.glob("/Volumes/*/mise/shims"):
+                if os.path.isfile(os.path.join(base, parts[0])):
+                    exe = os.path.join(base, parts[0])
+                    break
     return ([exe] + parts[1:]) if exe else parts
 
 # Minimum viable notional per grid line when :2087 market metadata is
@@ -638,7 +653,8 @@ def run_merge(top=30, confluence_top=10, no_confluence=False,
 SCREEN_CACHE_FIELDS = (
     "venue", "symbol", "tv_symbol", "regime", "metrics", "evidence",
     "score", "score_final", "spread_pct", "step", "archetype", "vol_usd",
-    "preset", "flags", "confluence_notes", "confluence_bonus", "tvcli_fit",
+    "preset", "flags", "confluence", "confluence_notes", "confluence_bonus",
+    "tvcli_fit",
     "expected_fills_per_24h", "harvest_net_pct_24h", "confirm_4h",
 )
 
@@ -1111,6 +1127,25 @@ class Daemon:
         self.port = port or int(self.config["server"].get("daemon_port", 8799))
         self.state = load_state()
         self_heal_env(self.state)
+        # config llm.chain is the documented fallback order — export it as
+        # the provider-chain env DEFAULT (an explicit GRID_LLM_CHAIN from
+        # state/llm.env or the environment still wins, so console-side
+        # chain edits keep their precedence). Without this the yaml key
+        # was dead config: provider.py only ever read the env var.
+        _chain = (self.config.get("llm") or {}).get("chain")
+        if isinstance(_chain, list) and _chain \
+                and not os.environ.get("GRID_LLM_CHAIN"):
+            os.environ["GRID_LLM_CHAIN"] = ",".join(
+                str(p).strip() for p in _chain if str(p).strip())
+        # same treatment for the per-provider model ids (yaml = documented
+        # default; state/llm.env + ambient env keep precedence)
+        for _prov, _var in (("cf_model", "CF_MODEL"),
+                            ("nvidia_model", "NVIDIA_MODEL"),
+                            ("openrouter_model", "OPENROUTER_MODEL"),
+                            ("mistral_model", "MISTRAL_MODEL")):
+            _model = (self.config.get("llm") or {}).get(_prov)
+            if _model and not os.environ.get(_var):
+                os.environ[_var] = str(_model)
         self.profiles = grid_profiles_safe()
         self.reliability = reliability_load_safe()
         self.state["profiles"] = self.profiles
@@ -1508,6 +1543,19 @@ class Daemon:
         if ticket.get("decision") != "GO":
             log(self.state, {"kind": "veto",
                              "msg": f"{key}: {ticket.get('veto', '?')[:160]}"})
+            # rejected candidates land in the ledger too (evidence block
+            # included) — "what did the agents turn down and why" is as
+            # operable as the deploys; memories_for ignores outcome-less
+            # rows, so the recall lane is unaffected
+            try:
+                record_decision_safe(
+                    ticket, brief,
+                    {"kind": "NO-GO", "slot": slot["slot"],
+                     "venue": cand["venue"], "symbol": cand["symbol"],
+                     "msg": f"deliberation veto: "
+                            f"{str(ticket.get('veto', '?'))[:160]}"})
+            except Exception:
+                pass
             return None, ticket, None, brief
 
         # live profile selection FIRST (venue-strict, allowlist + denylist):
@@ -1959,6 +2007,109 @@ class Daemon:
         self._run_paper_profile_ensure(missing, execute=True)
 
     # ── rescreen cycle ─────────────────────────────────────────────────
+    def _maybe_market_brief(self, cands, hunt_stats):
+        """One LLM call per brief interval — the always-on intelligence lane.
+
+        The swarm debate only runs for DEPLOY candidates; with the fleet at
+        the WT demo cap or all slots healthy, plan_candidate never fires and
+        the provider chain (Mistral first once cf is keyless) sits idle
+        between rare arbiter calls. This lane puts the subscription to work
+        on every rescreen (rate-limited by llm.brief_interval_min, 0=off):
+        a compact, strictly-JSON market brief over the fresh screen board +
+        the live fleet's fills/PnL + the tvcli hunt counters — the same
+        evidence the deploy agents would see. Journaled as `market-brief`,
+        persisted to state.market_brief for the console Fleet rail.
+        ADVISORY ONLY: the brief never gates, deploys, rotates or edits —
+        it is intelligence, not an actuator. Fail-soft by construction."""
+        try:
+            cfg = self.config.get("llm") or {}
+            interval_min = float(cfg.get("brief_interval_min", 30) or 0)
+            if interval_min <= 0:
+                return
+            now = time.time()
+            last = (self.state.get("market_brief") or {}).get("at_epoch")
+            if last and now - float(last) < interval_min * 60:
+                return
+            from provider import chat_json, named_chain  # llm/ on sys.path
+
+            # pin the brief lane to the subscription provider (default
+            # mistral — the always-on intelligence should ride the paid
+            # subscription, not the free CF lane it would otherwise hit
+            # first where a CF key exists). named_chain returns [] when
+            # the provider has no credentials, in which case chat_json
+            # falls back to the global chain — the lane never hard-fails
+            # on a missing key.
+            brief_chain = named_chain(
+                str(cfg.get("brief_provider") or "mistral"))
+
+            fleet = {}
+            try:
+                fleet = (self.pnl_snapshot() or {}).get("fleet") or {}
+            except Exception:
+                pass
+            incumbents = []
+            for slot_key, bot in (self.state.get("active_bots") or {}).items():
+                obs = bot.get("observed") or {}
+                incumbents.append({
+                    "slot": slot_key, "symbol": bot.get("symbol"),
+                    "venue": bot.get("venue"), "regime": bot.get("regime")
+                    or (bot.get("ticket") or {}).get("regime"),
+                    "score": bot.get("score_final"),
+                    "fills_24h": obs.get("fills_24h"),
+                    "realized_pnl": obs.get("realized_pnl"),
+                    "unrealized_pnl": obs.get("unrealized_pnl"),
+                    "open_lines": obs.get("open_lines"),
+                    "dd_vs_atr_band": obs.get("dd_vs_atr_band"),
+                    "structure": (bot.get("observed") or {}).get(
+                        "structure_notes") or [],
+                })
+            challengers = [{
+                "venue": c.get("venue"), "symbol": c.get("symbol"),
+                "regime": c.get("regime"),
+                "score_final": c.get("score_final"),
+                "harvest_net_pct_24h": c.get("harvest_net_pct_24h"),
+                "expected_fills_24h": c.get("expected_fills_per_24h"),
+                "confluence": c.get("confluence_notes") or [],
+            } for c in (cands or [])[:5]]
+            skills = {}
+            for skill, s in ((hunt_stats or {}).get("skills") or {}).items():
+                if isinstance(s, dict):
+                    skills[skill] = f"{s.get('ok', 0)}/{s.get('hunted', 0)}"
+            evidence = json.dumps({
+                "fleet_pnl": fleet, "incumbents": incumbents,
+                "top_challengers": challengers, "tvcli_hunt": skills,
+            }, default=str)
+            sys_prompt = ("You are the market intelligence officer of a "
+                          "crypto grid-trading fleet. Reply with STRICT "
+                          "JSON only, no markdown fences, no commentary. "
+                          "Be terse: summary at most 45 words, arrays at "
+                          "most 3 items of at most 15 words each.")
+            user_prompt = (
+                f"Assess the fleet's market position from this evidence and "
+                f"what the fleet should watch next. Schema: "
+                f'{{"bias":"risk-on|risk-off|mixed","summary":str,'
+                f'"watch":[str],"risks":[str]}}. Evidence: {evidence}')
+            name, obj = chat_json([
+                {"role": "system", "content": sys_prompt},
+                {"role": "user", "content": user_prompt}],
+                _chain=brief_chain or None)
+            brief = {
+                "at": utcnow(), "at_epoch": now, "provider": name,
+                "bias": str(obj.get("bias") or "mixed")[:24],
+                "summary": str(obj.get("summary") or "")[:600],
+                "watch": [str(w)[:160] for w in (obj.get("watch") or [])[:3]],
+                "risks": [str(r)[:160] for r in (obj.get("risks") or [])[:3]],
+            }
+            self.state["market_brief"] = brief
+            log(self.state, {"kind": "market-brief",
+                             "msg": f"[{name}] {brief['summary'][:200]}",
+                             "brief": brief})
+        except Exception:
+            # fail-soft AND quiet: a dead chain would otherwise journal an
+            # error every rescreen; the heartbeat's llm checks already
+            # surface provider health
+            pass
+
     def rescreen_cycle(self, dry_run=True, no_confluence=False, max_new=2,
                        top=None):
         actions = []
@@ -2054,6 +2205,19 @@ class Daemon:
             return actions
         cands = report.get("results", [])
         hunt_stats = report.get("hunt_stats") or {}
+        # data-source observability: persist the SUBPROCESS screen's candle-
+        # hop tail + hunt counters for the ctl /status data_sources block
+        # (the child's in-memory ring dies with it — this is the only way
+        # the console sees which hop served the 4h-confirm + harvest EV
+        # fetches). Fail-soft by construction.
+        try:
+            self.state["screen_data_sources"] = {
+                "at": time.time(),
+                "fetch_events": (report.get("fetch_events") or [])[-50:],
+                "hunt_stats": hunt_stats if isinstance(hunt_stats, dict) else {},
+            }
+        except Exception:
+            pass
         log(self.state, {"kind": "screen",
                          "msg": f"{len(cands)} candidates, top=" +
                                 (f"{cands[0]['venue']}:{cands[0]['symbol']} "
@@ -2268,6 +2432,13 @@ class Daemon:
             "active_slots": sorted(self.state["active_bots"]),
         }
         write_run_card_safe(cycle_report)
+        # always-on intelligence lane (Mistral-first chain): one brief per
+        # interval over this fresh evidence; advisory-only, fail-soft
+        self._maybe_market_brief(cands, hunt_stats)
+        try:
+            save_state(self.state)
+        except Exception:
+            pass
         return actions
 
     # ── gone-bot reconciliation (see is_gone_bot_error) ──────────────────
@@ -4010,7 +4181,12 @@ class Daemon:
         optimize_s = self.optimizer_interval_s()
         next_health = time.time() + interval_s
         next_rescreen = time.time() + rescreen_s
-        next_reliability = time.time() + reliability_s
+        # first reliability pass shortly after startup (same early-first-pass
+        # pattern as the heartbeat below): without it a fresh deploy's ledger
+        # stays missing for a full 24h, leaving the console Reliability tab
+        # empty even after paper bots have closed grid trips. The manual
+        # ctl /reliability refresh does the same work on demand.
+        next_reliability = time.time() + min(300.0, reliability_s)
         next_optimize = time.time() + (optimize_s or interval_s)
         po_s = self.position_optimizer_interval_s()
         next_po = time.time() + po_s

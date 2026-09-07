@@ -56,13 +56,27 @@ def _data_sources_payload(state=None):
     if _DS_CACHE["payload"] is not None and now - _DS_CACHE["at"] < _DS_TTL:
         return _DS_CACHE["payload"]
     payload = {"fetch_events": [], "hunt_stats": {}}
-    try:
-        import market_regime as _mr
-        _fn = getattr(_mr, "fetch_events_tail", None)
-        if callable(_fn):
-            payload["fetch_events"] = _fn(50) or []
-    except Exception:
-        pass
+    # primary for BOTH fields: the persisted snapshot of the last rescreen
+    # SUBPROCESS (state.screen_data_sources) — that child fetches the bulk
+    # of the candles (4h confirms + harvest EV) and runs the /hunt pass,
+    # but its in-memory rings die with it, so the daemon journals the tail
+    # per cycle. In-process rings below are the fallback (position
+    # optimizer / stagnation fetches happen in the daemon process itself).
+    sds = (state or {}).get("screen_data_sources")
+    if isinstance(sds, dict):
+        if isinstance(sds.get("fetch_events"), list) and sds["fetch_events"]:
+            payload["fetch_events"] = sds["fetch_events"][-50:]
+        hs = sds.get("hunt_stats")
+        if isinstance(hs, dict) and hs.get("skills"):
+            payload["hunt_stats"] = hs
+    if not payload["fetch_events"]:
+        try:
+            import market_regime as _mr
+            _fn = getattr(_mr, "fetch_events_tail", None)
+            if callable(_fn):
+                payload["fetch_events"] = _fn(50) or []
+        except Exception:
+            pass
     # primary: the newest screen journal entry carries the subprocess's
     # hunt_stats (per-skill hunted/ok, candidates boosted, errors)
     try:
@@ -152,7 +166,18 @@ def status_payload(daemon):
         # data-feed observability tails (fail-soft empty shapes)
         "heartbeat": st.get("heartbeat"),
         "data_sources": _data_sources_payload(st),
+        # latest LLM market brief (advisory intelligence lane; None before
+        # the first successful call) — rendered in the console Fleet rail
+        "market_brief": _brief_view(st.get("market_brief")),
     }
+
+
+def _brief_view(brief):
+    """Public copy of the persisted market brief (drops the internal
+    at_epoch bookkeeping key; never raises)."""
+    if not isinstance(brief, dict):
+        return None
+    return {k: v for k, v in brief.items() if k != "at_epoch"}
 
 
 class Ctl(BaseHTTPRequestHandler):
@@ -160,11 +185,16 @@ class Ctl(BaseHTTPRequestHandler):
 
     def _json(self, code, obj):
         body = json.dumps(obj).encode()
-        self.send_response(code)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # client hung up mid-response (curl -m, tab closed, etc.) —
+            # not a server fault, just stop sending
+            pass
 
     def do_GET(self):
         st = self.daemon.state
@@ -227,6 +257,14 @@ class Ctl(BaseHTTPRequestHandler):
 
     def log_message(self, *a):
         pass
+
+    def handle(self):
+        # ponytail: swallow client-disconnect noise (curl -m, closed tabs)
+        # so a hung-up browser poll doesn't pollute the daemon log
+        try:
+            super().handle()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
 
 def serve_ctl(daemon, port):

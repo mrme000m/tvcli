@@ -10,9 +10,10 @@ import shutil
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.request
-from http.server import ThreadingHTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 GRID = os.path.dirname(HERE)
@@ -142,8 +143,14 @@ class ConsoleTestCase(unittest.TestCase):
                             ("_pid", server._pid, lambda: None)]
         for name, _old, new in self._fn_patches:
             setattr(server, name, new)
+        # keep the PB read path hermetic too: no pbclient adapter (which
+        # would otherwise seed the real .pocketbase/pb.env creds and hit
+        # a live local PocketBase); tests that want it patch it again.
+        self._real_pb_client = server._pb_client
+        server._pb_client = lambda: None
 
     def tearDown(self):
+        server._pb_client = self._real_pb_client
         for name, old, _new in self._fn_patches:
             setattr(server, name, old)
         for key, value in self._saved.items():
@@ -185,6 +192,158 @@ class TestShaping(ConsoleTestCase):
         self.assertTrue(bots[0]["stagnant"])
         self.assertEqual(bots[0]["committed"], 37.5)
         self.assertEqual(bots[0]["grid_type"], "long")
+
+    def test_enriched_bots_attaches_tvcli_fit_from_cache(self):
+        # When the bot's symbol/venue appears in state.screen_cache, the
+        # enriched record should carry the tvcli_fit block + notes — the
+        # Fleet rail renders these directly on the slot card.
+        self.write_state({
+            "active_bots": {"1": {"symbol": "PUMP", "venue": "hyperliquid",
+                                   "ticket": {"grid_type": "long"},
+                                   "observed": {"price": 0.004, "status": "active"},
+                                   "decision_id": "d-test"}},
+            "screen_cache": {"at": time.time(),
+                             "candidates": [{"venue": "hyperliquid", "symbol": "PUMP",
+                                             "score_final": 120.5,
+                                             "confluence_bonus": 5.0,
+                                             "confluence_ok": 6,
+                                             "confluence_notes": ["moves-large",
+                                                                  "high-chop-harvest"],
+                                             "tvcli_fit": {"chop": 62.3,
+                                                           "mtf_composite": 12.4,
+                                                           "atr_pct": 2.1}}]},
+        })
+        bots = server._enriched_bots(server._load_state())
+        self.assertEqual(len(bots), 1)
+        b = bots[0]
+        self.assertEqual(b["tvcli_bonus"], 5.0)
+        self.assertEqual(b["tvcli_ok"], 6)
+        self.assertEqual(b["tvcli_notes"][0], "moves-large")
+        self.assertEqual(b["tvcli_fit"]["chop"], 62.3)
+        # screen_age_min is rounded to 1 decimal; just-now cache → 0
+        self.assertIn("screen_age_min", b)
+        self.assertLessEqual(b["screen_age_min"], 1)
+        # bot missing from the latest cache → no fit block (None keys
+        # render as "—" in the slot card, never as a crash)
+        self.write_state({
+            "active_bots": {"1": {"symbol": "X", "venue": "binance",
+                                   "observed": {}}},
+            "screen_cache": {"at": time.time(),
+                             "candidates": [{"venue": "hyperliquid", "symbol": "PUMP"}]},
+        })
+        bots = server._enriched_bots(server._load_state())
+        self.assertIsNone(bots[0]["tvcli_fit"])
+        self.assertIsNone(bots[0]["tvcli_bonus"])
+
+    def test_enriched_bots_attaches_decision_evidence(self):
+        # When the bot carries decision_id and the id exists in
+        # decisions.jsonl, the enriched record should carry the full
+        # decision object so the Fleet rail can deep-link to it.
+        with open(os.path.join(server.STATE_DIR, "decisions.jsonl"), "w") as f:
+            f.write(json.dumps({"id": "d-test", "symbol": "PUMP",
+                                "venue": "hyperliquid", "regime": "chop",
+                                "evidence": {"confidence": 0.9,
+                                             "llm": {"bull": "mistral"}}}) + "\n")
+            f.write(json.dumps({"id": "d-other", "symbol": "X",
+                                "venue": "binance"}) + "\n")
+        self.write_state({
+            "active_bots": {"1": {"symbol": "PUMP", "venue": "hyperliquid",
+                                   "observed": {}, "decision_id": "d-test"}},
+        })
+        bots = server._enriched_bots(server._load_state())
+        self.assertIsNotNone(bots[0]["decision"])
+        self.assertEqual(bots[0]["decision"]["evidence"]["llm"]["bull"], "mistral")
+
+    def test_decision_payload_by_id_with_cohort(self):
+        # /api/decisions/<id> returns the row + cohort_size/cohort_realized
+        # rolled up from same-symbol+venue+regime siblings.
+        rows = [
+            {"id": "d-a", "at": "2026-09-01T00:00:00", "symbol": "PUMP",
+             "venue": "hyperliquid", "regime": "chop",
+             "outcome": {"realized_pnl": 1.5}},
+            {"id": "d-b", "at": "2026-09-02T00:00:00", "symbol": "PUMP",
+             "venue": "hyperliquid", "regime": "chop",
+             "outcome": {"realized_pnl": -0.3}},
+            {"id": "d-c", "at": "2026-09-03T00:00:00", "symbol": "PUMP",
+             "venue": "binance", "regime": "chop"},   # different venue → excluded
+            {"id": "d-d", "at": "2026-09-04T00:00:00", "symbol": "X",
+             "venue": "hyperliquid", "regime": "chop"},  # different sym → excluded
+        ]
+        with open(os.path.join(server.STATE_DIR, "decisions.jsonl"), "w") as f:
+            for r in rows:
+                f.write(json.dumps(r) + "\n")
+        p = server.decision_payload_by_id("d-b")
+        self.assertIsNotNone(p)
+        self.assertEqual(p["decision"]["id"], "d-b")
+        self.assertEqual(p["cohort_size"], 1)            # only d-a matches
+        self.assertAlmostEqual(p["cohort_realized"], 1.5)
+        self.assertIsNone(server.decision_payload_by_id("d-missing"))
+        self.assertIsNone(server.decision_payload_by_id(""))
+
+    def test_optimizer_swap_log_shape(self):
+        # /api/optimizer/swap-log rolls up state.optimizer into a
+        # console-friendly shape with idle-min per slot + at_iso on every swap.
+        self.write_state({"optimizer": {
+            "trackers": {"1": {"last_fills": 2.0,
+                               "last_increase_at": time.time() - 600},
+                          "2": {"last_fills": 0.0,
+                                "last_increase_at": time.time() - 60}},
+            "swap_log": [{"slot": "1", "at": time.time() - 60, "ok": True}],
+            "cycles": 5, "swaps_total": 1,
+            "last_report": {"arbiter": {"slot": "1", "approve": True,
+                                       "challenger": "ETH",
+                                       "confidence": 0.8,
+                                       "llm": "mistral"}}}})
+        sl = server.optimizer_swap_log()
+        self.assertEqual(sl["cycles"], 5)
+        self.assertEqual(sl["swaps_total"], 1)
+        self.assertEqual(len(sl["trackers"]), 2)
+        # trackers sorted so the most-idle slot surfaces first
+        self.assertGreater(sl["trackers"][0]["idle_min"],
+                           sl["trackers"][1]["idle_min"])
+        self.assertEqual(len(sl["swaps"]), 1)
+        self.assertIn("at_iso", sl["swaps"][0])
+        self.assertEqual(sl["last_arbiter"]["challenger"], "ETH")
+
+    def test_optimizer_swap_log_fail_soft_no_state(self):
+        # No state.json on disk → empty shape (never a 500)
+        sl = server.optimizer_swap_log()
+        self.assertEqual(sl["cycles"], 0)
+        self.assertEqual(sl["swaps_total"], 0)
+        self.assertEqual(sl["trackers"], [])
+        self.assertEqual(sl["swaps"], [])
+        self.assertIsNone(sl["last_arbiter"])
+
+    def test_reliability_payload_includes_ladder_progression(self):
+        # The new kill_thresholds + per-archetype ladder_next fields
+        # power the "next rung" column in the Reliability view.
+        with open(os.path.join(server.STATE_DIR, "reliability.json"), "w") as f:
+            json.dump({
+                "Chop harvest": {"samples": 5, "profit_factor": 0.9,
+                                 "recent_pf": 1.5, "synthetic_samples": 0},
+                "Trend long": {"samples": 15, "profit_factor": 1.2,
+                               "recent_pf": 1.1, "synthetic_samples": 0},
+                "Killed one": {"samples": 30, "profit_factor": 5.0,
+                               "recent_pf": 0.7, "synthetic_samples": 0},
+            }, f)
+        p = server.reliability_payload()
+        self.assertIn("kill_thresholds", p)
+        self.assertEqual(p["kill_thresholds"]["kill_min_samples"], 10)
+        # base → probe
+        a = p["archetypes"]["Chop harvest"]
+        self.assertEqual(a["tier"], "base")
+        self.assertEqual(a["ladder_next"], "probe")
+        self.assertEqual(a["ladder_next_at"], p["ladder"]["probe_samples"])
+        # probe → full
+        b = p["archetypes"]["Trend long"]
+        self.assertEqual(b["tier"], "probe")
+        self.assertEqual(b["ladder_next"], "full")
+        # killed: no next rung
+        k = p["archetypes"]["Killed one"]
+        self.assertEqual(k["tier"], "killed")
+        self.assertIsNone(k["ladder_next"])
+        # real_samples subtracts synthetic from samples
+        self.assertEqual(a["real_samples"], 5)
 
     def test_decisions_payload_newest_first(self):
         with open(os.path.join(server.STATE_DIR, "decisions.jsonl"), "w") as f:
@@ -420,6 +579,188 @@ class TestHTTP(ConsoleTestCase):
         finally:
             sp.Popen = real_popen
             server.DEV_SCRIPT = real_script
+
+
+class TvcliStubHandler(BaseHTTPRequestHandler):
+    """Local stand-in for the tvcli server's POST /fetch: records request
+    bodies, answers with deterministic newest-first periods (like tvcli)."""
+
+    state = {"hits": 0, "bodies": []}
+
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        n = int(self.headers.get("Content-Length", 0))
+        try:
+            body = json.loads(self.rfile.read(n) if n else b"{}")
+        except Exception:
+            body = {}
+        TvcliStubHandler.state["hits"] += 1
+        TvcliStubHandler.state["bodies"].append(body)
+        bars = int(body.get("bars", 0))
+        periods = [{"time": 1700000000 + (bars - 1 - i) * 3600,
+                    "open": 100.0 + i, "high": 101.0 + i, "low": 99.0 + i,
+                    "close": 100.5 + i, "volume": 10.0}
+                   for i in range(bars)]   # newest-first, like real tvcli
+        out = json.dumps({"symbol": body.get("symbol"),
+                          "timeframe": body.get("timeframe"),
+                          "bars": bars, "periods": periods}).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        self.wfile.write(out)
+
+
+class TestChart(ConsoleTestCase):
+    """GET /api/chart against a local tvcli stub (hermetic)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.stub = ThreadingHTTPServer(("127.0.0.1", 0), TvcliStubHandler)
+        threading.Thread(target=cls.stub.serve_forever, daemon=True).start()
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.httpd.server_address[1]
+        threading.Thread(target=cls.httpd.serve_forever, daemon=True).start()
+        cls._saved_tvcli = server.TVCLI_BASE
+        server.TVCLI_BASE = f"http://127.0.0.1:{cls.stub.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        server.TVCLI_BASE = cls._saved_tvcli
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+        cls.stub.shutdown()
+        cls.stub.server_close()
+
+    def setUp(self):
+        super().setUp()
+        TvcliStubHandler.state["hits"] = 0
+        TvcliStubHandler.state["bodies"] = []
+        server._CHART_CACHE.clear()
+
+    def call(self, path):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}{path}")
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                return resp.status, json.loads(resp.read() or b"{}")
+        except urllib.error.HTTPError as exc:
+            return exc.code, json.loads(exc.read() or b"{}")
+
+    def test_chart_happy_path_oldest_first(self):
+        code, body = self.call("/api/chart?venue=binance&symbol=DASH/USDT")
+        self.assertEqual(code, 200)
+        self.assertEqual(body["count"], 96)
+        bars = body["bars"]
+        self.assertEqual(len(bars), 96)
+        self.assertEqual(bars[0]["t"], 1700000000)           # oldest first
+        self.assertEqual(bars[-1]["t"], 1700000000 + 95 * 3600)
+        for b in bars:
+            self.assertEqual(sorted(b), ["c", "h", "l", "o", "t"])
+            self.assertIsInstance(b["t"], int)
+            self.assertIsInstance(b["c"], float)
+        self.assertEqual(body["venue"], "binance")
+        self.assertEqual(body["symbol"], "DASH/USDT")
+        self.assertEqual(body["interval"], "1h")
+        self.assertIn("at", body)
+        # the stub saw the mapped TradingView symbol
+        self.assertEqual(TvcliStubHandler.state["bodies"][0]["symbol"],
+                         "BINANCE:DASHUSDT")
+        self.assertEqual(TvcliStubHandler.state["bodies"][0]["timeframe"], "1h")
+
+    def test_chart_hyperliquid_rides_binance_pair(self):
+        code, body = self.call("/api/chart?venue=hyperliquid&symbol=pump")
+        self.assertEqual(code, 200)
+        self.assertEqual(TvcliStubHandler.state["bodies"][0]["symbol"],
+                         "BINANCE:PUMPUSDT")   # USDT quote appended
+
+    def test_chart_unknown_venue_400(self):
+        code, body = self.call("/api/chart?venue=kraken&symbol=ETHUSDT")
+        self.assertEqual(code, 400)
+        self.assertIn("error", body)
+
+    def test_chart_bad_interval_400(self):
+        code, body = self.call("/api/chart?venue=binance&symbol=ETHUSDT&interval=2h")
+        self.assertEqual(code, 400)
+        self.assertIn("error", body)
+
+    def test_chart_bars_clamped(self):
+        code, body = self.call("/api/chart?venue=binance&symbol=ETHUSDT&bars=9999")
+        self.assertEqual(code, 200)
+        self.assertEqual(body["count"], 500)               # clamped to 500
+        self.assertEqual(TvcliStubHandler.state["bodies"][0]["bars"], 500)
+
+    def test_chart_tvcli_outage_fail_soft(self):
+        real = server.TVCLI_BASE
+        server.TVCLI_BASE = "http://127.0.0.1:59998"       # dead port
+        try:
+            code, body = self.call("/api/chart?venue=binance&symbol=BTCUSDT")
+        finally:
+            server.TVCLI_BASE = real
+        self.assertEqual(code, 200)                        # never a 500
+        self.assertEqual(body["bars"], [])
+        self.assertEqual(body["count"], 0)
+        self.assertTrue(body.get("error"))
+
+    def test_chart_cached_second_call_no_stub_hit(self):
+        code, first = self.call("/api/chart?venue=binance&symbol=SOLUSDT")
+        self.assertEqual(code, 200)
+        self.assertEqual(TvcliStubHandler.state["hits"], 1)
+        code, second = self.call("/api/chart?venue=binance&symbol=SOLUSDT")
+        self.assertEqual(code, 200)
+        self.assertEqual(TvcliStubHandler.state["hits"], 1)  # served from cache
+        self.assertEqual(second["bars"], first["bars"])
+
+
+class TestPnlPayload(ConsoleTestCase):
+    """pnl_payload: pbclient adapter first, state.json fallback last."""
+
+    def test_pb_client_primary_path(self):
+        recs = [
+            {"at": "2026-09-07T01:00:00+00:00", "kind": "pnl-snapshot",
+             "extra": json.dumps({"fleet": {"net": 1.25, "realized": 1.0},
+                                  "bots": {"2": {"symbol": "PUMP"}}})},
+            {"at": "2026-09-07T02:00:00+00:00", "kind": "pnl-snapshot",
+             "fleet": {"net": 2.0}},
+        ]
+
+        class StubPB:
+            def __init__(self, rows):
+                self.rows, self.calls = rows, []
+
+            def list(self, coll, filter=None, sort=None, page=1, per_page=50):
+                self.calls.append((coll, filter, sort, per_page))
+                return self.rows
+
+        stub = StubPB(recs)
+        server._pb_client = lambda: stub
+        out = server.pnl_payload()
+        self.assertEqual(out["source"], "pocketbase")
+        self.assertEqual(out["total"], 2)
+        # the adapter was queried with the documented filter/sort/page size
+        self.assertEqual(stub.calls[0], ("journal", "(kind='pnl-snapshot')",
+                                         "-at", 200))
+        # newest first, extra-as-JSON-string payload unpacked
+        self.assertEqual(out["points"][0]["at"], "2026-09-07T02:00:00+00:00")
+        self.assertEqual(out["points"][0]["fleet"], {"net": 2.0})
+        self.assertEqual(out["points"][1]["fleet"], {"net": 1.25, "realized": 1.0})
+        self.assertEqual(out["points"][1]["bots"]["2"]["symbol"], "PUMP")
+
+    def test_pb_client_empty_falls_back_to_state(self):
+        self.write_state({"journal": [
+            {"kind": "pnl-snapshot", "at": "2026-09-07T03:00:00+00:00",
+             "fleet": {"net": 5.0}},
+        ]})
+
+        class StubPB:
+            def list(self, *a, **k):
+                return []
+
+        server._pb_client = lambda: StubPB()
+        out = server.pnl_payload()
+        self.assertEqual(out["source"], "state")   # PB dead/empty → fallback
+        self.assertEqual(out["points"][0]["fleet"], {"net": 5.0})
 
 
 if __name__ == "__main__":

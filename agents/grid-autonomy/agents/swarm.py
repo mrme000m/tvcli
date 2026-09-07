@@ -184,6 +184,11 @@ def deliberate(brief, _chain=None, debate_rounds=1):
     degraded |= d
     bear, d = bear_open(brief, _chain)
     degraded |= d
+    # the openings carry the actual thesis/risks the agents argued FROM;
+    # the rebuttal round below overwrites bull/bear with {"refined",
+    # "concedes"} dicts, so the openings are stashed here for the decision
+    # ledger's evidence block (never fabricated when a round is skipped)
+    bull_open0, bear_open0 = dict(bull), dict(bear)
     for _ in range(max(debate_rounds, 0)):
         bull, d = rebuttal(brief, bull, bear, "bullish", _chain)
         degraded |= d
@@ -201,7 +206,10 @@ def deliberate(brief, _chain=None, debate_rounds=1):
                                 GRID_TYPE.get(brief.get("regime"), "neutral")),
         "rationale": verdict.get("rationale", ""),
         "confidence": verdict.get("confidence", 0.5),
-        "debate": {"bull": bull, "bear": bear},
+        "debate": {"bull": bull, "bear": bear,
+                   "bull_open": bull_open0, "bear_open": bear_open0},
+        # provider attribution for the decision ledger's evidence block
+        "facilitator_llm": verdict.get("_llm"),
         "llm_degraded": degraded,
     }
     if ticket["decision"] != "GO":

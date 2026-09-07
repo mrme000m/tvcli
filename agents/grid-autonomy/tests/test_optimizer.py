@@ -526,6 +526,32 @@ class TestFastHunter(unittest.TestCase):
         self.assertEqual(out[0]["score_final"], 60.0)  # untouched
         self.assertIn("_error", hunts["squeeze"])
 
+    def test_apply_structure_refreshes_confluence_truth(self):
+        # a fast-lane deploy records its evidence from the cached
+        # candidate: the per-skill boolean truth must reflect the LIVE
+        # hunt (squeeze now failing), not only the last hourly screen
+        def hunt(skill, syms, tf, bars):
+            return {"BINANCE:SOLUSDT": {}}  # result missing → skill failed
+
+        h = FastHunter(hunt_fn=hunt, presets={"p": PRESET})
+        cands = [{"venue": "hyperliquid", "symbol": "SOL",
+                  "tv_symbol": "BINANCE:SOLUSDT", "regime": "neutral",
+                  "score": 60.0, "score_final": 60.0,
+                  "confluence": {"squeeze": True, "vp": True,
+                                 "errors": {}}}]
+        out, hunts = h.apply_structure(cands, ["squeeze"], "15m", 96)
+        # the freshly hunted skill flips to False; untouched skills keep
+        # their screen truth
+        self.assertFalse(out[0]["confluence"]["squeeze"])
+        self.assertTrue(out[0]["confluence"]["vp"])
+        # candidates without the screen bool dict are left alone
+        h2 = FastHunter(hunt_fn=hunt, presets={"p": PRESET})
+        bare = [{"venue": "hyperliquid", "symbol": "SOL",
+                 "tv_symbol": "BINANCE:SOLUSDT", "regime": "neutral",
+                 "score": 60.0, "score_final": 60.0}]
+        out2, _ = h2.apply_structure(bare, ["squeeze"], "15m", 96)
+        self.assertNotIn("confluence", out2[0])
+
 
 # ── full cycle on a fake daemon ────────────────────────────────────────
 

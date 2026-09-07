@@ -22,6 +22,7 @@ API (all JSON):
     GET  /api/state           raw state.json
     GET  /api/journal?limit=  journal tail (newest last, as stored)
     GET  /api/decisions?limit=decisions.jsonl tail (newest first)
+    GET  /api/decisions/<id>   one decision + cohort (same symbol+regime)
     GET  /api/reliability     archetype ledger + sizing-tier computation
     GET  /api/recommendations?limit=  position-optimizer recommendations
                               (PocketBase records, newest first)
@@ -30,6 +31,9 @@ API (all JSON):
                               (ctl /optimizer; fail-soft:
                               {"optimizer": null, "error": ...} + 200
                               when down)
+    GET  /api/optimizer/swap-log  swap_log + per-slot idle trackers +
+                              last arbiter verdict from state.optimizer
+                              (no ctl round-trip; fail-soft empty)
     GET  /api/reports         run-card index
     GET  /api/reports/<stem>  one run card {json, md}
     GET  /api/logs?lines=&grep=  daemon.log tail
@@ -39,16 +43,27 @@ API (all JSON):
     GET  /api/status          proxy of the daemon ctl /status  (5s cache,
                               fail-soft: {"error": ...} + 200 when down)
     GET  /api/pnl             PnL history — PocketBase `journal` records of
-                              kind "pnl-snapshot" (authed via .pocketbase/
-                              pb.env when public read is empty), falling
-                              back to state.json's journal array
+                              kind "pnl-snapshot" (via the pbclient adapter
+                              with .pocketbase/pb.env superuser re-auth,
+                              then the raw HTTP read, falling back to
+                              state.json's journal array)
                               → {points: [{at, fleet{…}}]} newest-first
+    GET  /api/chart?venue=&symbol=&interval=&bars=
+                              OHLCV window for a slot's market — proxy of
+                              the tvcli server's POST /fetch (interval ∈
+                              15m|1h|4h|1d, bars 8..500, 60s in-process
+                              cache; fail-soft: {"error": …, "bars": []}
+                              + 200 when tvcli is down)
+                              → {at, venue, symbol, interval,
+                                 bars: [{t, o, h, l, c}] oldest-first}
     GET  /api/position-sweeps position-optimizer sweep history — journal
                               ring entries of kind position-optimizer-sweep /
                               position-optimizer / position-optimizer-applied
                               from state.json (fail-soft when absent)
                               → {sweeps: [{…}]} newest-first, last 25
     GET  /api/meta            ports, paths, versions
+    GET  /api/llm/health      live provider ping + role routing matrix
+                              (60s in-process cache; keys never returned)
     POST /api/ctl/rescreen    queue an immediate rescreen     {confirm}
     POST /api/ctl/optimize    queue an immediate fast-optimizer
                               cycle                        {confirm}
@@ -365,6 +380,34 @@ def _pb_env() -> dict:
     return env
 
 
+_PB_CLIENT = None
+
+
+def _pb_client():
+    """Lazily-built shared pbclient.PB() for journal reads (never raises).
+
+    Seeds os.environ with the PB_* keys from the local .pocketbase/pb.env
+    sidecar — ONLY keys not already present — so PB() picks up the
+    superuser credentials and transparently re-auths when the stored
+    PB_TOKEN JWT is stale (the journal collection blocks public reads).
+    Returns None on any failure; callers fall through to the raw HTTP /
+    state.json paths. Credentials are used for Authorization only and are
+    never logged or returned by any console endpoint."""
+    global _PB_CLIENT
+    if _PB_CLIENT is not None:
+        return _PB_CLIENT
+    try:
+        env = _pb_env()
+        for key, val in env.items():
+            if key.startswith("PB_") and os.environ.get(key) is None:
+                os.environ[key] = val
+        import pbclient  # GRID_HOME is already on sys.path
+        _PB_CLIENT = pbclient.PB(url=(os.environ.get("PB_URL") or PB_URL))
+    except Exception:
+        return None
+    return _PB_CLIENT
+
+
 def _pb_get(url, timeout=2.5, token=None):
     req = urllib.request.Request(url)
     if token:
@@ -407,11 +450,22 @@ def pnl_payload() -> dict:
     """PnL history for the timeline: newest-first pnl-snapshot points.
 
     Primary source: the PB `journal` collection (filter kind='pnl-snapshot',
-    sort=-at, perPage=200) — public read first, then authed via the local
-    .pocketbase/pb.env sidecar when the public read comes back empty.
+    sort=-at, perPage=200) via the pbclient adapter first (superuser
+    re-auth from the local .pocketbase/pb.env sidecar), then the raw HTTP
+    read (public, then the sidecar's stored token).
     Fallback: state.json's journal array (the daemon keeps the last 200
     events in-process). Missing kind entirely → empty points list, which is
     a valid response (daemon pre-restart)."""
+    pb = _pb_client()
+    if pb is not None:
+        try:
+            records = pb.list("journal", filter="(kind='pnl-snapshot')",
+                              sort="-at", per_page=200)
+        except Exception:
+            records = []
+        if records:
+            return {"points": _pnl_points(records), "source": "pocketbase",
+                    "total": len(records)}
     from urllib.parse import quote
     flt = quote("(kind='pnl-snapshot')")
     url = (f"{PB_URL}/api/collections/journal/records"
@@ -431,6 +485,86 @@ def pnl_payload() -> dict:
            if isinstance(e, dict) and e.get("kind") == "pnl-snapshot"]
     return {"points": _pnl_points(evs), "source": "state",
                 "total": len(evs)}
+
+
+# ── market OHLCV proxy (tvcli /fetch) for slot sparklines ──────────────
+
+# Base URL of the tvcli serve daemon; read at import like PB_URL, and
+# referenced through the module global so tests can point it at a stub.
+TVCLI_BASE = os.environ.get("TVCLI_SERVER", "http://127.0.0.1:8765")
+CHART_INTERVALS = ("15m", "1h", "4h", "1d")
+CHART_TTL = 60.0            # seconds a fetched window stays fresh
+CHART_CACHE_MAX = 32        # bounded in-process cache (keys are 4-tuples)
+
+_CHART_CACHE: dict = {}     # key -> (expiry_ts, payload)
+
+
+def _tv_symbol(symbol: str) -> str:
+    """TradingView symbol for a console venue/base pair (mirrors
+    market_regime._tv_symbol): uppercase, no slash, USDT/USDC/BUSD quote
+    kept, else USDT appended; BOTH venues ride the Binance USDT pair
+    (hyperliquid perps have no TV feed of their own)."""
+    s = (symbol or "").upper().replace("/", "")
+    if not s.endswith(("USDT", "USDC", "BUSD")):
+        s += "USDT"
+    return f"BINANCE:{s}"
+
+
+def _chart_bars(venue: str, symbol: str, interval: str, bars) -> tuple[int, dict]:
+    """OHLCV window for the fleet sparklines, proxied from tvcli /fetch.
+
+    Returns (status_code, payload): 400 for a bad venue/interval/symbol,
+    otherwise 200. tvcli returns periods newest-first; we sort ascending
+    and emit slim {t, o, h, l, c} bars. A 60s in-process cache (bounded
+    to 32 keys, oldest-expiry evicted) keeps the 5s console poll from
+    hammering tvcli. tvcli outages degrade to 200 + {"error": …,
+    "bars": []} — fail-soft, like every other proxy here."""
+    venue = (venue or "").strip().lower()
+    if venue not in ("binance", "hyperliquid"):
+        return 400, {"error": "unknown venue (binance|hyperliquid)"}
+    interval = (interval or "1h").strip()
+    if interval not in CHART_INTERVALS:
+        return 400, {"error": f"bad interval ({'|'.join(CHART_INTERVALS)})"}
+    symbol = (symbol or "").strip()
+    if not symbol:
+        return 400, {"error": "missing symbol"}
+    try:
+        n = int(bars)
+    except (TypeError, ValueError):
+        n = 96
+    n = max(8, min(500, n))
+
+    key = (venue, symbol, interval, n)
+    now = time.time()
+    hit = _CHART_CACHE.get(key)
+    if hit and hit[0] > now:
+        return 200, hit[1]
+
+    ok, body = _http_json(f"{TVCLI_BASE}/fetch", 30.0, "POST",
+                          {"symbol": _tv_symbol(symbol),
+                           "timeframe": interval, "bars": n})
+    periods = body.get("periods") if ok and isinstance(body, dict) else None
+    base = {"at": utcnow(), "venue": venue, "symbol": symbol,
+            "interval": interval}
+    if not isinstance(periods, list):
+        err = body.get("error") if isinstance(body, dict) else None
+        return 200, {**base, "bars": [], "count": 0,
+                     "error": err or "tvcli unreachable"}
+    out = []
+    for per in sorted(periods, key=lambda p: (p.get("time") or 0)
+                      if isinstance(p, dict) else 0):
+        try:
+            out.append({"t": int(per["time"]), "o": float(per["open"]),
+                        "h": float(per["high"]), "l": float(per["low"]),
+                        "c": float(per["close"])})
+        except (KeyError, TypeError, ValueError):
+            continue
+    payload = {**base, "bars": out, "count": len(out)}
+    _CHART_CACHE[key] = (now + CHART_TTL, payload)
+    while len(_CHART_CACHE) > CHART_CACHE_MAX:
+        oldest = min(_CHART_CACHE, key=lambda k: _CHART_CACHE[k][0])
+        del _CHART_CACHE[oldest]
+    return 200, payload
 
 
 # ── daemon lifecycle helpers ───────────────────────────────────────────
@@ -587,6 +721,28 @@ def reliability_payload() -> dict:
             st["real_samples"] = (max(0, (st.get("samples") or 0)
                                       - synth) if isinstance(synth, (int, float))
                                   else st.get("samples"))
+            # ladder progression: which rung is the archetype on, and how
+            # many more samples before the NEXT rung. Consumed by the UI
+            # to render progress arrows + a kill-flag ladder status line.
+            samples = st.get("samples") or 0
+            probe = LADDER["probe_samples"]
+            full = LADDER["full_samples"]
+            if st["tier"] == "base":
+                st["ladder_next"] = "probe"
+                st["ladder_next_at"] = probe
+                st["ladder_progress_pct"] = round(min(100, (samples / probe) * 100), 1)
+            elif st["tier"] == "probe":
+                st["ladder_next"] = "full"
+                st["ladder_next_at"] = full
+                st["ladder_progress_pct"] = round(min(100, (samples / full) * 100), 1)
+            elif st["tier"] == "full":
+                st["ladder_next"] = None
+                st["ladder_next_at"] = None
+                st["ladder_progress_pct"] = 100.0
+            elif st["tier"] == "killed":
+                st["ladder_next"] = None
+                st["ladder_next_at"] = None
+                st["ladder_progress_pct"] = 0.0
             archs[arch] = st
     # the ledger is a snapshot refreshed by the daemon's health cycle;
     # past the 24h refresh cadence (+grace) it is stale evidence.
@@ -603,13 +759,93 @@ def reliability_payload() -> dict:
                 f"refresh cadence)")
     else:
         note = ""
-    return {"ladder": LADDER, "archetypes": archs,
-            "ledger_age_h": age_h, "stale": stale, "missing": missing,
-            "note": note, "refresh_cadence_h": 24}
+    # kill-flag ladder thresholds (mirrors reliability_grid.py constants —
+    # the daemon binds them on its own, the console just surfaces them so
+    # an operator can see WHY a particular archetype was refused).
+    return {
+        "ladder": LADDER,
+        "kill_thresholds": {
+            "kill_min_samples": 10,
+            "recent_window": 20,
+            "live_min_samples": 30,
+        },
+        "archetypes": archs,
+        "ledger_age_h": age_h, "stale": stale, "missing": missing,
+        "note": note, "refresh_cadence_h": 24,
+    }
+
+
+def _decision_index() -> dict:
+    """decisions.jsonl by id → record; cheap full scan, fail-soft empty.
+
+    Powers the slot-card "decision evidence" lookup and the
+    /api/decisions/<id> endpoint. ~1k decisions × few hundred bytes
+    each = well under a millisecond on the stdlib JSON parser."""
+    idx = {}
+    try:
+        for line in _tail(os.path.join(STATE_DIR, "decisions.jsonl")).splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            did = r.get("id")
+            if did:
+                idx[did] = r
+    except OSError:
+        pass
+    return idx
+
+
+def _screen_fit_index() -> dict:
+    """screen_cache candidates keyed by (venue, symbol) → candidate dict.
+
+    The latest screen's tvcli_fit + confluence_bonus is what the active
+    bot was selected ON, so the Fleet slot cards should show it. When
+    the cache is older than `optimizer.screen_cache_fresh_min` (default
+    120m), the index still serves the last-known fitness with an
+    `at_age_min` field so the UI can flag a stale read."""
+    idx = {}
+    sc = _read_json(os.path.join(STATE_DIR, "state.json"), {}) or {}
+    cache = sc.get("screen_cache") or {}
+    age_min = None
+    at = cache.get("at")
+    if at:
+        try:
+            age_min = round((time.time() - float(at)) / 60.0, 1)
+        except (TypeError, ValueError):
+            age_min = None
+    for c in (cache.get("candidates") or []):
+        if not isinstance(c, dict):
+            continue
+        key = f"{c.get('venue')}:{c.get('symbol')}"
+        idx[key] = {
+            "score_final": c.get("score_final"),
+            "score": c.get("score"),
+            "regime": c.get("regime"),
+            "archetype": c.get("archetype"),
+            "tvcli_fit": c.get("tvcli_fit"),
+            "confluence_bonus": c.get("confluence_bonus"),
+            "confluence_ok": c.get("confluence_ok"),
+            "confluence_notes": c.get("confluence_notes"),
+            "spread_pct": c.get("spread_pct"),
+            "step_pct": c.get("step"),
+            "expected_fills_per_24h": c.get("expected_fills_per_24h"),
+            "harvest_net_pct_24h": c.get("harvest_net_pct_24h"),
+            "confirm_4h": c.get("confirm_4h"),
+            "flags": c.get("flags"),
+            "at_age_min": age_min,
+        }
+    idx["__at_age_min__"] = age_min
+    return idx
 
 
 def _enriched_bots(st: dict) -> list[dict]:
     observe = st.get("last_observe") or {}
+    dec_idx = _decision_index()
+    fit_idx = _screen_fit_index()
     out = []
     for slot_key, bot in (st.get("active_bots") or {}).items():
         bot = dict(bot or {})
@@ -623,6 +859,18 @@ def _enriched_bots(st: dict) -> list[dict]:
             min_ratio = stag_if.get("min_realized_ratio")
             if min_fills is not None and min_ratio is not None:
                 stagnant = fills < min_fills and ratio < min_ratio
+        # tvcli_fit: the screen-time confluence read the bot was selected on.
+        # Joined from the latest screen cache by venue+symbol — when absent
+        # (bot not in the latest cache, e.g. deployed on a prior rescreen
+        # that's since rolled off), the keys are just null and the UI
+        # degrades to "—".
+        fit = fit_idx.get(f"{bot.get('venue')}:{bot.get('symbol')}") or {}
+        # decision evidence: full record so the Fleet rail can render the
+        # debate + risk-team + confluence without a second round-trip.
+        dec_id = bot.get("decision_id")
+        dec = dec_idx.get(dec_id) if dec_id else None
+        # position-optimizer summary: the slow lane's last analysis.
+        po = bot.get("position_optimizer") or {}
         out.append({
             "slot": int(slot_key) if str(slot_key).isdigit() else slot_key,
             "symbol": bot.get("symbol"), "venue": bot.get("venue"),
@@ -631,13 +879,26 @@ def _enriched_bots(st: dict) -> list[dict]:
             "bot_code": bot.get("bot_code"), "channel": bot.get("channel"),
             "archetype": bot.get("archetype"),
             "score_final": bot.get("score_final"),
-            "decision_id": bot.get("decision_id"),
+            "decision_id": dec_id,
+            "decision": dec,
+            "tvcli_fit": fit.get("tvcli_fit"),
+            "tvcli_bonus": fit.get("confluence_bonus"),
+            "tvcli_ok": fit.get("confluence_ok"),
+            "tvcli_notes": fit.get("confluence_notes"),
+            "screen_score": fit.get("score_final"),
+            "screen_age_min": fit.get("at_age_min"),
+            "expected_fills_24h": fit.get("expected_fills_per_24h"),
+            "harvest_net_pct_24h": fit.get("harvest_net_pct_24h"),
             "force_rotate": bool(bot.get("force_rotate")),
             "needs_reanalysis": bool(bot.get("needs_reanalysis")),
             "committed": (st.get("committed") or {}).get(str(slot_key)),
             "stagnation_policy": pol,
             "observed": obs,
             "stagnant": stagnant,
+            "position_optimizer": po,
+            "optimizer_tracker": bot.get("optimizer"),
+            "take_profit_usd": bot.get("take_profit_usd"),
+            "loss_veto": obs.get("loss_veto") if isinstance(obs, dict) else None,
         })
     out.sort(key=lambda b: (not str(b["slot"]).isdigit(), str(b["slot"])))
     return out
@@ -666,8 +927,204 @@ def screen_payload() -> dict | None:
         "at": rep.get("at"), "cycle_kind": rep.get("cycle_kind"),
         "n_candidates": scr.get("n_candidates"),
         "top": scr.get("top3") or [],
+        "hunt_stats": scr.get("hunt_stats") or {},
+        "data_sources": rep.get("data_sources") or {},
+        # the run-card JSON keys are deliberate/guard (singular, as the
+        # daemon writes them): pass them through verbatim so the UI can
+        # show the per-cycle deliberation + guard verdict
+        "deliberations": rep.get("deliberations") or [],
+        "guard": rep.get("guard") or [],
+        "deployments": rep.get("deployments") or [],
+        "rotations": rep.get("rotations") or [],
+        "actions": rep.get("actions") or [],
+        "caveats": rep.get("caveats") or [],
         "dry_run": rep.get("dry_run"),
     }
+
+
+def decision_payload_by_id(decision_id: str) -> dict | None:
+    """One full decision record by id, plus context.
+
+    Powers the Fleet slot-card "View decision evidence" deep-link and the
+    /api/decisions/<id> endpoint. Fails soft with None when missing —
+    the UI shows a stale-by-id note instead of a 500."""
+    if not decision_id:
+        return None
+    idx = _decision_index()
+    row = idx.get(decision_id)
+    if row is None:
+        return None
+    # Sibling decisions for the same symbol + venue + regime — the cohort
+    # the k=3 memory recall drew from, surfaced so the UI can answer
+    # "what happened last time we ran this archetype here" without
+    # scanning the ledger. Identity filter is by `id` (each call to
+    # _decision_index returns fresh objects, so `is` would always match).
+    sib = [r for r in idx.values()
+           if r.get("id") != decision_id
+           and r.get("symbol") == row.get("symbol")
+           and r.get("venue") == row.get("venue")
+           and r.get("regime") == row.get("regime")]
+    sib.sort(key=lambda r: r.get("at") or "", reverse=True)
+    return {"decision": row,
+            "cohort_size": len(sib),
+            "cohort_realized": sum(
+                float(((r.get("outcome") or {}).get("realized_pnl")) or 0)
+                for r in sib if isinstance(r.get("outcome"), dict))}
+
+
+def optimizer_swap_log() -> dict:
+    """The fast slot-optimizer's swap_log + per-slot trackers + last
+    arbiter verdict — surfaced in the console so an operator can answer:
+
+      * which slots have been swapped and when
+      * how long each slot has been idle (last_fills / last_increase_at)
+      * what the Mistral arbiter last concluded per idle slot
+      * how many cycles the optimizer has run + swap totals
+
+    All from state.optimizer (already in-memory, no extra I/O); the
+    arbiter verdict comes from the last cycle report's `arbiter` block.
+    """
+    st = _read_json(os.path.join(STATE_DIR, "state.json"), {}) or {}
+    opt = st.get("optimizer") or {}
+    trackers = opt.get("trackers") or {}
+    swap_log = opt.get("swap_log") or []
+    last = opt.get("last_report") or {}
+    now = time.time()
+    tracker_rows = []
+    for slot, tr in trackers.items():
+        if not isinstance(tr, dict):
+            continue
+        last_inc = tr.get("last_increase_at")
+        idle_min = None
+        if isinstance(last_inc, (int, float)) and last_inc > 0:
+            idle_min = round((now - float(last_inc)) / 60.0, 1)
+        tracker_rows.append({
+            "slot": slot,
+            "last_fills": tr.get("last_fills"),
+            "last_increase_at": last_inc,
+            "idle_min": idle_min,
+        })
+    tracker_rows.sort(key=lambda r: (r["idle_min"] is None,
+                                      r["idle_min"] if r["idle_min"] is not None else 0),
+                      reverse=True)
+    swaps = []
+    for e in swap_log:
+        if not isinstance(e, dict):
+            continue
+        swaps.append({
+            "slot": e.get("slot"),
+            "at": e.get("at"),
+            "ok": bool(e.get("ok")),
+            "at_iso": (datetime.fromtimestamp(float(e["at"]), tz=timezone.utc).isoformat(timespec="seconds")
+                       if isinstance(e.get("at"), (int, float)) and e["at"] > 0 else None),
+        })
+    swaps.sort(key=lambda s: s.get("at") or 0, reverse=True)
+    arbiter = last.get("arbiter") if isinstance(last, dict) else None
+    return {
+        "cycles": opt.get("cycles") or 0,
+        "swaps_total": opt.get("swaps_total") or 0,
+        "cycles_since_card": opt.get("cycles_since_card") or 0,
+        "last_at": opt.get("last_at"),
+        "trackers": tracker_rows,
+        "swaps": swaps[:60],
+        "last_arbiter": arbiter,
+        "caveats": (last.get("caveats") or []) if isinstance(last, dict) else [],
+    }
+
+
+def llm_health() -> dict:
+    """Live LLM provider reachability + the role-pinning matrix, served
+    without exposing any keys.
+
+    The same `llm/provider.py --ping` the console's "validate" button
+    uses, but cached for 60s so the Fleet rail / readiness strip / a
+    dedicated panel can poll every 5s without hammering the providers.
+    Surfaces the role routing (which swarm agent uses which provider)
+    so the operator can see at a glance whether Mistral is actually
+    driving the fast-lane arbiter — the headline use case."""
+    cache_key = "llm_health"
+    hit = _CTL_CACHE.get(cache_key)
+    if hit and hit[0] > time.time():
+        return hit[2]
+
+    provider_script = os.path.join(GRID_HOME, "llm", "provider.py")
+    ping_results = []
+    chain = []
+    if os.path.isfile(provider_script):
+        env = dict(os.environ)
+        for key, val in _llm_sidecar().items():
+            env[key] = val
+        try:
+            proc = subprocess.run(
+                [sys.executable, provider_script, "--ping", "--json"],
+                capture_output=True, text=True, timeout=180, env=env,
+                cwd=GRID_HOME)
+            if proc.returncode == 0:
+                try:
+                    data = json.loads(proc.stdout)
+                    chain = data.get("chain") or []
+                    for r in (data.get("results") or []):
+                        ping_results.append({
+                            "provider": r.get("provider"),
+                            "ok": bool(r.get("ok")),
+                            "latency_ms": r.get("latency_ms"),
+                            "error": (str(r.get("error", ""))[:160]
+                                      if not r.get("ok") else None),
+                        })
+                except Exception:
+                    pass
+        except subprocess.TimeoutExpired:
+            ping_results = [{"provider": p, "ok": False, "error": "ping timeout (180s)"}
+                            for p in ("cf", "nvidia", "openrouter", "mistral")]
+        except Exception as exc:
+            ping_results = [{"provider": "?", "ok": False,
+                             "error": f"ping failed: {str(exc)[:120]}"}]
+
+    # fall back to presence-only when the ping subprocess failed
+    if not ping_results:
+        side = _llm_sidecar()
+        for name in LLM_PROVIDERS:
+            kenv = {"cf": ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_TOKEN"),
+                    "nvidia": ("NVIDIA_API_KEY",),
+                    "openrouter": ("OPENROUTER_API_KEY",),
+                    "mistral": ("MISTRAL_API_KEY",)}[name]
+            present = any(side.get(k) or os.environ.get(k) for k in kenv)
+            ping_results.append({"provider": name, "ok": present,
+                                 "error": None if present else "no key"})
+
+    # role pinning (mirrors llm_state from /api/llm but re-parsed here so
+    # the operator sees WHICH model is driving EACH agent in the swarm —
+    # the headline "is Mistral actually doing the arbiter?" question)
+    side = _llm_sidecar()
+    raw_roles = side.get("GRID_LLM_ROLES")
+    roles = {}
+    if raw_roles:
+        try:
+            parsed = json.loads(raw_roles)
+            if isinstance(parsed, dict):
+                roles = parsed
+        except Exception:
+            roles = {}
+
+    # active LLM provider for the fast-lane arbiter, mirrored from
+    # config.optimizer.llm_provider (with sensible default to "mistral")
+    cfg = (config_payload().get("config") or {})
+    arbiter_provider = ((cfg.get("optimizer") or {}).get("llm_provider")
+                        or "mistral")
+
+    out = {
+        "at": utcnow(),
+        "chain": chain,
+        "results": ping_results,
+        "roles": roles,
+        "role_keys": LLM_ROLE_KEYS,
+        "arbiter_provider": arbiter_provider,
+        "note": ("Live ping cached 60s; keys never returned. "
+                 "Arbiter default = mistral (override via "
+                 "config.optimizer.llm_provider)."),
+    }
+    _CTL_CACHE[cache_key] = (time.time() + 60.0, True, out)
+    return out
 
 
 def decisions_payload(limit: int) -> list[dict]:
@@ -1073,6 +1530,12 @@ def overview_payload() -> dict:
                           if isinstance(v, (int, float)))
     cfg = config_payload()["config"]
     portfolio = cfg.get("portfolio") or {}
+    # Last arbiter verdict from the optimizer — surfaced so the Fleet rail
+    # can show "Mistral said: keep NEAR (conf 0.78)" without waiting for the
+    # next /optimizer poll. Always fail-soft (None when the loop hasn't run).
+    opt = st.get("optimizer") or {}
+    last_report = opt.get("last_report") or {}
+    last_arbiter = last_report.get("arbiter") if isinstance(last_report, dict) else None
     return {
         "at": utcnow(),
         "daemon": daemon,
@@ -1086,6 +1549,8 @@ def overview_payload() -> dict:
         "screen": screen_payload(),
         "pocketbase": {"up": pb_ok},
         "readiness": _readiness(ctl_status),
+        "screen_cache_age_s": ((time.time() - float(opt.get("screen_cache_age_s", 0))) if isinstance(opt.get("screen_cache_age_s"), (int, float)) else None),
+        "last_arbiter": last_arbiter,
         "config_digest": {
             "total_usd": (portfolio.get("total_usd")),
             "slots_default": portfolio.get("slots_default"),
@@ -1341,6 +1806,13 @@ class Handler(BaseHTTPRequestHandler):
         elif route == "/api/decisions":
             self._json(200, {"decisions":
                              decisions_payload(int(q1("limit", 100)))})
+        elif route.startswith("/api/decisions/"):
+            did = os.path.basename(route[len("/api/decisions/"):])
+            payload = decision_payload_by_id(did)
+            if payload is None:
+                self._json(404, {"error": f"no decision {did}"})
+            else:
+                self._json(200, payload)
         elif route == "/api/reliability":
             self._json(200, reliability_payload())
         elif route == "/api/recommendations":
@@ -1355,6 +1827,14 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, body if ok else
                        {"optimizer": None, "error": "ctl unreachable",
                         "detail": body})
+        elif route == "/api/optimizer/swap-log":
+            # swap_log + per-slot idle trackers + last arbiter verdict
+            # from state.json's optimizer block (the daemon already keeps
+            # the live copy — no extra ctl call needed)
+            self._json(200, optimizer_swap_log())
+        elif route == "/api/llm/health":
+            # live provider ping + role routing matrix; 60s in-process cache
+            self._json(200, llm_health())
         elif route == "/api/observe":
             ok, body = _ctl_cached("/observe")
             # fail-soft: degrade with a 200 + {"error": ...} so the UI can
@@ -1367,6 +1847,11 @@ class Handler(BaseHTTPRequestHandler):
                        {"error": "ctl unreachable", "detail": body})
         elif route == "/api/pnl":
             self._json(200, pnl_payload())
+        elif route == "/api/chart":
+            code, payload = _chart_bars(q1("venue", ""), q1("symbol", ""),
+                                        q1("interval", "1h"),
+                                        q1("bars", "96"))
+            self._json(code, payload)
         elif route == "/api/position-sweeps":
             self._json(200, {"sweeps": position_sweeps_payload(
                 int(q1("limit", 25)))})

@@ -486,6 +486,52 @@ a { color: var(--teal-deep); }
   margin-top: 8px;
 }
 
+/* tvcli confluence strip on each slot card — bonus + skill count +
+   screen-cache age + the actual notes that fired. Sits between the
+   channel ladder and the metric grid so it reads as "what the deploy
+   was scored on". */
+.slot-tvcli {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 6px 14px 0;
+}
+.slot-tvcli-row { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; }
+.slot-tvcli-notes { display: flex; gap: 4px; flex-wrap: wrap; }
+.slot-tvcli-notes .badge { font-size: 9.5px; padding: 1px 6px; }
+
+/* position-optimizer last pass on the slot — rec + Δ + conf + when. */
+.slot-po {
+  padding: 6px 14px 0;
+  border-top: 1px dashed var(--rule);
+  margin-top: 6px;
+}
+.slot-po-row { display: flex; gap: 8px; align-items: center; }
+
+/* fast-lane idle tracker per slot — drives the "is this slot stale"
+   at-a-glance answer. */
+.slot-opt {
+  padding: 4px 14px 0;
+  display: flex; gap: 6px; align-items: center;
+  font-size: 11px;
+}
+
+/* decision-evidence deep-link on the slot card (the d…NNNN id →
+   jumps to the Decisions tab with the deliberation row expanded). */
+.slot-decision-link {
+  font-size: 10.5px;
+  color: var(--teal);
+  background: rgba(10,126,109,0.08);
+  border: 1px solid rgba(10,126,109,0.25);
+  padding: 1px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: auto;
+}
+.slot-decision-link:hover,
+.slot-decision-link:focus {
+  background: rgba(10,126,109,0.18);
+  outline: none;
+}
+
 .slot-since {
   font-family: var(--font-mono);
   font-size: 11px;
@@ -514,6 +560,14 @@ a { color: var(--teal-deep); }
 .badge--bad { background: var(--crimson-wash); color: var(--crimson); border-color: #E8C2BE; }
 .badge--dim { background: var(--panel-deep); color: var(--ink-soft); border-color: var(--rule); }
 .badge--violet { background: var(--violet-wash); color: var(--violet); border-color: #CFC7EE; }
+/* Mistral pinned provider — the "this is what the operator cares about"
+   tint so it stands out from the other violet badges in the panel. */
+.badge--mistral {
+  background: linear-gradient(135deg, #FFE9B0 0%, #F8C56A 100%);
+  color: #5C3B00;
+  border-color: #C58E33;
+  font-weight: 600;
+}
 
 /* ── buttons ─────────────────────────────────────────────────────── */
 
@@ -719,6 +773,20 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
   width: 2px;
   background: var(--ink);
   opacity: 0.5;
+}
+
+/* mini track for the "next rung" cell — just a thin fill bar to
+   contextualize the sample count without a full progress row */
+.tier-track-mini {
+  display: inline-block; vertical-align: middle;
+  width: 38px; height: 4px;
+  background: var(--panel-deep);
+  border: 1px solid var(--rule);
+  border-radius: 99px; overflow: hidden;
+  margin-right: 4px;
+}
+.tier-track-mini .fill {
+  height: 100%; background: var(--teal); opacity: 0.75;
 }
 
 /* ── config editor ───────────────────────────────────────────────── */
@@ -1443,3 +1511,169 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
   .pnl-chart { border-left: none; border-top: 1.5px solid var(--rule);
     padding: 12px 0 0; }
 }
+
+/* ── decision evidence panel (Decisions tab row expansion) ─────────── */
+
+tr.dec-row { cursor: pointer; }
+tr.dec-row:hover td { background: var(--panel-deep); }
+tr.dec-row--nogo td { opacity: 0.85; }
+tr.dec-detail td { padding: 0 !important; background: var(--panel-deep); }
+.dec-ev { padding: 12px 14px; border-top: 1.5px dashed var(--rule); }
+.dec-ev-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
+.dec-ev-h { font-family: var(--font-display); font-weight: 600; font-size: 11px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-soft);
+  margin: 8px 0 4px; }
+.dec-ev-h:first-child { margin-top: 0; }
+.dec-ev-agents { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.dec-ev-quote { font-size: 12px; color: var(--ink-soft); margin-top: 4px;
+  line-height: 1.45; }
+.dec-ev-quote b { color: var(--ink); font-family: var(--font-display);
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+  margin-right: 4px; }
+@media (max-width: 900px) { .dec-ev-grid { grid-template-columns: 1fr; } }
+
+/* ── market brief card (Fleet rail) ────────────────────────────────── */
+
+.mb-top { display: flex; gap: 8px; align-items: flex-start; }
+.mb-summary { font-size: 12.5px; line-height: 1.5; color: var(--ink); }
+
+/* ── run-card kind filter chips ────────────────────────────────────── */
+
+.rc-kinds { display: flex; flex-wrap: wrap; gap: 6px; }
+.rc-chip { font-family: var(--font-mono); font-size: 11px; padding: 3px 10px;
+  border: 1px solid var(--rule); border-radius: 999px; background: var(--panel);
+  color: var(--ink-soft); cursor: pointer; }
+.rc-chip:hover { border-color: var(--teal); color: var(--ink); }
+.rc-chip--on { background: var(--teal-wash); border-color: var(--teal);
+  color: var(--teal-deep); font-weight: 600; }
+
+/* ── slot sparkline (tvcli /api/chart proxy) ─────────────────────── */
+
+.slot-spark {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 14px 0;
+  height: 54px;
+  cursor: pointer;
+}
+
+.slot-spark:hover .spark-line { stroke-width: 2; }
+.slot-spark:focus-visible {
+  outline: 2px solid var(--teal);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.spark-delta {
+  flex: none;
+  min-width: 48px;
+  font-size: 10px;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+
+.spark-delta--up { color: var(--teal-deep); }
+.spark-delta--down { color: var(--crimson); }
+
+.spark-slot {
+  flex: 1;
+  min-width: 0;
+  height: 48px;
+  display: flex;
+  align-items: center;
+}
+
+.spark-ph {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-faint);
+}
+
+.spark-svg { display: block; width: 100%; height: 48px; }
+
+.spark-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-width: 1.5;
+  vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
+}
+
+.spark-line--down { stroke: var(--crimson); }
+
+.spark-ref {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.5;
+}
+
+/* ── market modal chart ──────────────────────────────────────────── */
+
+.modal--chart { max-width: 960px; }
+
+.modal--chart .modal-body { margin-bottom: 10px; }
+
+.mk-chart svg.mk-svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--rule);
+  border-radius: 6px;
+  background:
+    linear-gradient(to right, rgba(101, 126, 113, 0.06) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(101, 126, 113, 0.06) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.mk-line {
+  fill: none;
+  stroke: var(--teal);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.mk-line--down { stroke: var(--crimson); }
+
+.mk-area { fill: rgba(10, 126, 109, 0.10); }
+.mk-area--down { fill: rgba(179, 38, 30, 0.08); }
+
+.mk-ch {
+  stroke: var(--ink-faint);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.6;
+}
+
+.mk-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--ink-soft);
+}
+
+.mk-empty {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  padding: 24px 0;
+  text-align: center;
+}
+
+.mk-captions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  margin-top: 8px;
+}
+
+.mk-captions b { color: var(--ink); font-weight: 600; }
+
+.mk-delta--up { color: var(--teal-deep); }
+.mk-delta--down { color: var(--crimson); }
+
+.mk-window { margin-left: auto; color: var(--ink-faint); }

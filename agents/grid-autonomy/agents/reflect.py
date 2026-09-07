@@ -175,6 +175,88 @@ def _risk_multipliers(ticket):
     return out
 
 
+def _evidence_block(ticket, brief):
+    """Compact record of WHAT the agents evaluated the decision against.
+
+    The console renders this verbatim (Decisions tab → row detail): the
+    debate theses + which LLM provider served each agent, the risk-team
+    stances, the tvcli /hunt confluence the screen had in hand, the
+    memories injected from past outcomes, and the fill/harvest model the
+    score was built on. Everything is bounded (strings clipped, lists
+    capped) so the ledger line stays small; anything missing stays
+    missing — never fabricated. Rule-fallback shows as provider
+    "rule-fallback" so a degraded deliberation is visible, not silent."""
+    if not isinstance(ticket, dict):
+        ticket = {}
+    if not isinstance(brief, dict):
+        brief = {}
+    debate = ticket.get("debate") if isinstance(ticket.get("debate"), dict) else {}
+    bull, bear = debate.get("bull") or {}, debate.get("bear") or {}
+    # post-rebuttal tickets overwrite bull/bear with {"refined","concedes"}
+    # dicts — the OPENING statements (stashed by deliberate as bull_open/
+    # bear_open) hold the actual thesis/risks the agents argued from
+    bull_open = debate.get("bull_open") \
+        if isinstance(debate.get("bull_open"), dict) else {}
+    bear_open = debate.get("bear_open") \
+        if isinstance(debate.get("bear_open"), dict) else {}
+    stances = {}
+    risk = ticket.get("risk") if isinstance(ticket.get("risk"), dict) else {}
+    for stance in ("seeking", "neutral", "conservative"):
+        r = risk.get(stance)
+        if isinstance(r, dict):
+            stances[stance] = {
+                "approve": bool(r.get("approve", True)),
+                "max_alloc_mult": r.get("max_alloc_mult"),
+                "step_mult": r.get("step_mult"),
+                "note": str(r.get("notes") or "")[:160],
+                "llm": r.get("_llm"),
+            }
+    con = brief.get("confluence") if isinstance(brief.get("confluence"), dict) else {}
+    fit = brief.get("tvcli_fit") if isinstance(brief.get("tvcli_fit"), dict) else {}
+    memories = []
+    for mem in (brief.get("memories") or [])[:3]:
+        if isinstance(mem, dict):
+            memories.append({
+                "symbol": mem.get("symbol"), "venue": mem.get("venue"),
+                "regime": mem.get("regime"),
+                "outcome_pnl": mem.get("outcome_pnl"),
+                "reason": mem.get("reason"), "at": mem.get("at"),
+            })
+    return {
+        "confidence": ticket.get("confidence"),
+        "llm": {
+            "bull": bull.get("_llm"), "bear": bear.get("_llm"),
+            "facilitator": ticket.get("facilitator_llm"),
+            "degraded": bool(ticket.get("llm_degraded", False)),
+        },
+        "debate": {
+            "bull_thesis": str(bull_open.get("thesis")
+                               or bull.get("thesis")
+                               or bull.get("refined") or "")[:240],
+            "bear_risks": [str(r)[:160]
+                           for r in ((bear_open.get("risks")
+                                      or bear.get("risks")) or [])[:3]],
+            "kill_triggers": [str(t)[:100]
+                              for t in ((bear_open.get("kill_triggers")
+                                         or bear.get("kill_triggers")) or [])[:3]],
+            "bull_confidence": bull.get("confidence"),
+            "bear_confidence": bear.get("confidence"),
+        },
+        "risk_stances": stances,
+        "confluence": {
+            "bonus": brief.get("confluence_bonus"),
+            "ok": sum(1 for k, v in con.items()
+                      if k != "errors" and v is True),
+            "notes": [str(n) for n in (brief.get("confluence_notes") or [])[:8]],
+            "fit": {k: v for k, v in fit.items()
+                    if isinstance(v, (int, float, bool, str))},
+        },
+        "memories": memories,
+        "expected_fills_24h": brief.get("expected_fills_per_24h"),
+        "harvest_net_pct_24h": brief.get("harvest_net_pct_24h"),
+    }
+
+
 def record_decision(ticket, brief, action, payloads=None):
     """Append one decision line; return its decision_id."""
     path = _decisions_path()
@@ -216,6 +298,7 @@ def record_decision(ticket, brief, action, payloads=None):
         "rationale": ticket.get("rationale"),
         "risk_multipliers": _risk_multipliers(ticket),
         "llm_degraded": ticket.get("llm_degraded", False),
+        "evidence": _evidence_block(ticket, brief),
         "stagnation_policy": stagnation,
         "channel": _channel_from(payloads, brief),
         "payload_digest": _payload_digest(payloads),

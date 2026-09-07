@@ -111,6 +111,9 @@ optimizer:                     # fast loop BETWEEN rescreens (optimizer.py)
   refresh_limit: 180           # 1h candles per refresh (light vs merge's 300)
   screen_cache_fresh_min: 120  # older candidate board → wait for rescreen
   refill_nudge_min: 10         # empty-slot rescreen-nudge rate limit
+  run_card_every_n_cycles: 40  # heartbeat run card cadence for QUIET cycles
+                               # (~2h at 3-min cycles); interesting cycles
+                               # (idle/arbiter/swap/veto/refill) always card
   llm_provider: mistral        # arbiter pinned to Mistral (the debate chain
                                # stays on CF) — falls back to the global
                                # chain when MISTRAL_API_KEY is absent
@@ -138,10 +141,24 @@ grid_defaults:                 # passed through to grid_config.py
   take_profit_pct: 0.04
 
 llm:
-  chain: [cf, nvidia, openrouter]   # GRID_LLM_CHAIN env overrides order
+  chain: [cf, mistral, nvidia, openrouter]   # GRID_LLM_CHAIN env/sidecar
+                                # overrides; the daemon now exports this as
+                                # the env DEFAULT at boot (was dead config)
   cf_model: "@cf/zai-org/glm-5.3"
   nvidia_model: "meta/llama-3.3-70b-instruct"
   openrouter_model: "arcee-ai/trinity-large-preview:free"
+  mistral_model: "mistral-large-latest"
+  brief_interval_min: 30       # always-on intelligence lane: one LLM market
+                               # brief per interval over the fresh screen +
+                               # fleet evidence (journaled `market-brief`,
+                               # shown in the console Fleet rail). Keeps the
+                               # Mistral subscription working even when the
+                               # deploy machinery is idle (demo cap / full
+                               # fleet → the debate swarm never fires).
+                               # 0 disables. ADVISORY ONLY — never gates.
+  brief_provider: mistral       # the brief lane is pinned to this provider
+                               # (falls back to the global chain when its
+                               # key is absent — e.g. local dry-runs)
   max_calls_per_decision: 8
 
 policy:                        # history-derived per token; values here are bounds

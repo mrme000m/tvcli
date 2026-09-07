@@ -148,9 +148,21 @@ class TestCdpProbe(unittest.TestCase):
                 ["/usr/local/bin/node", "x.mjs"])
 
     def test_resolve_cmd_unresolvable_passthrough(self):
-        with mock.patch.object(daemon.shutil, "which", return_value=None):
+        with mock.patch.object(daemon.shutil, "which", return_value=None), \
+                mock.patch.object(daemon.os.path, "isfile",
+                                  return_value=False):
             self.assertEqual(daemon.resolve_cmd("node x"),
                              ["node", "x"])
+
+    def test_resolve_cmd_scans_install_roots(self):
+        # launchd's minimal PATH hides homebrew/mise binaries: the watchdog
+        # must still resolve `node` via the usual install roots
+        with mock.patch.object(daemon.shutil, "which", return_value=None), \
+                mock.patch.object(
+                    daemon.os.path, "isfile",
+                    side_effect=lambda p: p == "/opt/homebrew/bin/node"):
+            self.assertEqual(daemon.resolve_cmd("node x.mjs"),
+                             ["/opt/homebrew/bin/node", "x.mjs"])
 
 
 # ── browser watchdog ────────────────────────────────────────────────────

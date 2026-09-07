@@ -576,6 +576,12 @@ class FastHunter:
         for c in cands:
             tv = c.get("tv_symbol")
             per_skill = {s: (h.get(tv) or {}) for s, h in hunts.items()}
+            # refresh the per-skill boolean truth the screen recorded, so a
+            # fast-lane deploy's evidence block (confluence.ok) reflects the
+            # LIVE hunt, not only the last hourly screen
+            if isinstance(c.get("confluence"), dict):
+                for s, h in per_skill.items():
+                    c["confluence"][s] = bool(h.get("result") is not None)
             if HAS_MERGE:
                 bonus, notes, _fit = tvcli_fitness(
                     c,
@@ -673,12 +679,27 @@ class SlotOptimizer:
         st["cycles"] = int(st.get("cycles", 0)) + 1
         st["last_at"] = report["at"]
         st["last_report"] = report
+        # run-card throttle: the fast loop cycles every 2–5 min — an
+        # unconditioned card per cycle floods state/reports with ~300–700
+        # "nothing happened" files a day and buries the rescreen cards.
+        # Write a card only when the cycle DID something (idle detected,
+        # arbiter consulted, swap attempted/vetoed, refill nudged, or an
+        # error caveat), plus one periodic heartbeat card every N quiet
+        # cycles so the Run-cards view still proves the loop is alive.
+        interesting = bool(report.get("idle") or report.get("swaps")
+                           or report.get("vetoes") or report.get("arbiter")
+                           or report.get("refill")
+                           or any("error" in str(c) for c in report.get("caveats") or []))
+        every_n = int(self.cfg().get("run_card_every_n_cycles", 40))
+        st["cycles_since_card"] = int(st.get("cycles_since_card", 0)) + 1
+        if interesting or st["cycles_since_card"] >= max(1, every_n):
+            st["cycles_since_card"] = 0
+            try:
+                self.daemon.write_run_card_safe(report)
+            except Exception:
+                pass
         try:
             self.daemon.save_state(self.daemon.state)
-        except Exception:
-            pass
-        try:
-            self.daemon.write_run_card_safe(report)
         except Exception:
             pass
         return report
