@@ -770,6 +770,40 @@ class ManageTestCase(ManageHarness):
         self.assertTrue(captured["paper"])
         self.assertEqual(captured["guard"][0]["ok"], True)
 
+    def test_dry_run_plans_virtual_slot_open_when_slots_occupied(self):
+        # the deployed dry-run mirror had every persisted slot occupied and
+        # silently skipped ALL candidates (slot None → dry-run continue),
+        # freezing the decision ledger forever. The mirror must simulate the
+        # slot-open (same gates, no persisted mutation) and keep planning.
+        d = self.make_daemon()
+        for s in d.state["slots"]:
+            d.state["active_bots"][str(s["slot"])] = {
+                "symbol": f"OLD{s['slot']}", "venue": s["venue"],
+                "bot_code": f"B{s['slot']}"}
+        slots_before = [dict(s) for s in d.state["slots"]]
+        cands = [
+            {"venue": "hyperliquid", "symbol": "SOL",
+             "tv_symbol": "BINANCE:SOLUSDT", "regime": "neutral",
+             "score_final": 90.0, "step": 0.5,
+             "archetype": "Neutral Grid (mean-reversion)"},
+        ]
+        decisions = []
+        with mock.patch("daemon.run_merge", return_value={"results": cands}), \
+                mock.patch(
+                    "daemon.record_decision_safe",
+                    side_effect=lambda t, b, a, p=None:
+                        decisions.append(a) or "d1"):
+            d.rescreen_cycle(dry_run=True, max_new=2, top=5)
+        # the dry-run slot-open never grows the persisted slot plan
+        self.assertEqual(d.state["slots"], slots_before)
+        # ...but the candidate was planned via the virtual slot and a
+        # decision was recorded for it (the ledger stays alive)
+        built = [op for op in self.ops if op[0] == "build"]
+        self.assertEqual([op[1] for op in built], ["PAIR1"])
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["slot"], 5)  # virtual = max(slot)+1
+        self.assertEqual(decisions[0]["symbol"], "SOL")
+
 
 class DefensiveImportTest(unittest.TestCase):
     """Real (unpatched) defensive stubs when Worker A/C modules are absent."""

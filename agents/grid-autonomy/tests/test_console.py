@@ -173,6 +173,22 @@ class TestShaping(ConsoleTestCase):
         self.assertEqual(server._tier({"samples": 40, "profit_factor": 1.4,
                                        "recent_pf": 0.8}), "killed")
 
+    def test_wt_account_label_sources(self):
+        # The deployment (container) and the Mac's local daemon run on two
+        # SEPARATE WunderTrading accounts — the console must be able to say
+        # which one it trades on. WT_ACCOUNT_LABEL env overrides; the
+        # default is container-aware (/.dockerenv) but never a secret.
+        saved = server.WT_ACCOUNT_LABEL
+        try:
+            self.assertIsInstance(saved, str)
+            self.assertTrue(saved)  # a label always resolves
+            server.WT_ACCOUNT_LABEL = "custom (override)"
+            ov = server.overview_payload()
+            self.assertEqual(ov["wt_account"], "custom (override)")
+        finally:
+            server.WT_ACCOUNT_LABEL = saved
+
+
     def test_enriched_bots_stagnation(self):
         self.write_state({
             "active_bots": {"1": {
@@ -394,6 +410,34 @@ class TestShaping(ConsoleTestCase):
     def test_position_sweeps_fail_soft_no_state(self):
         # no state.json written yet → [] , never an exception
         self.assertEqual(server.position_sweeps_payload(), [])
+
+    def test_recommendations_journal_fallback_for_dry_run(self):
+        # a dry-run mirror never persists recs to PB; the Optimizer view
+        # must fall back to the state journal so real rec activity shows
+        self.write_state({
+            "journal": [
+                {"kind": "position-optimizer",
+                 "msg": "recenter hyperliquid:PUMP (Δ+32.36%, conf 1.00)",
+                 "slot": "1", "symbol": "PUMP",
+                 "recommendation": "recenter",
+                 "expected_delta_pct": 32.3636, "trigger": "periodic",
+                 "dry_run": True, "at": "2026-09-07T18:47:00+00:00"},
+                {"kind": "pnl-snapshot", "msg": "fleet net $+1",
+                 "at": "2026-09-07T18:46:00+00:00"},
+            ],
+        })
+        payload = server.recommendations_payload(limit=200)
+        self.assertEqual(payload["source"], "journal")
+        recs = payload["recommendations"]
+        self.assertEqual(len(recs), 1)
+        r = recs[0]
+        self.assertEqual(r["symbol"], "PUMP")
+        self.assertEqual(r["venue"], "hyperliquid")
+        self.assertEqual(r["recommendation"], "recenter")
+        self.assertEqual(r["blocked_by"], "journal-only")
+        self.assertTrue(r["journal_only"])
+        # journal-derived rows never count toward the PB persist cap
+        self.assertEqual(payload["persisted_today"], 0)
 
     def test_logs_grep(self):
         with open(os.path.join(server.STATE_DIR, "daemon.log"), "w") as f:

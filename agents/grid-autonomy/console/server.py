@@ -115,6 +115,13 @@ CONFIG_PATH = os.path.join(GRID_HOME, "config.yaml")
 STATIC_DIR = os.path.join(HERE, "static")
 KILL_FILE = os.path.join(GRID_HOME, "KILL")
 LAUNCHD_LABEL = "com.tvcli.grid-autonomy"
+# WunderTrading account identity for the header/footnote — the deployment
+# (VPS/container, vault item `wundertrading` folder grid-autonomy) and the
+# Mac's local daemon run on TWO SEPARATE WT accounts. WT_ACCOUNT_LABEL
+# overrides; the default distinguishes container (vault/VPS account) from
+# bare-metal (local Mac account). Never a secret — a display label only.
+WT_ACCOUNT_LABEL = os.environ.get("WT_ACCOUNT_LABEL") or (
+    "vps (vault account)" if os.path.exists("/.dockerenv") else "local (Mac account)")
 # The launchd-supervised daemon's stdout/stderr go here (see
 # launchd/com.tvcli.grid-autonomy.plist), NOT state/daemon.log — start.sh
 # writes daemon.log only for manual/nohup launches. The console must read
@@ -953,6 +960,12 @@ def _enriched_bots(st: dict) -> list[dict]:
             "stagnant": stagnant,
             "position_optimizer": po,
             "optimizer_tracker": bot.get("optimizer"),
+            # current exit profile (enriched grid_list fields projected
+            # by the daemon health cycle / observe layer) — renders the
+            # exit badge on the fleet card when present
+            "exits": (bot.get("exits") if isinstance(bot.get("exits"), dict)
+                      else (obs.get("exits")
+                            if isinstance(obs.get("exits"), dict) else None)),
             "take_profit_usd": bot.get("take_profit_usd"),
             "loss_veto": obs.get("loss_veto") if isinstance(obs, dict) else None,
         })
@@ -1277,6 +1290,37 @@ def recommendations_payload(limit: int) -> dict:
                     if ok and isinstance(body, dict) else None
     items = [dict(r) for r in items if isinstance(r, dict)] \
         if isinstance(items, list) else []
+    source = "pocketbase"
+    if not items:
+        # Journal fallback: a dry-run mirror never persists (persist is
+        # gated on not-dry_run) but DOES journal every recommendation —
+        # without this the Optimizer view looked permanently empty on the
+        # az00 mirror even though the engine emits recs every sweep.
+        # Derived rows carry journal_only + a source marker; they are NOT
+        # applyable (no PB record to flip applied on).
+        evs = [e for e in (_load_state().get("journal") or [])
+               if e.get("kind") == "position-optimizer"
+               and e.get("recommendation")]
+        evs.sort(key=lambda e: e.get("at") or "", reverse=True)
+        items = []
+        for e in evs[:limit]:
+            venue = ""
+            parts = (e.get("msg") or "").split(" ", 1)
+            if len(parts) == 2 and ":" in parts[1]:
+                venue = parts[1].split(":")[0]
+            items.append({
+                "at": e.get("at"), "slot": e.get("slot"),
+                "venue": venue, "symbol": e.get("symbol"),
+                "recommendation": e.get("recommendation"),
+                "expected_delta_pct": e.get("expected_delta_pct"),
+                "trigger": e.get("trigger"),
+                "dry_run": bool(e.get("dry_run")),
+                "applied": False, "applied_at": None,
+                "blocked_by": "journal-only",
+                "journal_only": True,
+            })
+        if items:
+            source = "journal"
 
     # Enrich each record with the apply-gate verdict so the UI can say WHY
     # a recommendation is sitting unapplied: config `apply: false` (advisory
@@ -1286,10 +1330,13 @@ def recommendations_payload(limit: int) -> dict:
     max_day = cfg.get("max_apply_per_day") or 4
     today = utcnow()[:10]
     persisted_today = sum(1 for r in items
-                          if str(r.get("at") or "").startswith(today))
+                          if str(r.get("at") or "").startswith(today)
+                          and not r.get("journal_only"))
     for r in items:
         r.setdefault("applied", False)
         r.setdefault("applied_at", None)
+        if r.get("journal_only"):
+            continue
         if r.get("applied"):
             r["blocked_by"] = "applied"
         elif not apply_enabled:
@@ -1299,7 +1346,8 @@ def recommendations_payload(limit: int) -> dict:
         else:
             r["blocked_by"] = ""
     return {"recommendations": items, "apply": apply_enabled,
-            "max_apply_per_day": max_day, "persisted_today": persisted_today}
+            "max_apply_per_day": max_day, "persisted_today": persisted_today,
+            "source": source}
 
 
 def reports_index() -> list[dict]:
@@ -1677,6 +1725,7 @@ def overview_payload() -> dict:
         "pocketbase": {"up": pb_ok},
         "readiness": _readiness(ctl_status),
         "screen_cache_age_s": ((time.time() - float(opt.get("screen_cache_age_s", 0))) if isinstance(opt.get("screen_cache_age_s"), (int, float)) else None),
+        "wt_account": WT_ACCOUNT_LABEL,
         "last_arbiter": last_arbiter,
         "config_digest": {
             "total_usd": (portfolio.get("total_usd")),
@@ -2012,6 +2061,7 @@ class Handler(BaseHTTPRequestHandler):
                 "console_port": CONSOLE_PORT, "ctl_port": _ctl_port(),
                 "pocketbase": PB_URL, "state_dir": STATE_DIR,
                 "grid_home": GRID_HOME, "launchd_label": LAUNCHD_LABEL,
+                "wt_account": WT_ACCOUNT_LABEL,
                 "pid": os.getpid(), "started": getattr(SERVER, "started", None),
             })
         else:

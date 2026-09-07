@@ -374,6 +374,30 @@ function tvcliFitHTML(bot) {
   </div>`;
 }
 
+/* Current exit profile — the enriched grid_list fields the daemon now
+   projects (bot.exits / observed.exits). Compact one-line badge on the
+   fleet card when any exit is configured. */
+function exitProfileHTML(bot) {
+  const ex = bot.exits || (bot.observed && bot.observed.exits) || null;
+  if (!ex || typeof ex !== "object") return "";
+  const parts = [];
+  if (isNum(ex.takeProfit)) parts.push(`TP ${fmtUsd(ex.takeProfit)}`);
+  if (isNum(ex.stopLoss)) parts.push(`SL ${fmtUsd(ex.stopLoss)}`);
+  if (isNum(ex.trailingStopActivation))
+    parts.push(`trail ${fmtNum(ex.trailingStopActivation, 2)}/${fmtNum(ex.trailingStopExecute, 2)}`);
+  if (isNum(ex.strategyStopLossFixedPercentRatio))
+    parts.push(`posSL ${fmtNum(ex.strategyStopLossFixedPercentRatio * 100, 1)}%`);
+  if (ex.strategyProfitCondition === "trailing_stop") parts.push("pos trail");
+  if (!parts.length) return "";
+  const cmp = [];
+  if (ex.stopLossPnlCompareType) cmp.push(`SL@${ex.stopLossPnlCompareType}`);
+  if (ex.pumpProtectionOrderType) cmp.push(`pp ${ex.pumpProtectionOrderType}`);
+  const tip = `server-side exit config${cmp.length ? ` (${cmp.join(" · ")})` : ""} — the fields GridClient.set_exits edits`;
+  return `<div class="slot-exits" title="${esc(tip)}">
+    <span class="mono" style="font-size:11px;color:var(--ink-faint)">${esc(parts.join(" · "))}</span>
+  </div>`;
+}
+
 /* position_optimizer last-pass summary — slow lane (15 min + on-entry)
    revalues each active bot. Rec / Δ% / confidence / when / candle hop. */
 function positionOptimizerHTML(bot) {
@@ -480,6 +504,7 @@ function slotCard(bot) {
     </div>
     ${ladderHTML(bot)}
     ${tvcliFitHTML(bot)}
+    ${exitProfileHTML(bot)}
     <div class="slot-metrics">
       <div class="metric"><div class="m-label">price</div><div class="m-value">${fmtPrice(obs.price)}</div></div>
       <div class="metric"><div class="m-label">fills 24h</div>
@@ -1185,7 +1210,8 @@ function renderSummary(ov) {
        <div class="row"><span class="k">Dashboard gridBots</span><span class="v" title="dashboard view — does not reflect the per-tier cap">${esc(dashGrid.active ?? "—")}/${esc(dashGrid.max ?? "—")}</span></div>`
     : `<div class="row"><span class="k">Capacity</span><span class="v">ctl offline</span></div>`;
   $("#fleet-summary").innerHTML = `
-    <div class="row"><span class="k">Mode</span><span class="v">${esc(d.mode || "—")}${d.supervisor === "launchd" ? " · launchd" : ""}</span></div>
+    <div class="row"><span class="k">WT account</span><span class="v" title="WunderTrading account this instance trades on — the VPS deployment (vault item 'wundertrading', folder grid-autonomy) and the Mac's local daemon run on two SEPARATE accounts">${esc(ov.wt_account || "—")}</span></div>
+     <div class="row"><span class="k">Mode</span><span class="v">${esc(d.mode || "—")}${d.supervisor === "launchd" ? " · launchd" : ""}</span></div>
     <div class="row"><span class="k">Fund size</span><span class="v">${fmtUsd(cd.total_usd)}</span></div>
     <div class="row"><span class="k">Committed</span><span class="v">${fmtUsd(ov.committed_usd)}</span></div>
     <div class="row"><span class="k">Rescreen cadence</span><span class="v">${esc(cd.rescreen_minutes ?? "—")} min</span></div>
@@ -1993,6 +2019,7 @@ function blockedByBadge(b) {
   if (b === "applied") return `<span class="badge badge--ok">applied</span>`;
   if (b === "apply disabled") return `<span class="badge badge--dim" title="position_optimizer.apply is false in config.yaml — advisory mode, recs never auto-edit WunderTrading">apply disabled</span>`;
   if (b === "rate limit") return `<span class="badge badge--warn" title="max_apply_per_day persisted recommendations for today already reached">rate limit</span>`;
+  if (b === "journal-only") return `<span class="badge badge--dim" title="dry-run mirror: recommendation is journaled only, never persisted to PocketBase">journal-only</span>`;
   return `<span class="badge badge--violet" title="would apply on its next eligibility check">eligible</span>`;
 }
 
@@ -3176,8 +3203,11 @@ async function boot() {
   loadPnlTimeline();
   try {
     const meta = await api("/api/meta");
+    const acct = meta.wt_account || "unknown";
+    const hdr = $("#wt-account");
+    if (hdr) hdr.textContent = `mission console · paper fleet · WT: ${acct}`;
     $("#footnote").textContent =
-      `grid/autonomy console · paper fleet · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
+      `grid/autonomy console · paper fleet · WT: ${acct} · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
   } catch { /* footnote stays default */ }
 }
 boot();

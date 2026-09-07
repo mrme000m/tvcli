@@ -185,6 +185,18 @@ except Exception:
     HAS_POSITION_OPTIMIZER = False
     _PositionOptimizer = None
 
+# ── wtclient exit-edit seam (defensive) ────────────────────────────────
+# execution/wt_library.py wraps wtclient.GridClient.set_exits — the
+# exit-only live edit of an ACTIVE grid bot (no stop/restart, verified
+# live 2026-09-07). The daemon injects a thin closure of it into the
+# position optimizer as its opt-in exit-apply seam; imported defensively
+# so the daemon runs even when wtclient/wt_library are missing entirely.
+try:
+    import wt_library  # noqa: E402
+    HAS_WT_LIBRARY = True
+except Exception:
+    HAS_WT_LIBRARY = False
+
 # ── Paper-profile bootstrap layer (defensive) ───────────────────────────
 # execution/profiles.py turns autonomy.paper_profiles (venue-keyed allowlist)
 # into a wtclient ensure call — the daemon self-heals missing paper profiles
@@ -1179,7 +1191,12 @@ class Daemon:
             self.config.get("position_optimizer"),
             journal_fn=lambda event: log(self.state, event),
             persist_fn=self._pb_recommendation_persist,
-            hunt_fn=self._po_hunt_structure) \
+            hunt_fn=self._po_hunt_structure,
+            # opt-in exit-edit seam: engine calls it (only when
+            # position_optimizer.apply is on) with (code, exit_kwargs)
+            # shaped for wt_library.grid_set_exits; the daemon-level
+            # dry-run gate lives inside (see _po_apply_exit)
+            apply_fn=self._po_apply_exit) \
             if _PositionOptimizer else None
         self._browser_down_since = None
         self._last_browser_restart = 0.0
@@ -1416,6 +1433,28 @@ class Daemon:
         except Exception:
             return None
 
+    def _po_apply_exit(self, code, exit_kwargs):
+        """Position-optimizer exit-apply seam → wt_library.grid_set_exits.
+
+        Called by the engine (position_optimizer._apply_exit_rec) for
+        add-take-profit / add-trailing / add-stop-loss recs ONLY, and
+        only when position_optimizer.apply is on (the engine checks).
+        The daemon-level dry-run gate lives HERE, mirroring how
+        grid_stop/grid_create are gated: a dry-run daemon (the default)
+        passes dry_run=True so wt_library returns the PLANNED envelope —
+        journaled, never executed; a live-paper daemon executes the
+        exit-only live edit. Never raises.
+        """
+        if not HAS_WT_LIBRARY:
+            return {"ok": False,
+                    "error": "execution/wt_library unavailable (wtclient "
+                             "not importable) — exit edit not attempted"}
+        try:
+            return wt_library.grid_set_exits(
+                code, dry_run=not self._live_paper, **(exit_kwargs or {}))
+        except Exception as exc:
+            return {"ok": False, "error": str(exc)[:160]}
+
     def optimizer_status(self):
         """Snapshot for GET /optimizer (never raises)."""
         if not self.optimizer:
@@ -1460,6 +1499,15 @@ class Daemon:
           3. spare deployable capital ≥ the new slot's worst-case commitment
         Returns (slot, None) on open, (None, reason) on refusal.
         """
+        return self._open_slot_plan(venue, commit=True)
+
+    def _open_slot_plan(self, venue, commit=True):
+        """open_slot's planning half: identical gates and slot construction,
+        but the persisted mutation (slot append, fixed-venue budget
+        re-normalization, the slot-open journal) only happens with
+        commit=True. Dry-run mirrors call this with commit=False so their
+        decision ledger shows what the planner WOULD open without growing
+        the persisted slot plan."""
         p = self.config["portfolio"]
         dynamic = venue in (p.get("dynamic_slot_venues") or [])
         min_slot_usd = float(p.get("min_slot_usd", 100.0))
@@ -1497,21 +1545,24 @@ class Daemon:
                     "balance": balance, "max_commitment": max_commitment,
                     "venue_sleeve": sleeve, "venue_slots": venue_slots,
                     "dynamic": dynamic}
-        if not dynamic:
-            # re-normalize the venue's existing slot budgets to the new split
-            # so a later deploy into a freed slot sizes like one into the new
-            for s in cur:
-                if s["venue"] == venue:
-                    s["balance"] = balance
-                    s["max_commitment"] = max_commitment
-                    s["venue_slots"] = venue_slots
-        self.state["slots"] = cur + [new_slot]
-        log(self.state, {"kind": "slot-open", "slot": new_slot["slot"],
-                         "msg": (f"{venue} slot {new_slot['slot']} opened "
-                                 f"(${balance:.0f} budget, worst-case "
-                                 f"${max_commitment:.0f}); spare ${spare:.0f} "
-                                 f"of ${ceiling:.0f} deployable"
-                                 + (" (dynamic)" if dynamic else ""))})
+        if commit:
+            if not dynamic:
+                # re-normalize the venue's existing slot budgets to the new
+                # split so a later deploy into a freed slot sizes like one
+                # into the new
+                for s in cur:
+                    if s["venue"] == venue:
+                        s["balance"] = balance
+                        s["max_commitment"] = max_commitment
+                        s["venue_slots"] = venue_slots
+            self.state["slots"] = cur + [new_slot]
+            log(self.state, {"kind": "slot-open", "slot": new_slot["slot"],
+                             "msg": (f"{venue} slot {new_slot['slot']} opened "
+                                     f"(${balance:.0f} budget, worst-case "
+                                     f"${max_commitment:.0f}); spare "
+                                     f"${spare:.0f} of ${ceiling:.0f} "
+                                     f"deployable"
+                                     + (" (dynamic)" if dynamic else ""))})
         return new_slot, None
 
     # ── plan + commit one candidate (shared by rescreen and rotation) ──
@@ -2271,8 +2322,23 @@ class Daemon:
                 if (cand.get("score_final") or 0) < floor:
                     continue  # below the open-slot floor
                 if dry_run:
-                    continue  # dry runs never grow the persisted slot plan
-                slot, open_err = self.open_slot(cand["venue"])
+                    # dry-run slot-open simulation: same gates as a live
+                    # open, no persisted mutation — the mirror records what
+                    # the planner WOULD open and deploy instead of silently
+                    # skipping every candidate when all slots are occupied
+                    slot, open_err = self._open_slot_plan(cand["venue"],
+                                                          commit=False)
+                    if slot is not None and cand["venue"] not in slot_open_noted:
+                        slot_open_noted.add(cand["venue"])
+                        log(self.state, {"kind": "slot-open",
+                                         "slot": slot["slot"], "dry_run": True,
+                                         "msg": (f"dry-run: would open "
+                                                 f"{cand['venue']} slot "
+                                                 f"{slot['slot']} "
+                                                 f"(${slot['balance']:.0f} "
+                                                 f"budget)")})
+                else:
+                    slot, open_err = self.open_slot(cand["venue"])
                 if slot is None:
                     if cand["venue"] not in slot_open_noted:
                         slot_open_noted.add(cand["venue"])
@@ -2532,6 +2598,17 @@ class Daemon:
             obs = observed_all.get(slot_key, observed_all.get(int(slot_key), {}))
             bot["observed"] = obs
             bot["last_observed"] = utcnow()
+            # exit-profile projection (additive): the observe layer now
+            # extracts the enriched grid_list exit fields (takeProfit /
+            # stopLoss / trailing / positions exits — the fields
+            # GridClient.set_exits edits) from the grid resource; mirror
+            # them onto the bot record so the console fleet cards AND the
+            # position optimizer's current_exits() see the CURRENT config.
+            _exits = obs.get("exits")
+            if isinstance(_exits, dict):
+                bot["exits"] = _exits
+            else:
+                bot.pop("exits", None)
             if obs.get("error"):
                 err = str(obs["error"])
                 if is_gone_bot_error(err):
@@ -3252,13 +3329,15 @@ class Daemon:
             return None
 
     # ── position-optimizer apply path (audit 2026-09-06 fix #2) ──────
-    # Only edit-type GEOMETRY recs are ever eligible: recenter / widen /
-    # narrow / resize / revalue-grid. Exit recs (add-take-profit /
-    # add-trailing / add-stop-loss) stay advisory + journal-only even with
-    # apply:true, and the exit payload keys are stripped from applied
-    # geometry edits too — nothing that closes or arms an exit rides the
-    # auto-apply path. An edit leaves open lines and their entry prices
-    # untouched (verified live 2026-09-06 on GRAM).
+    # Only edit-type GEOMETRY recs are ever eligible here: recenter /
+    # widen / narrow / resize / revalue-grid (grid_edit path). Exit recs
+    # (add-take-profit / add-trailing / add-stop-loss) have their OWN
+    # opt-in apply path — the engine's set_exits seam (apply_fn, wired to
+    # wt_library.grid_set_exits, exit-only live edit verified 2026-09-07)
+    # — and never ride this geometry path; the exit payload keys are
+    # stripped from applied geometry edits too. An edit leaves open
+    # lines and their entry prices untouched (verified live 2026-09-06
+    # on GRAM).
     PO_GEOMETRY_RECS = ("recenter", "widen", "narrow", "resize",
                         "revalue-grid")
     PO_EXIT_PAYLOAD_KEYS = ("takeProfitUsd", "stopLossUsd",
@@ -3303,8 +3382,9 @@ class Daemon:
                         continue
                     slot_key = str(rec.get("slot"))
                     rec_name = rec.get("recommendation")
-                    # 1. edit-type GEOMETRY recs only — exit recs are
-                    #    advisory by design, never auto-applied
+                    # 1. edit-type GEOMETRY recs only — exit recs go
+                    #    through the engine's own set_exits seam instead
+                    #    (never this grid_edit path)
                     if rec_name not in self.PO_GEOMETRY_RECS:
                         continue
                     # 2. improvement gate (the same threshold the engine
@@ -4165,9 +4245,10 @@ class Daemon:
             except Exception as exc:
                 log(self.state, {"kind": "health-error", "msg": str(exc)[:200],
                              "tb": traceback.format_exc(limit=6)[-1200:]})
-            # one position-revaluation pass (edit-geometry recs auto-applied
-            # when position_optimizer.apply is on; exit recs never —
-            # apply_position_optimizer_recs is fail-soft)
+            # one position-revaluation pass (geometry recs auto-applied
+            # via grid_edit when position_optimizer.apply is on; exit-add
+            # recs via the engine's wtclient set_exits seam — both
+            # opt-in, fail-soft, and inert when apply is off)
             if self.position_optimizer:
                 try:
                     _recs = self.position_optimizer.cycle(
@@ -4247,9 +4328,10 @@ class Daemon:
                 next_optimize = time.time() + optimize_s
             elif not optimize_s:
                 self.consume_optimize()  # drain stale requests when disabled
-            # slow loop: position revaluation — edit-geometry recs are
-            # auto-applied when position_optimizer.apply is on (exit recs
-            # never); the whole path is fail-soft
+            # slow loop: position revaluation — geometry recs are
+            # auto-applied via grid_edit when position_optimizer.apply is
+            # on, exit-add recs via the engine's set_exits seam; the
+            # whole path is fail-soft
             if po_s and now >= next_po:
                 try:
                     _recs = self.position_optimizer.cycle(
