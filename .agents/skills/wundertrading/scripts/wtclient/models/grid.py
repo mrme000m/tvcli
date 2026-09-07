@@ -105,14 +105,14 @@ class GridUpsertPayload(BaseModel):
     stopOnOutOfGrid: bool | None = None
     startCondition: StartCondition = StartCondition.IMMEDIATE
     signalCode: str | None = None
-    maxRequiredAmount: float | None = None
+    maxRequiredAmount: float | str | None = None
     leverage: int | None = Field(default=None, ge=1, le=125)
     highPrice: float | None = None
     lowPrice: float | None = None
     stopCondition: StopCondition = StopCondition.STOP_ONLY
     profitCurrencyType: ProfitCurrencyType = ProfitCurrencyType.BASE
     pumpProtection: bool | None = None
-    pumpProtectionOrderType: Literal["market"] | None = None
+    pumpProtectionOrderType: Literal["market", "limit"] | None = None
     takeProfit: float | None = Field(default=None, gt=0)
     stopLoss: float | None = Field(default=None, gt=0)
     stopLossPnlCompareType: PnlCompareType | None = None
@@ -144,8 +144,9 @@ class GridUpsertPayload(BaseModel):
             raise ValueError("startCondition='indicator' requires 'indicators'")
         if self.startCondition is StartCondition.WEBHOOK_ALERT and self.signalSource is None:
             raise ValueError("startCondition='webhook_alert' requires 'signalSource'")
-        if self.startCondition is not StartCondition.WEBHOOK_ALERT and self.signalCode is not None:
-            raise ValueError("signalCode is only valid with startCondition='webhook_alert'")
+        # NOTE: signalCode alongside a non-webhook startCondition is valid on the
+        # wire — the edit form always sends the bot's existing (rotated) signalCode
+        # even with startCondition="immediate" (live-verified 2026-09-07).
         return self
 
     def with_channel(

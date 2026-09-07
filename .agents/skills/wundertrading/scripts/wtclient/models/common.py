@@ -88,10 +88,12 @@ class ProfitCurrencyType(str, enum.Enum):
 
 class PnlCompareType(str, enum.Enum):
     TOTAL = "total"
+    UNREALIZED = "unrealized"
 
 
 class PositionsProfitCondition(str, enum.Enum):
     TRAILING_STOP = "trailing_stop"
+    TAKE_PROFIT = "take_profit"
 
 
 class SignalSource(str, enum.Enum):

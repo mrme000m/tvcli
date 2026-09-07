@@ -155,6 +155,11 @@ def cmd_grid(args: argparse.Namespace) -> int:
     elif action == "presets":
         limit = int(args.arg[0]) if args.arg else 10
         _print_json(client.presets(limit))
+    elif action == "backtest":
+        _require(args.arg, "backtest <cfg.json>")
+        payload = json.loads(open(args.arg[0], encoding="utf-8").read())
+        result = client.backtest(payload, timeframe=args.tf, days=args.days)
+        _print_json(result.get("summary", result))
     elif action == "profiles":
         _print_json(client.profiles())
     else:
@@ -380,15 +385,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("grid", help="grid bots (raw session or browser)")
     p.add_argument("action", choices=[
-        "list", "list-bots", "analyze", "create", "edit", "stop", "restart",
-        "close-all", "delete", "positions", "positions-history", "presets",
-        "profiles",
+        "list", "list-bots", "analyze", "create", "edit", "backtest", "stop",
+        "restart", "close-all", "delete", "positions", "positions-history",
+        "presets", "profiles",
     ])
     p.add_argument("arg", nargs="*")
     p.add_argument("--all", action="store_true")
     p.add_argument("--transport", choices=["raw", "browser"], default="raw")
     p.add_argument("--grid-market", choices=["spot", "derivative"], default=None)
     p.add_argument("--bot-type", dest="bot_type", default=None, help="for list-bots")
+    p.add_argument("--tf", type=int, default=15, help="backtest timeframe in minutes")
+    p.add_argument("--days", type=int, default=31, help="backtest lookback days")
     p.set_defaults(func=cmd_grid)
 
     p = sub.add_parser(

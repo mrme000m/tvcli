@@ -90,6 +90,15 @@ wun.grid.list()
 wun.grid.analyze("HYPERLIQUID_SWAP:191")
 wun.market.ohlc_last("HYPERLIQUID_SWAP:191", timeframe=15)
 
+# Exit-only edits on an existing grid bot (no stop/restart; live-verified)
+wun.grid.set_exits(bot_code, take_profit=5, stop_loss=3, positions_stop_loss_pct=5)
+
+# Backtest a config exactly like the Edit form's Backtest button
+# (one public GET :2087/ohlc + the pure client-side engine port)
+result = wun.grid.backtest(cfg, timeframe=15, days=31)
+result["summary"]["totalResult"]    # realized+unrealized percent
+result["summary"]["positionsLong"]  # closed positions, etc.
+
 # Exchange-profile management (my-exchanges, session-auth)
 wun.exchanges.list_profiles()            # -> [Profile(...)] (paper + live)
 wun.exchanges.account_limits()           # -> raw plan-limits payload
@@ -106,6 +115,17 @@ wun.exchanges.delete_profile_by_name("stale-paper")        # lookup by name;
 # paper_only=True (default) refuses NON-paper profiles — a live exchange
 # connection is never deleted by a name match.
 ```
+
+`GridClient.set_exits(code, …)` edits only the exit/risk fields of an existing
+grid bot (take profit, stop loss + "Based on" P/L compare type, trailing stop,
+positions trailing stop, positions stop-loss percent, pump-protection order
+type): it re-reads the bot resource, rebuilds the full `upsert` body, overlays
+just the given kwargs, and POSTs through the same edit path as `edit()` —
+without stopping the bot. The `PnlCompareType` enum now includes
+`"unrealized"` (the UI "Unrealized P/L" option) and
+`PositionsProfitCondition` includes `"take_profit"` (Positions trailing stop
+off); `pumpProtectionOrderType` accepts `"limit"` alongside `"market"`, and
+`maxRequiredAmount` accepts the display-string form (`"100 USDT"`).
 
 Paper profiles need **no real exchange keys** — the WT UI itself submits
 random 32-hex placeholders for `api`/`secret` and `paper_profile_body()`
@@ -188,6 +208,7 @@ python3 wt_httpx.py grid list --transport browser
 python3 wt_httpx.py grid analyze HYPERLIQUID_SWAP:191 --transport browser
 python3 wt_httpx.py grid create cfg.json --transport browser --grid-market derivative
 python3 wt_httpx.py grid stop <code> --transport browser
+python3 wt_httpx.py grid backtest cfg.json --tf 15 --days 31   # :2087 is public
 python3 wt_httpx.py market /supported-markets --transport browser
 
 # Exchange profiles + plan limits (dry run by default; --execute to write)
@@ -221,6 +242,35 @@ To add a new surface to the **discovery** catalog:
 
 1. Add the endpoint patterns to `PUBLIC_SURFACES` in `discovery.py`.
 2. If the transport needs probing logic, add a branch to `Probe.try_method`.
+
+## Backtest (Edit-form parity)
+
+`GridClient.backtest(payload, *, timeframe=15, days=31, from_ms=None, limit=None)`
+reproduces the Edit Grid bot form's **Backtest** button (live-verified
+2026-09-07): it makes exactly one public `GET :2087/ohlc?code=<EXCH:pairCode>
+&from=<ms>&timeframe=<tf>&limit=2976` history fetch and runs the pure engine
+port (`wtclient/backtest.py`) on it — 0.2% fee per closed grid position,
+zigzag intra-candle path, edge lines never open, `pumpProtection` side flip,
+`stopOnOutOfGrid` trimming, infinite grids bounded by the window hi/lo ±1%.
+The `:2087` origin is public, so the raw transport works (no browser).
+
+```python
+result = wun.grid.backtest(cfg)           # cfg = the upsert-style payload
+result["summary"]                        # {totalResult, pnl, unrealizedPnl,
+                                         #  positionsLong, ...} like the UI
+```
+
+**Live-parity recipe** (digit-for-digit verified 2026-09-07): NEAR-USDT on
+BINANCE_FUTURES (pairCode `"NEARUSDT"`), 15m, 30 days, config
+`{gridTradingType: long, gridType: interval, gridPercentStep: 0.0124,
+lowPrice: 2.149906, highPrice: 2.474094, amountPerTrade: 10,
+pumpProtection: true}` with `from_ms=1786135500000, limit=2976` — the live
+UI Backtest panel and `wun.grid.backtest(cfg, from_ms=..., limit=2976)` both
+return: Realized P/L 10.9% (1.09 USDT), Unrealized 0% (0), Total 10.9%
+(1.09 USDT), Positions long 10, Unrealized positions long 0 (20 trades).
+Gotcha (SPA state leak): the Edit form can keep a previous bot's pair when
+re-opened from the bots list — always verify the form's Pair field before
+trusting a UI backtest; the fetch URL tells the truth about which pair ran.
 
 ## Adoption outside this repo
 

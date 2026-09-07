@@ -217,6 +217,44 @@ is echoed but NOT applied while active. Stop → edit → restart applies sizing
 changes (verified: amount 20→30 took effect only after the stop-edit-restart
 cycle).
 
+### Edit interface live findings (2026-09-07)
+
+Captured via XHR interceptor on the real Edit Grid bot form (authenticated
+session; POST `upsert?gridMarket=derivative&code=…` → 200, status `success`).
+
+**Exit section field map** — 7 toggles + an order-type segmented control:
+
+| UI control | Payload field(s) |
+|---|---|
+| Take Profit | `takeProfit` |
+| Stop Loss | `stopLoss` + `stopLossPnlCompareType` |
+| Trailing Stop | `trailingStopActivation`, `trailingStopExecute`, `trailingStopPnlCompareType` |
+| Stop Trigger | `stopOnOutOfGrid` + `stopCondition` |
+| Pump Protection | `pumpProtection` |
+| Positions trailing stop | `strategyProfitCondition` (`trailing_stop` on, `take_profit` off) |
+| Positions stop loss | `strategyStopLossFixedPercentRatio` |
+| "Order type" Market\|Limit | `pumpProtectionOrderType` (`"limit"` live-verified on the wire) |
+
+- "Based on" segmented control **Total P/L | Unrealized P/L** =
+  `stopLossPnlCompareType` / `trailingStopPnlCompareType` — sends `"total"`
+  or `"unrealized"`.
+- Trailing sub-fields: "Trigger P/L $" = `trailingStopActivation`,
+  "Trailing Stop $" = `trailingStopExecute`.
+- Positions stop loss takes **% in the UI**, stored as a decimal ratio
+  (5 → `strategyStopLossFixedPercentRatio: 0.05`).
+- **Each edit-save rotates `signalCode`** (observed
+  `3a9c822933c6f53aba6f64d3` → `3a6e8229bac6f53aba4864aa` across two
+  identical saves) — consumers must re-read the bot after every edit; the
+  (current) `signalCode` is sent even with `startCondition="immediate"`.
+- `maxRequiredAmount` is sent as the display string, e.g. `"100 USDT"`
+  (not a bare number).
+- The UI "Grids" input shows **11** while the payload sends `gridLevels: 12`
+  (lines = intervals + 1).
+- On an ACTIVE bot the UI disables Pair/geometry/Amount-per-trade inputs;
+  exit toggles, start condition, and order type remain editable.
+- The edit POST is an **XMLHttpRequest** (not `fetch`) — CDP interception
+  must wrap XHR when capturing bodies.
+
 Not covered by the API (by design / platform gap): the arithmetic grid step
 ("coming soon" per the article), and the chart-drag interaction itself (pure
 UI convenience for setting `highPrice`/`lowPrice`/`midPrice` — the same
