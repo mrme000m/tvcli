@@ -172,6 +172,28 @@ class UpgradeTestCase(unittest.TestCase):
         self.assertIn("error", body)
         self.assertIn("detail", body)
 
+    def test_position_sweeps_fail_soft_200(self):
+        """The sweep-history endpoint reads state.json directly (no ctl
+        round-trip) — it must answer 200 even with the daemon down."""
+        self.write_state({"journal": [
+            {"kind": "position-optimizer-sweep", "msg": "2 bots analyzed",
+             "at": "2026-09-07T01:00:00+00:00"},
+            {"kind": "heartbeat", "msg": "score 88/100",
+             "at": "2026-09-07T01:05:00+00:00"},   # not a sweep: excluded
+        ]})
+        code, body = self.call("/api/position-sweeps")
+        self.assertEqual(code, 200)
+        self.assertEqual(len(body["sweeps"]), 1)
+        self.assertEqual(body["sweeps"][0]["kind"],
+                         "position-optimizer-sweep")
+
+    def test_status_proxy_keys_added_only_when_daemon_up(self):
+        """ctl is a dead port here → /api/status stays the documented
+        fail-soft {"error": ...} + 200 shape (backward compat: no 502)."""
+        code, body = self.call("/api/status")
+        self.assertEqual(code, 200)
+        self.assertIn("error", body)
+
     def test_ctl_optimize_502_when_ctl_dead(self):
         # POST /api/ctl/optimize mirrors /api/ctl/rescreen: ctl down → 502
         req = urllib.request.Request(

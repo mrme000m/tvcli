@@ -20,7 +20,7 @@ Usage:
 
 tvcli fitness bonus (numeric signals, added to preset score, then re-sorted):
   moves large (ATR% ≥ 1.5) / mtf volRatio ≥ 1.5              +1.0 each
-  moves fast: squeeze released + momentum |m| ≥ 20           +1.0
+  moves fast: squeeze released + momentum ≥ 0.10% of price  +1.0
               extended squeeze (≥ 6 bars coiled)             +1.5
   choppiness CHOP ≥ 61.8 with range regime (harvestable)     +1.5
   choppiness CHOP ≤ 38.2 with trend regime (clean trend)     +1.0
@@ -66,6 +66,53 @@ except Exception:  # pragma: no cover - exercised when spreads.py is absent
 TVCLI_SERVER = os.environ.get("TVCLI_SERVER", "http://127.0.0.1:8765")
 CONFLUENCE_SKILLS = ("squeeze", "choppiness", "mtf-confluence", "dvi")
 TVCLI_BONUS_CAP = 6.0
+
+# ── tvcli /hunt observability ──────────────────────────────────────────
+# Nothing logged WHAT the hunts found: a down tvcli degraded silently to
+# score-only screening. apply_confluence records per-skill hunted/ok
+# counts, error strings, and how many candidates the confluence bonus
+# actually moved, here at module level (run_merge runs merge.py as a
+# subprocess, so the snapshot lives one process) AND in the report via
+# report["hunt_stats"]. Fail-soft: tracking never shapes ranking.
+_HUNT_STATS = {"at": 0.0, "skills": {}, "candidates_boosted": 0, "errors": []}
+
+
+def _set_hunt_stats(stats):
+    global _HUNT_STATS
+    try:
+        _HUNT_STATS = stats or {"at": 0.0, "skills": {},
+                                "candidates_boosted": 0, "errors": []}
+    except Exception:
+        pass
+
+
+def last_hunt_stats():
+    """Snapshot of the last confluence pass: {at: epoch, skills: {skill:
+    {hunted: N, ok: N}}, candidates_boosted: M, errors: [str, ...]}.
+
+    hunted = symbols the skill ran over; ok = symbols with a parsed
+    result; candidates_boosted = candidates whose score_final changed
+    due to the confluence bonus. Fail-soft: any error → the zero shape.
+    """
+    try:
+        st = _HUNT_STATS or {}
+        skills = {}
+        for skill, s in (st.get("skills") or {}).items():
+            try:
+                skills[skill] = {
+                    "hunted": int((s or {}).get("hunted") or 0),
+                    "ok": int((s or {}).get("ok") or 0)}
+            except Exception:
+                skills[skill] = {"hunted": 0, "ok": 0}
+        return {
+            "at": float(st.get("at") or 0.0),
+            "skills": skills,
+            "candidates_boosted": int(st.get("candidates_boosted") or 0),
+            "errors": [str(e)[:160] for e in (st.get("errors") or [])][:20],
+        }
+    except Exception:
+        return {"at": 0.0, "skills": {}, "candidates_boosted": 0,
+                "errors": []}
 
 # global dead-tape floor (see main()); below this ATR a grid pays more fees
 # than it harvests, whatever the preset weights say
@@ -314,13 +361,32 @@ def tvcli_fitness(c, mtf=None, sq=None, ch=None, dvi=None, vp=None, sr=None):
     squeeze_on = bool((sqr.get("structure") or {}).get("squeezeOn"))
     sq_mom = _rnum(sqr, "structure", "momentum")
     sq_bars = _rnum(sqr, "structure", "squeezeBars")
+    # squeeze momentum is PRICE-SCALED (a raw histogram delta, not a
+    # percentage): live 2026-09-07 BTC price 79831 → momentum -175.1,
+    # ETH price 2510 → -1.003, PUMP price 0.00396 → -0.0000097. The old
+    # raw gate |mom| >= 20 just meant "high-priced symbol" — BTC always
+    # earned the momentum-release bonus, ETH/PUMP never could. Normalize
+    # to % of price first (the hunt result's market.lastPrice, falling
+    # back to the candidate's own metrics price), then gate on >= 0.10%
+    # — a genuine 15m-bar-scale expansion (BTC live 0.22% fires; ETH
+    # 0.04% / PUMP 0.024% don't). No price available → no bonus
+    # (fail-soft, same philosophy as every other missing read).
+    sq_price = _rnum(sqr, "market", "lastPrice")
+    if sq_price is None or sq_price <= 0:
+        sq_price = _rnum(m, "price")
+    sq_mom_pct = None
+    if sq_mom is not None and sq_price is not None and sq_price > 0:
+        sq_mom_pct = abs(sq_mom) / sq_price * 100
     if sqr:
         fit.update({"squeeze_on": squeeze_on,
                     "squeeze_momentum": sq_mom, "squeeze_bars": sq_bars})
+        if sq_mom_pct is not None:
+            fit["squeeze_momentum_pct"] = round(sq_mom_pct, 4)
         if squeeze_on and sq_bars is not None and sq_bars >= 6:
             bonus += 1.5
             notes.append("squeeze-coiled(breakout pending)")
-        elif not squeeze_on and sq_mom is not None and abs(sq_mom) >= 20:
+        elif (not squeeze_on and sq_mom_pct is not None
+                and sq_mom_pct >= 0.10):
             bonus += 1.0
             notes.append("momentum-release")
         elif squeeze_on and regime in ("chop_high_volatility", "squeeze",
@@ -456,13 +522,24 @@ def apply_confluence(cands, timeframe="1H", bars=180):
     """Enrich top candidates with tvcli /hunt numeric fitness (see docstring)."""
     tv_syms = list({c["tv_symbol"] for c in cands})
     hunts = {}
+    stats = {"at": time.time(), "skills": {}, "candidates_boosted": 0,
+             "errors": []}
     for skill in config_confluence_skills():
         try:
             hunts[skill] = tv_hunt(skill, tv_syms, timeframe, bars)
+            entries = [r for r in (hunts[skill] or {}).values()
+                       if isinstance(r, dict)]
+            stats["skills"][skill] = {
+                "hunted": len(entries),
+                "ok": sum(1 for r in entries
+                          if r.get("result") is not None)}
         except Exception as exc:
             print(f"confluence {skill} failed: {exc} — continuing without it",
                   file=sys.stderr)
             hunts[skill] = {}
+            stats["skills"][skill] = {"hunted": 0, "ok": 0}
+            stats["errors"].append(f"{skill}: {str(exc)[:120]}")
+    boosted = 0
     for c in cands:
         tv = c["tv_symbol"]
         mtf = hunts.get("mtf-confluence", {}).get(tv) or {}
@@ -490,6 +567,10 @@ def apply_confluence(cands, timeframe="1H", bars=180):
         c["confluence_bonus"] = bonus
         c["confluence_notes"] = notes
         c["score_final"] = round(c["score"] + bonus, 2)
+        if bonus:
+            boosted += 1
+    stats["candidates_boosted"] = boosted
+    _set_hunt_stats(stats)
     cands.sort(key=lambda x: x["score_final"], reverse=True)
     return cands
 
@@ -700,6 +781,17 @@ def main():
             c["score_final"] = c["score"]
             c["confluence_bonus"] = 0.0
             c["confluence_notes"] = ["confluence-skipped"]
+        # honest zero state: this run hunted nothing (report consumers
+        # must not read the previous run's skills/boost counts)
+        _set_hunt_stats({"at": time.time(), "skills": {},
+                         "candidates_boosted": 0, "errors": []})
+
+    # hunt observability rides the report (run_merge is a subprocess, so
+    # the module-level snapshot never crosses the process boundary)
+    try:
+        report_hunt_stats = last_hunt_stats()
+    except Exception:
+        report_hunt_stats = {}
 
     report = {
         "as_of": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -712,6 +804,7 @@ def main():
         "top": cands[0] if cands else None,
         "results": cands,
         "screen_errors": screen_errors,
+        "hunt_stats": report_hunt_stats,
         "dropped_dead_tape": dropped_floor,
         "disclaimer": "screening only — execution blocked until guardrails pass.",
     }

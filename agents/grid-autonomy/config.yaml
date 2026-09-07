@@ -245,6 +245,22 @@ server:
   tvcli: http://127.0.0.1:8765
   daemon_port: 8799
 
+heartbeat:                    # loop-health monitor + safe self-nudges
+  enabled: true               # heartbeat_cycle every interval_s: 8 checks
+                              # (tvcli /health, PocketBase, WT observe fold,
+                              # screen-cache freshness, optimizer liveness,
+                              # position-optimizer recency, journal error
+                              # rate, pnl-snapshot feed) → 0–100 score in
+                              # state.heartbeat + the console chip. Stale
+                              # screen/optimizer feeds self-nudge
+                              # (queue_rescreen / queue_optimize) when the
+                              # daemon is NOT in dry-run.
+  interval_s: 900             # one heartbeat per 15 min (first ~60s after
+                              # startup)
+  screen_stale_s: 2400       # screen_cache older than this → rescreen nudge
+  error_rate_warn: 0.3       # journal -error fraction in the trailing hour
+                              # above this → journal_errors check fails
+
 position_optimizer:           # slow-loop position revaluation (position_optimizer.py)
                                # — ADVISORY by default: apply: false means recs are
                                # journaled/persisted but never auto-edit WunderTrading

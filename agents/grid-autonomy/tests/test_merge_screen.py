@@ -25,9 +25,11 @@ def _res(structure):
 
 
 def _cand(regime="chop_high_volatility", venue="hyperliquid",
-          atr=2.0, rsi=50.0):
-    return {"regime": regime, "venue": venue,
-            "metrics": {"atr_pct": atr, "rsi14": rsi}}
+          atr=2.0, rsi=50.0, price=None):
+    m = {"atr_pct": atr, "rsi14": rsi}
+    if price is not None:
+        m["price"] = price
+    return {"regime": regime, "venue": venue, "metrics": m}
 
 
 class TestTvcliFitness(unittest.TestCase):
@@ -51,11 +53,75 @@ class TestTvcliFitness(unittest.TestCase):
         self.assertTrue(fit["squeeze_on"])
 
     def test_squeeze_momentum_release(self):
-        bonus, notes, _ = merge.tvcli_fitness(
+        # momentum is PRICE-SCALED: 25.0 raw on a $100 symbol = 25% of
+        # price — a genuine release (market.lastPrice from the hunt result)
+        bonus, notes, fit = merge.tvcli_fitness(
             _cand(atr=0.5),
-            sq=_res({"squeezeOn": False, "momentum": 25.0}))
+            sq={"result": {"structure": {"squeezeOn": False,
+                                         "momentum": 25.0},
+                           "market": {"lastPrice": 100.0}}})
         self.assertEqual(bonus, 1.0)
         self.assertIn("momentum-release", notes)
+        self.assertEqual(fit["squeeze_momentum"], 25.0)
+        self.assertEqual(fit["squeeze_momentum_pct"], 25.0)
+
+    def test_momentum_release_price_normalized(self):
+        # regression (live 2026-09-07): the old raw gate |mom| >= 20 meant
+        # "high-priced symbol" — BTC (price 79831, momentum -175.1) always
+        # fired, ETH/PUMP never could. Same momentum value, two prices:
+        # 5.0 on a $100 symbol = 5% of price → fires; on a $100000 symbol
+        # = 0.005% → does not.
+        low_priced = merge.tvcli_fitness(
+            _cand(atr=0.5),
+            sq={"result": {"structure": {"squeezeOn": False,
+                                         "momentum": 5.0},
+                           "market": {"lastPrice": 100.0}}})
+        high_priced = merge.tvcli_fitness(
+            _cand(atr=0.5),
+            sq={"result": {"structure": {"squeezeOn": False,
+                                         "momentum": 5.0},
+                           "market": {"lastPrice": 100000.0}}})
+        self.assertEqual(low_priced[0], 1.0)     # 5.0/100 = 5% >= 0.10%
+        self.assertIn("momentum-release", low_priced[1])
+        self.assertEqual(high_priced[0], 0.0)     # 5.0/100000 = 0.005%
+        self.assertEqual(high_priced[1], [])
+        self.assertEqual(low_priced[2]["squeeze_momentum_pct"], 5.0)
+        self.assertEqual(high_priced[2]["squeeze_momentum_pct"], 0.005)
+
+    def test_momentum_release_falls_back_to_metrics_price(self):
+        # no market.lastPrice in the hunt result → the candidate's own
+        # metrics price normalizes instead
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5, price=50.0),
+            sq=_res({"squeezeOn": False, "momentum": 1.0}))
+        self.assertEqual(bonus, 1.0)   # 1.0/50 = 2% >= 0.10%
+        self.assertIn("momentum-release", notes)
+        self.assertEqual(fit["squeeze_momentum_pct"], 2.0)
+
+    def test_momentum_release_without_any_price_fails_soft(self):
+        # neither market.lastPrice nor a metrics price → cannot normalize
+        # → no bonus (never fire on an unnormalized raw value)
+        bonus, notes, fit = merge.tvcli_fitness(
+            _cand(atr=0.5),
+            sq=_res({"squeezeOn": False, "momentum": 999.0}))
+        self.assertEqual(bonus, 0.0)
+        self.assertEqual(notes, [])
+        self.assertNotIn("squeeze_momentum_pct", fit)
+
+    def test_momentum_release_edge_at_threshold(self):
+        # exactly 0.10% of price fires; just under does not
+        at_edge = merge.tvcli_fitness(
+            _cand(atr=0.5),
+            sq={"result": {"structure": {"squeezeOn": False,
+                                         "momentum": 0.1},
+                           "market": {"lastPrice": 100.0}}})
+        self.assertEqual(at_edge[0], 1.0)
+        below = merge.tvcli_fitness(
+            _cand(atr=0.5),
+            sq={"result": {"structure": {"squeezeOn": False,
+                                         "momentum": 0.0999},
+                           "market": {"lastPrice": 100.0}}})
+        self.assertEqual(below[0], 0.0)
 
     def test_squeeze_active_range_small_bonus(self):
         bonus, notes, _ = merge.tvcli_fitness(
@@ -431,6 +497,199 @@ class TestBinanceUniverse(unittest.TestCase):
         self.assertEqual(len(calls), 2)
         self.assertIn("data-api.binance.vision", calls[0])
         self.assertIn("api.binance.com", calls[1])
+
+
+class TestHuntStats(unittest.TestCase):
+    """last_hunt_stats / report["hunt_stats"]: what the tvcli /hunt pass
+    actually found (per-skill hunted/ok, boosted candidates, errors) —
+    a down tvcli degraded silently to score-only screening before."""
+
+    def setUp(self):
+        # module-level snapshot: each test starts from a known zero state
+        merge._set_hunt_stats({"at": 0.0, "skills": {},
+                               "candidates_boosted": 0, "errors": []})
+
+    def _cands(self, n=2):
+        return [{"venue": "hyperliquid", "symbol": f"S{i}",
+                 "tv_symbol": f"BINANCE:S{i}USDT",
+                 "regime": "neutral", "score": 50.0,
+                 "metrics": {"atr_pct": 0.5, "price": 100.0}}
+                for i in range(n)]
+
+    def test_zero_shape_before_any_run(self):
+        st = merge.last_hunt_stats()
+        self.assertEqual(set(st), {"at", "skills", "candidates_boosted",
+                                   "errors"})
+        self.assertEqual(st["skills"], {})
+        self.assertEqual(st["candidates_boosted"], 0)
+        self.assertEqual(st["errors"], [])
+        self.assertEqual(st["at"], 0.0)
+
+    def test_skills_counts_and_boosted(self):
+        # squeeze result carries a price for the momentum gate
+        def hunt(skill, syms, tf, bars):
+            if skill == "squeeze":
+                return {
+                    "BINANCE:S0USDT": {"result": {
+                        "structure": {"squeezeOn": False, "momentum": 5.0},
+                        "market": {"lastPrice": 100.0}}},
+                    "BINANCE:S1USDT": {"error": "no data"}}
+            return {s: {"result": {"structure": {}}} for s in syms}
+
+        cands = self._cands(2)
+        with mock.patch("merge.config_confluence_skills",
+                        return_value=["squeeze", "choppiness"]), \
+                mock.patch("merge.tv_hunt", side_effect=hunt):
+            out = merge.apply_confluence(cands)
+        st = merge.last_hunt_stats()
+        self.assertEqual(st["skills"]["squeeze"], {"hunted": 2, "ok": 1})
+        self.assertEqual(st["skills"]["choppiness"], {"hunted": 2, "ok": 2})
+        self.assertEqual(st["errors"], [])
+        # S0 earned the momentum-release bonus (+1.0); S1 got nothing
+        self.assertEqual(st["candidates_boosted"], 1)
+        self.assertEqual(out[0]["score_final"], 51.0)
+        self.assertEqual(out[1]["score_final"], 50.0)
+        self.assertIsInstance(st["at"], float)
+        self.assertGreater(st["at"], 0.0)
+
+    def test_hunt_exception_recorded_as_error(self):
+        def boom(skill, syms, tf, bars):
+            raise RuntimeError("tvcli down")
+
+        cands = self._cands(1)
+        with mock.patch("merge.config_confluence_skills",
+                        return_value=["squeeze", "choppiness"]), \
+                mock.patch("merge.tv_hunt", side_effect=boom), \
+                mock.patch("sys.stderr"):
+            merge.apply_confluence(cands)
+        st = merge.last_hunt_stats()
+        self.assertEqual(st["skills"]["squeeze"], {"hunted": 0, "ok": 0})
+        self.assertEqual(st["skills"]["choppiness"], {"hunted": 0, "ok": 0})
+        self.assertEqual(len(st["errors"]), 2)
+        self.assertIn("squeeze", st["errors"][0])
+        self.assertIn("tvcli down", st["errors"][0])
+        self.assertEqual(st["candidates_boosted"], 0)
+
+    def test_last_hunt_stats_is_a_copy(self):
+        # callers mutating the snapshot must not corrupt module state
+        st = merge.last_hunt_stats()
+        st["skills"]["x"] = {"hunted": 99, "ok": 99}
+        self.assertNotIn("x", merge.last_hunt_stats()["skills"])
+
+
+class TestReportHuntStats(unittest.TestCase):
+    """main() folds the hunt snapshot into report["hunt_stats"] — the
+    daemon's run_merge is a subprocess, so the report is the only channel
+    the module-level stats cross the process boundary through."""
+
+    def setUp(self):
+        merge._set_hunt_stats({"at": 0.0, "skills": {},
+                               "candidates_boosted": 0, "errors": []})
+
+    def _run_main(self, tmp_out):
+        argv = ["merge.py", "--top", "5", "--confluence-top", "5",
+                "--out", tmp_out]
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch("merge.load_presets",
+                           return_value={"grid-neutral": {},
+                                         "grid-directional": {}}), \
+                mock.patch("merge.screen_hyperliquid", return_value=[]), \
+                mock.patch("merge.screen_binance",
+                           return_value=[]), \
+                mock.patch("merge.confirm_directional",
+                           side_effect=lambda cands, iv: cands), \
+                mock.patch("merge.apply_harvest_ev",
+                           side_effect=lambda cands, *a, **k: cands), \
+                mock.patch("sys.stdout"):
+            merge.main()
+        with open(tmp_out) as fh:
+            return json.load(fh)
+
+    def test_report_carries_hunt_stats_zero_shape(self):
+        # no candidates → confluence skipped → the honest zero snapshot
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            rep = self._run_main(os.path.join(td, "report.json"))
+        self.assertIn("hunt_stats", rep)
+        st = rep["hunt_stats"]
+        self.assertEqual(set(st), {"at", "skills", "candidates_boosted",
+                                   "errors"})
+        self.assertEqual(st["skills"], {})
+        self.assertEqual(st["candidates_boosted"], 0)
+        self.assertEqual(st["errors"], [])
+        self.assertGreater(st["at"], 0.0)
+
+    def test_skipped_confluence_does_not_leak_stale_stats(self):
+        # a prior apply_confluence in this process must NOT surface in a
+        # run whose shortlist was empty (that run hunted nothing)
+        def hunt(skill, syms, tf, bars):
+            return {s: {"result": {"structure": {}}} for s in syms}
+
+        cands = [{"venue": "hyperliquid", "symbol": "S0",
+                  "tv_symbol": "BINANCE:S0USDT", "regime": "neutral",
+                  "score": 50.0, "metrics": {"atr_pct": 0.5}}]
+        with mock.patch("merge.config_confluence_skills",
+                        return_value=["squeeze"]), \
+                mock.patch("merge.tv_hunt", side_effect=hunt):
+            merge.apply_confluence(cands)
+        self.assertEqual(merge.last_hunt_stats()["skills"]["squeeze"]["ok"],
+                         1)
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            rep = self._run_main(os.path.join(td, "report.json"))
+        self.assertEqual(rep["hunt_stats"]["skills"], {})
+        self.assertEqual(rep["hunt_stats"]["candidates_boosted"], 0)
+
+    def test_report_carries_the_confluence_snapshot_when_hunted(self):
+        # shortlist non-empty → apply_confluence runs inside main() and
+        # its per-skill counts ride the report out of the subprocess
+        def hunt(skill, syms, tf, bars):
+            return {
+                "BINANCE:S0USDT": {"result": {
+                    "structure": {"squeezeOn": False, "momentum": 5.0},
+                    "market": {"lastPrice": 100.0}}},
+                "BINANCE:S1USDT": {"error": "no data"}}
+
+        screened = [
+            {"venue": "hyperliquid", "symbol": f"S{i}",
+             "tv_symbol": f"BINANCE:S{i}USDT", "regime": "neutral",
+             "score": 60.0 - i, "spread_pct": 0.02, "step": 0.5,
+             "archetype": "x", "vol_usd": 9e8, "oi_usd": None,
+             "mark_px": 100.0, "flags": [], "preset": "grid-neutral",
+             "metrics": {"atr_pct": 0.5, "price": 100.0, "rsi14": 50},
+             "evidence": {}}
+            for i in range(2)]
+        import copy
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            argv = ["merge.py", "--top", "5", "--confluence-top", "5",
+                    "--out", os.path.join(td, "report.json")]
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch("merge.load_presets",
+                               return_value={"grid-neutral": {},
+                                             "grid-directional": {}}), \
+                    mock.patch("merge.screen_hyperliquid",
+                               return_value=copy.deepcopy(screened)), \
+                    mock.patch("merge.screen_binance",
+                               return_value=[]), \
+                    mock.patch("merge.confirm_directional",
+                               side_effect=lambda cands, iv: cands), \
+                    mock.patch("merge.apply_harvest_ev",
+                               side_effect=lambda cands, *a, **k: cands), \
+                    mock.patch("merge.config_confluence_skills",
+                               return_value=["squeeze"]), \
+                    mock.patch("merge.tv_hunt", side_effect=hunt), \
+                    mock.patch("sys.stdout"):
+                merge.main()
+            with open(os.path.join(td, "report.json")) as fh:
+                rep = json.load(fh)
+        st = rep["hunt_stats"]
+        self.assertEqual(st["skills"]["squeeze"], {"hunted": 2, "ok": 1})
+        # S0 (momentum 5.0 on a $100 symbol = 5%) got the release bonus
+        self.assertEqual(st["candidates_boosted"], 1)
+        by_sym = {c["symbol"]: c for c in rep["results"]}
+        self.assertEqual(by_sym["S0"]["score_final"], 61.0)
+        self.assertEqual(by_sym["S1"]["score_final"], 59.0)
 
 
 if __name__ == "__main__":

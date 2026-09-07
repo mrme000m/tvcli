@@ -12,6 +12,9 @@ Schedules (from ../config.yaml, merged over built-in defaults):
                                       the optimizer's challenger board)
   reliability cron        24h        (bot_trades → archetype_stats → save
                                     → reload → sizing/kill gates)
+  heartbeat              15m        (8 fail-soft loop-health checks → score
+                                    in state.heartbeat + journal; stale
+                                    screen/optimizer feeds self-nudge)
 
 Autonomy with guardrails: deployments are paper (demo-hype) until the
 reliability gate passes (>=30 samples, PF>=1.3); live needs live_allow=true in
@@ -417,6 +420,14 @@ DEFAULT_STATE = {
     "profiles": [],            # last grid_profiles() snapshot
 }
 
+# heartbeat defaults — config.yaml `heartbeat:` section overrides these
+HEARTBEAT_DEFAULTS = {
+    "enabled": True,
+    "interval_s": 900.0,        # one heartbeat cycle per 15 min
+    "screen_stale_s": 2400.0,   # screen_cache older → nudge a rescreen
+    "error_rate_warn": 0.3,     # journal -error fraction (trailing hour)
+}
+
 DEFAULT_CONFIG = {
     "portfolio": {
         "total_usd": 600.0,
@@ -484,6 +495,9 @@ DEFAULT_CONFIG = {
                     # samples (1 losing trip must not ban a regime forever)
                     "kill_min_samples": 10},
     "server": {"daemon_port": 8799},
+    # loop-health heartbeat (HEARTBEAT_DEFAULTS is the same contract in
+    # module-level form; kept here so a config.yaml-less boot carries it)
+    "heartbeat": dict(HEARTBEAT_DEFAULTS),
 }
 
 # ── config loading (YAML subset parser lives in config_lite.py) ───────
@@ -514,6 +528,39 @@ def log(state, event):
     state["journal"] = state["journal"][-200:]
     _pb_journal(event)
     print(f"[{event['at']}] {event.get('kind')}: {event.get('msg')}", flush=True)
+
+
+def _round_trip_fee_pct(venue):
+    """Venue round-trip fee in % (execution.guardrails.ROUND_TRIP_FEE_PCT).
+
+    Lazy import so the daemon still boots (and projects honestly with the
+    0.15 fallback) even if the guardrails module is unavailable — this is
+    an observability input, never a deploy gate."""
+    try:
+        from execution.guardrails import ROUND_TRIP_FEE_PCT
+        return float((ROUND_TRIP_FEE_PCT or {}).get(venue, 0.15))
+    except Exception:
+        return 0.15
+
+
+def _tvcli_health(base_url, timeout=5.0):
+    """GET {base}/health probe for the tvcli server → (ok, detail).
+
+    Fail-soft: any transport/parse failure returns (False, short reason).
+    Never raises — heartbeat check #1."""
+    try:
+        req = urllib.request.Request(
+            str(base_url).rstrip("/") + "/health", method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            body = r.read(2048) or b"{}"
+            try:
+                js = json.loads(body)
+            except Exception:
+                js = {}
+            status = (js or {}).get("status") or "ok"
+            return (r.status == 200), f"HTTP {r.status} · {status}"
+    except Exception as exc:
+        return False, f"unreachable: {str(exc)[:80]}"
 
 
 def load_state():
@@ -1096,7 +1143,8 @@ class Daemon:
         self.position_optimizer = _PositionOptimizer(
             self.config.get("position_optimizer"),
             journal_fn=lambda event: log(self.state, event),
-            persist_fn=self._pb_recommendation_persist) \
+            persist_fn=self._pb_recommendation_persist,
+            hunt_fn=self._po_hunt_structure) \
             if _PositionOptimizer else None
         self._browser_down_since = None
         self._last_browser_restart = 0.0
@@ -2005,10 +2053,12 @@ class Daemon:
             save_state(self.state)
             return actions
         cands = report.get("results", [])
+        hunt_stats = report.get("hunt_stats") or {}
         log(self.state, {"kind": "screen",
                          "msg": f"{len(cands)} candidates, top=" +
                                 (f"{cands[0]['venue']}:{cands[0]['symbol']} "
-                                 f"{cands[0]['score_final']}" if cands else "none")})
+                                 f"{cands[0]['score_final']}" if cands else "none"),
+                         "hunt_stats": hunt_stats})
         # candidate board for the fast optimizer (2–5 min cadence): the top
         # entries with every field a challenger refresh + plan needs. The
         # optimizer re-scores them on live candles between rescreens.
@@ -2192,6 +2242,7 @@ class Daemon:
             "at": utcnow(), "cycle_kind": "rescreen",
             "dry_run": dry_run, "paper": dry_run,
             "screen": {"n_candidates": len(cands),
+                       "hunt_stats": hunt_stats,
                        "top3": [{"venue": c.get("venue"), "symbol": c.get("symbol"),
                                  "regime": c.get("regime"),
                                  "score_final": c.get("score_final"),
@@ -2670,6 +2721,7 @@ class Daemon:
         the committed worst-case claims."""
         bots = {}
         realized = unrealized = fills = 0.0
+        projected = 0.0
         for slot_key, bot in (self.state.get("active_bots") or {}).items():
             obs = (bot or {}).get("observed") or {}
             try:
@@ -2679,9 +2731,12 @@ class Daemon:
             except (TypeError, ValueError):
                 r = u = 0.0
                 f = 0.0
+            proj = self._projected_24h_usd(bot)
+            projected += proj
             bots[str(slot_key)] = {"symbol": (bot or {}).get("symbol"),
                                    "realized": r, "unrealized": u,
-                                   "fills_24h": f}
+                                   "fills_24h": f,
+                                   "projected_24h_usd": proj}
             realized += r
             unrealized += u
             fills += f
@@ -2699,10 +2754,53 @@ class Daemon:
                     "realized": realized,
                     "unrealized": unrealized,
                     "net": round(realized + unrealized, 4),
+                    "realized_net": round(realized + unrealized, 4),
                     "committed_usd": committed,
                     "idle_usd": round(max(total - committed, 0.0), 2),
-                    "fills_24h": round(fills, 1)},
+                    "fills_24h": round(fills, 1),
+                    "projected_24h_usd": round(projected, 2)},
                 "bots": bots}
+
+    def _projected_24h_usd(self, bot):
+        """Model-based expected grid income per 24h for ONE bot, net of
+        round-trip fees (observability only — never a gate).
+
+        Fill semantics (verified live 2026-09-07):
+          stagnation_policy.expected_fills_per_24h comes from
+          policy/stagnation.simulate_grid_fills, which counts EVERY
+          single-side grid-line crossing (one fill event each time
+          consecutive closes cross any line). execution/observe.py's
+          observed fills_24h instead counts CLOSED ROUND TRIPS — and one
+          round trip = a buy-side fill matched by its sell-side fill,
+          i.e. ~2 line crossings. Gross grid income accrues per ROUND
+          TRIP (amountPerTrade × step spread), so the honest projection
+          halves the crossing count:
+              trips/24h ≈ expected_fills_per_24h / 2
+              proj      = trips × amountPerTrade × (step% − rtfee%) / 100
+        with the fee leg floored at 0 (a step thinner than the round-trip
+        fee projects zero, not negative). Missing/NaN fields → 0.0, never
+        a raise: pure fail-soft like the rest of the snapshot."""
+        bot = bot if isinstance(bot, dict) else {}
+        try:
+            exp = float(((bot.get("stagnation_policy") or {})
+                         .get("expected_fills_per_24h")) or 0)
+        except (TypeError, ValueError):
+            exp = 0.0
+        if exp <= 0:
+            return 0.0
+        try:
+            channel = bot.get("channel") or {}
+            upsert = bot.get("upsert") or {}
+            step = float(channel.get("step_pct")
+                         or float(upsert.get("gridPercentStep") or 0) * 100
+                         or 0)
+            amt = float(upsert.get("amountPerTrade") or 0)
+        except (TypeError, ValueError):
+            step = amt = 0.0
+        if step <= 0 or amt <= 0:
+            return 0.0
+        rt = _round_trip_fee_pct(bot.get("venue"))
+        return round(exp * 0.5 * amt * max(step - rt, 0.0) / 100.0, 2)
 
     def _journal_pnl_snapshot(self):
         """One 'pnl-snapshot' journal event per watch.pnl_snapshot_interval_s
@@ -2717,8 +2815,252 @@ class Daemon:
                     f"{f['realized']:+.4f}, unrealized "
                     f"{f['unrealized']:+.4f}) — committed "
                     f"${f['committed_usd']:.2f}, idle ${f['idle_usd']:.2f}, "
-                    f"fills {f['fills_24h']:.0f}/24h"),
+                    f"fills {f['fills_24h']:.0f}/24h, "
+                    f"proj/24h ${f['projected_24h_usd']:.2f}"),
             **snap})
+
+    # ── heartbeat: loop-health monitor + safe self-nudges ────────────
+
+    def _heartbeat_cfg(self):
+        """Merged heartbeat config (HEARTBEAT_DEFAULTS ← config.yaml)."""
+        merged = dict(HEARTBEAT_DEFAULTS)
+        try:
+            cfg = self.config.get("heartbeat") or {}
+            if isinstance(cfg, dict):
+                merged.update({k: v for k, v in cfg.items() if v is not None})
+        except Exception:
+            pass
+        return merged
+
+    def _heartbeat_interval_s(self):
+        try:
+            return max(60.0, float(self._heartbeat_cfg().get("interval_s",
+                                                            900)))
+        except (TypeError, ValueError):
+            return 900.0
+
+    def _hb_check_tvcli(self):
+        """(1) tvcli /health — the candle/confluence backbone."""
+        base = (os.environ.get("TVCLI_SERVER")
+                or (self.config.get("server") or {}).get("tvcli")
+                or "http://127.0.0.1:8765")
+        return _tvcli_health(base)
+
+    def _hb_check_pocketbase(self):
+        """(2) PocketBase sidecar (journal write-through)."""
+        return (_pb() is not None), ("connected" if _pb() is not None
+                                     else "client unavailable "
+                                          "(PB_TOKEN/PB_ADMIN_EMAIL unset "
+                                          "or .pocketbase down)")
+
+    def _hb_check_wt_observe(self):
+        """(3) WunderTrading observe fold — the last per-bot read."""
+        lo = self.state.get("last_observe")
+        if not isinstance(lo, dict) or not lo:
+            return False, "no observe result yet"
+        errs = [k for k, v in lo.items()
+                if isinstance(v, dict) and v.get("error")]
+        if errs:
+            return False, f"observe errors: {','.join(sorted(errs)[:4])}"
+        return True, f"{len(lo)} bot(s) observed clean"
+
+    def _hb_check_screen_fresh(self, stale_s):
+        """(4) screen cache age vs the staleness bound."""
+        at = (self.state.get("screen_cache") or {}).get("at")
+        try:
+            age = time.time() - float(at)
+        except (TypeError, ValueError):
+            return False, "no screen cache"
+        return (age <= stale_s), f"age {int(max(age, 0))}s (bound {int(stale_s)}s)"
+
+    def _hb_check_optimizer_fresh(self):
+        """(5) fast optimizer liveness — 3× its own interval."""
+        if not getattr(self, "optimizer", None):
+            return True, "optimizer unavailable (import failed) — skipped"
+        opt_s = self.optimizer_interval_s() or 0
+        if not opt_s:
+            return True, "optimizer disabled — skipped"
+        last = ((self.state.get("optimizer") or {}).get("last_at"))
+        try:
+            age = time.time() - float(last)
+        except (TypeError, ValueError):
+            return False, "no optimizer cycle yet"
+        bound = 3 * opt_s
+        return (age <= bound), f"last cycle {int(max(age, 0))}s ago (bound {int(bound)}s)"
+
+    def _hb_check_po_fresh(self):
+        """(6) position-optimizer per-bot recency — generous 2 h bound
+        (2× the interval + cooldown design window)."""
+        bots = self.state.get("active_bots") or {}
+        if not bots:
+            return True, "no active bots — skipped"
+        stale = []
+        for slot_key, bot in bots.items():
+            po = (bot or {}).get("position_optimizer") or {}
+            last = po.get("last_analyzed_at")
+            try:
+                age = time.time() - float(last)
+            except (TypeError, ValueError):
+                age = None
+            if age is None or age > 7200:
+                stale.append(str(slot_key))
+        return (not stale), (f"not analyzed in 2h: {','.join(stale[:5])}"
+                             if stale else "all bots analyzed in window")
+
+    def _hb_check_journal_errors(self, warn_rate):
+        """(7) journal -error fraction over the trailing hour."""
+        now = time.time()
+        in_hour = err = 0
+        for ev in self.state.get("journal") or []:
+            if not isinstance(ev, dict):
+                continue
+            try:
+                age = now - datetime.fromisoformat(
+                    str(ev.get("at"))).timestamp()
+            except (ValueError, TypeError, OSError):
+                continue  # unparseable/missing stamp → outside the window
+            if age > 3600 or age < -300:
+                continue
+            in_hour += 1
+            if str(ev.get("kind") or "").endswith("-error"):
+                err += 1
+        rate = (err / in_hour) if in_hour else 0.0
+        return (rate < warn_rate), f"{err}/{in_hour} error entries ({rate:.0%})"
+
+    def _hb_check_pnl_feed(self):
+        """(8) pnl-snapshot feed — exists within 2× its interval."""
+        pnl_s = self._pnl_snapshot_interval_s()
+        if not pnl_s:
+            return True, "pnl snapshots disabled — skipped"
+        now = time.time()
+        freshest = None
+        for ev in reversed(self.state.get("journal") or []):
+            if isinstance(ev, dict) and ev.get("kind") == "pnl-snapshot":
+                try:
+                    freshest = now - datetime.fromisoformat(
+                        str(ev.get("at"))).timestamp()
+                except (ValueError, TypeError, OSError):
+                    freshest = None
+                break
+        if freshest is None:
+            return False, "no pnl-snapshot in the journal ring"
+        return (freshest <= 2 * pnl_s), \
+            f"last snapshot {int(max(freshest, 0))}s ago (bound {int(2 * pnl_s)}s)"
+
+    def heartbeat_cycle(self, dry_run=True):
+        """One loop-health pass: 8 fail-soft checks, a 0–100 score, and
+        SAFE improving nudges (queue_rescreen/queue_optimize — the same
+        auto paths the optimizer uses, demo-cap gated) when a feed goes
+        stale. Never raises: a heartbeat failure must never crash the
+        manage loop."""
+        try:
+            cfg = self._heartbeat_cfg()
+            if not cfg.get("enabled", True):
+                return None
+            stale_s = 2400.0
+            warn_rate = 0.3
+            try:
+                stale_s = float(cfg.get("screen_stale_s", 2400))
+                warn_rate = float(cfg.get("error_rate_warn", 0.3))
+            except (TypeError, ValueError):
+                pass
+            checks = {}
+            for name, fn in (
+                    ("tvcli_health", self._hb_check_tvcli),
+                    ("pocketbase", self._hb_check_pocketbase),
+                    ("wt_observe", self._hb_check_wt_observe),
+                    ("screen_fresh", lambda: self._hb_check_screen_fresh(stale_s)),
+                    ("optimizer_fresh", self._hb_check_optimizer_fresh),
+                    ("po_fresh", self._hb_check_po_fresh),
+                    ("journal_errors", lambda: self._hb_check_journal_errors(warn_rate)),
+                    ("pnl_feed", self._hb_check_pnl_feed)):
+                try:
+                    ok, detail = fn()
+                    checks[name] = {"ok": bool(ok),
+                                    "detail": str(detail)[:120]}
+                except Exception as exc:  # a broken check ≠ a broken loop
+                    checks[name] = {"ok": False,
+                                    "detail": f"check error: {str(exc)[:80]}"}
+            passed = sum(1 for c in checks.values() if c["ok"])
+            total = len(checks) or 1
+            score = round(100 * passed / total)
+            failed = [n for n, c in checks.items() if not c["ok"]]
+
+            # improving actions — only when actionable and NOT dry-run
+            nudges = []
+            if not dry_run:
+                try:
+                    if not checks["screen_fresh"]["ok"] \
+                            and self.queue_rescreen():
+                        nudges.append("rescreen queued (screen cache stale)")
+                except Exception:
+                    pass
+                try:
+                    # set the flag directly (queue_optimize journals a
+                    # "manual" message that would mislead here); the
+                    # manage loop's fast-lane branch consumes it
+                    if not checks["optimizer_fresh"]["ok"] \
+                            and getattr(self, "optimizer", None):
+                        with self._lock:
+                            self._optimize_flag = True
+                        nudges.append("optimize queued (optimizer stale)")
+                except Exception:
+                    pass
+            for why in nudges:
+                log(self.state, {"kind": "heartbeat-nudge", "msg": why})
+
+            state_block = {"at": utcnow(), "score": score,
+                           "checks": {k: dict(v) for k, v in checks.items()},
+                           "nudges": list(nudges)}
+            self.state["heartbeat"] = state_block
+            msg = (f"heartbeat score {score}/100 · {passed}/{total} checks"
+                   + (f" · {', '.join(failed)}" if failed else ""))
+            log(self.state, {"kind": "heartbeat", "score": score,
+                             "checks": {k: dict(v) for k, v in checks.items()},
+                             "msg": msg})
+            return state_block
+        except Exception as exc:
+            try:
+                log(self.state, {"kind": "heartbeat-error",
+                                "msg": str(exc)[:160]})
+            except Exception:
+                pass
+            return None
+
+    def _po_hunt_structure(self, bot):
+        """Compact tvcli structure snapshot for ONE bot (PO hunt_fn).
+
+        Feeds position_optimizer._analyze's rec["tvcli_structure"] with
+        the 15m squeeze + choppiness read — the same tape the fast
+        optimizer hunts — so slow-loop recommendations carry the current
+        volatility context (is a recenter being proposed INTO a squeeze?).
+        TV symbol convention mirrors screen/merge.py: BINANCE:<SYM>USDT
+        for BOTH venues (HL perps mirror Binance symbols). Exactly 2
+        skills, one /hunt batch each; the engine only calls this on
+        re-analyzed (cooldown-gated) bots, so it stays cheap.
+        Fail-soft: ANY import/hunt/extract failure returns None — a dead
+        tvcli must never break the PO cycle."""
+        try:
+            symbol = str((bot or {}).get("symbol") or "").upper().strip()
+            if not symbol:
+                return None
+            from merge import tv_hunt  # screen/merge.py (sys.path'd)
+            tv_symbol = f"BINANCE:{symbol}USDT"
+            out = {"at": time.time()}
+            sq = (tv_hunt("squeeze", [tv_symbol],
+                          timeframe="15m", bars=96).get(tv_symbol) or {})
+            ch = (tv_hunt("choppiness", [tv_symbol],
+                          timeframe="15m", bars=96).get(tv_symbol) or {})
+            sqs = (sq.get("result") or {}).get("structure") or {}
+            chs = (ch.get("result") or {}).get("structure") or {}
+            out["squeeze"] = {"squeezeOn": bool(sqs.get("squeezeOn")),
+                              "squeezeBars": sqs.get("squeezeBars"),
+                              "momentumDir": sqs.get("momentumDir")}
+            out["choppiness"] = {"chop": chs.get("chop"),
+                                 "regime": chs.get("regime")}
+            return out
+        except Exception:
+            return None
 
     # ── position-optimizer apply path (audit 2026-09-06 fix #2) ──────
     # Only edit-type GEOMETRY recs are ever eligible: recenter / widen /
@@ -3661,6 +4003,11 @@ class Daemon:
         next_po = time.time() + po_s
         pnl_s = self._pnl_snapshot_interval_s()
         next_pnl = time.time() + (pnl_s or 0)
+        # heartbeat: first pass shortly after startup (~60s) so the
+        # console shows a score before the first full interval elapses,
+        # then on its own cadence (fail-soft, never blocks the loop)
+        hb_s = self._heartbeat_interval_s()
+        next_heartbeat = time.time() + min(60.0, hb_s)
         while True:
             if os.path.exists(os.path.join(HERE, "KILL")):
                 log(self.state, {"kind": "kill", "msg": "KILL file — halting"})
@@ -3719,6 +4066,15 @@ class Daemon:
                                      "msg": str(exc)[:200],
                                      "tb": traceback.format_exc(limit=6)[-800:]})
                 next_po = now + po_s
+            # observability: loop-health heartbeat on its own cadence
+            # (enabled=false turns it off); fail-soft — never blocks the loop
+            if hb_s and now >= next_heartbeat:
+                try:
+                    self.heartbeat_cycle(dry_run=dry_run)
+                except Exception as exc:
+                    log(self.state, {"kind": "heartbeat-error",
+                                    "msg": str(exc)[:160]})
+                next_heartbeat = time.time() + hb_s
             # observability: fleet PnL snapshot on its own cadence
             # (0 = off); fail-soft — never blocks the manage loop
             if pnl_s and now >= next_pnl:
@@ -3743,7 +4099,8 @@ class Daemon:
             nxt = min(next_health, next_rescreen, next_reliability,
                       next_optimize if optimize_s else next_health,
                       next_po if po_s else next_health,
-                      next_pnl if pnl_s else next_health)
+                      next_pnl if pnl_s else next_health,
+                      next_heartbeat if hb_s else next_health)
             time.sleep(max(1.0, min(10.0, nxt - time.time())))
 
 

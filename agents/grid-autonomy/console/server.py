@@ -43,6 +43,11 @@ API (all JSON):
                               pb.env when public read is empty), falling
                               back to state.json's journal array
                               → {points: [{at, fleet{…}}]} newest-first
+    GET  /api/position-sweeps position-optimizer sweep history — journal
+                              ring entries of kind position-optimizer-sweep /
+                              position-optimizer / position-optimizer-applied
+                              from state.json (fail-soft when absent)
+                              → {sweeps: [{…}]} newest-first, last 25
     GET  /api/meta            ports, paths, versions
     POST /api/ctl/rescreen    queue an immediate rescreen     {confirm}
     POST /api/ctl/optimize    queue an immediate fast-optimizer
@@ -542,6 +547,24 @@ def _tier(stats: dict) -> str:
     if samples >= LADDER["probe_samples"]:
         return "probe"
     return "base"
+
+
+POSITION_OPTIMIZER_JOURNAL_KINDS = {
+    "position-optimizer-sweep", "position-optimizer", "position-optimizer-applied"}
+
+
+def position_sweeps_payload(limit=25):
+    """Last position-optimizer journal events from state.json's ring
+    (newest first, capped at `limit`). Fail-soft: a missing/corrupt state
+    file yields [] — the UI shows its empty state, never a 500."""
+    try:
+        journal = _load_state().get("journal") or []
+    except Exception:
+        return []
+    sweeps = [e for e in journal
+              if isinstance(e, dict)
+              and e.get("kind") in POSITION_OPTIMIZER_JOURNAL_KINDS]
+    return sweeps[-limit:][::-1]
 
 
 def reliability_payload() -> dict:
@@ -1344,6 +1367,9 @@ class Handler(BaseHTTPRequestHandler):
                        {"error": "ctl unreachable", "detail": body})
         elif route == "/api/pnl":
             self._json(200, pnl_payload())
+        elif route == "/api/position-sweeps":
+            self._json(200, {"sweeps": position_sweeps_payload(
+                int(q1("limit", 25)))})
         elif route == "/api/reports":
             self._json(200, {"reports": reports_index()})
         elif route.startswith("/api/reports/"):

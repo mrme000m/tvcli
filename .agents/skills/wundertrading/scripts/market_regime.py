@@ -20,11 +20,13 @@ The recommendation is a STARTING POINT — verify against the playbook matrix
 in references/strategy-playbook.md and user constraints before executing.
 """
 import argparse
+import collections
 import json
 import math
 import os
 import ssl
 import sys
+import time
 import urllib.request
 from datetime import datetime, timezone
 
@@ -92,6 +94,57 @@ def args_window_ms(limit, interval):
 # US-datacenter IPs). The daemon sets TVCLI_SERVER to the in-container serve.
 TVCLI_SERVER = os.environ.get("TVCLI_SERVER", "http://127.0.0.1:8765")
 
+# ── fetch-chain attribution (observability only) ───────────────────────
+# Nothing logged WHERE candles came from: a geo-block silently degrades the
+# whole pipeline from direct REST to the vision mirror to tvcli and the
+# operator can't tell. FETCH_EVENTS is a bounded ring recording which hop
+# served each fetch; consumers (position-optimizer sweep journal, console)
+# read it via fetch_events_tail() without touching the fetch path itself.
+# Recording is fail-soft by construction and never changes fetch_candles'
+# return contract (list of candle rows).
+FETCH_EVENTS = collections.deque(maxlen=200)
+
+
+def _record_fetch_event(venue, symbol, interval, hop, rows, ms):
+    """Append one {ts, venue, symbol, interval, hop, rows, ms} event for the
+    hop that served the data (direct | vision | tvcli). Under
+    MARKET_REGIME_DEBUG=1 also prints one compact stderr line per fetch.
+    Never raises into the fetch path."""
+    try:
+        event = {
+            "ts": time.time(),
+            "venue": venue,
+            "symbol": symbol,
+            "interval": interval,
+            "hop": hop,
+            "rows": len(rows or []),
+            "ms": int(ms),
+        }
+        FETCH_EVENTS.append(event)
+        if os.environ.get("MARKET_REGIME_DEBUG", "").strip().lower() \
+                in ("1", "true", "yes"):
+            print(f"[market-regime] {venue}:{symbol} {interval} <- {hop} "
+                  f"({event['rows']} rows, {event['ms']} ms)",
+                  file=sys.stderr)
+    except Exception:
+        pass
+
+
+def fetch_events_tail(n=50):
+    """The last n fetch attribution events, oldest-first (newest last).
+    Fail-soft: any error → []."""
+    try:
+        events = list(FETCH_EVENTS)
+    except Exception:
+        return []
+    try:
+        n = int(n)
+    except (TypeError, ValueError):
+        return []
+    if n <= 0:
+        return []
+    return events[-n:]
+
 
 def fetch_candles(exchange, symbol, interval, limit, market="spot"):
     """OHLCV rows [(open, high, low, close), ...] oldest-first, fail-soft.
@@ -111,15 +164,27 @@ def fetch_candles(exchange, symbol, interval, limit, market="spot"):
     errors = []
     if exchange == "binance":
         try:
-            return _binance_mirror(symbol, interval, limit)
+            t0 = time.time()
+            rows = _binance_mirror(symbol, interval, limit)
+            _record_fetch_event(exchange, symbol, interval, "vision",
+                                rows, (time.time() - t0) * 1000)
+            return rows
         except Exception as exc:
             errors.append(f"vision: {exc}")
     try:
-        return _fetch_direct(exchange, symbol, interval, limit, market)
+        t0 = time.time()
+        rows = _fetch_direct(exchange, symbol, interval, limit, market)
+        _record_fetch_event(exchange, symbol, interval, "direct",
+                            rows, (time.time() - t0) * 1000)
+        return rows
     except Exception as exc:  # noqa: BLE001 — chain to the next source
         errors.append(f"{exchange}: {exc}")
     try:
-        return fetch_candles_tvcli(exchange, symbol, interval, limit, market)
+        t0 = time.time()
+        rows = fetch_candles_tvcli(exchange, symbol, interval, limit, market)
+        _record_fetch_event(exchange, symbol, interval, "tvcli",
+                            rows, (time.time() - t0) * 1000)
+        return rows
     except Exception as exc:
         errors.append(f"tvcli: {exc}")
     raise RuntimeError("candle fetch failed — " + " | ".join(errors))

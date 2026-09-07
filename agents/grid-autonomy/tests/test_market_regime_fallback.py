@@ -185,6 +185,136 @@ class FallbackChainTest(unittest.TestCase):
         self.assertEqual(rows, tvcli_rows)
 
 
+class FetchAttributionTest(unittest.TestCase):
+    """FETCH_EVENTS ring: whichever hop served the candles records a
+    {ts, venue, symbol, interval, hop, rows, ms} event — nothing logged
+    WHERE data came from before, so a silent geo-block degradation (all
+    fetches now tvcli) was invisible."""
+
+    def setUp(self):
+        market_regime.FETCH_EVENTS.clear()
+
+    def _patch(self, direct=None, mirror=None, tvcli=None):
+        m = mock.patch.object
+        ps = [m(market_regime, "_fetch_direct",
+                side_effect=direct if direct is not None
+                else lambda e, s, i, l, mk: _rows())]
+        if mirror is not None:
+            ps.append(m(market_regime, "_binance_mirror",
+                        side_effect=mirror))
+        if tvcli is not None:
+            ps.append(m(market_regime, "fetch_candles_tvcli",
+                        side_effect=tvcli))
+        for p_ in ps:
+            p_.start()
+        self.addCleanup(lambda: [p_.stop() for p_ in ps])
+
+    def _last(self):
+        return market_regime.fetch_events_tail(1)[-1]
+
+    def test_direct_hop_recorded(self):
+        rows = _rows(5, 111.0)
+        ps = [mock.patch.object(market_regime, "_fetch_direct",
+                                return_value=rows)]
+        for p_ in ps:
+            p_.start()
+        self.addCleanup(lambda: [p_.stop() for p_ in ps])
+        out = market_regime.fetch_candles("hyperliquid", "BTC", "1h", 5)
+        self.assertEqual(out, rows)
+        ev = self._last()
+        self.assertEqual(ev["hop"], "direct")
+        self.assertEqual(ev["venue"], "hyperliquid")
+        self.assertEqual(ev["symbol"], "BTC")
+        self.assertEqual(ev["interval"], "1h")
+        self.assertEqual(ev["rows"], 5)
+        self.assertIsInstance(ev["ms"], int)
+        self.assertIsInstance(ev["ts"], float)
+        self.assertEqual(set(ev), {"ts", "venue", "symbol", "interval",
+                                   "hop", "rows", "ms"})
+
+    def test_vision_hop_recorded(self):
+        # binance: the vision mirror serves → hop "vision"; direct unused
+        rows = _rows(3, 222.0)
+        direct = mock.Mock(side_effect=AssertionError("direct must not run"))
+        self._patch(direct=direct, mirror=lambda s, i, l: rows)
+        out = market_regime.fetch_candles("binance", "GIGGLEUSDT", "1h", 3)
+        self.assertEqual(out, rows)
+        self.assertEqual(self._last()["hop"], "vision")
+        self.assertEqual(self._last()["symbol"], "GIGGLEUSDT")
+
+    def test_tvcli_hop_recorded(self):
+        # vision + direct both 451 → the tvcli leg serves → hop "tvcli"
+        err = lambda *a, **k: urllib.error.HTTPError(
+            "https://example/x", 451, "Unavailable For Legal Reasons",
+            None, None)
+        rows = _rows(2, 333.0)
+        self._patch(direct=mock.Mock(side_effect=err()),
+                    mirror=mock.Mock(side_effect=err()),
+                    tvcli=lambda e, s, i, l, mk: rows)
+        out = market_regime.fetch_candles("binance", "GIGGLEUSDT", "1h", 2)
+        self.assertEqual(out, rows)
+        self.assertEqual(self._last()["hop"], "tvcli")
+
+    def test_failed_fetch_records_nothing(self):
+        # every hop raising → no event (attribution only for served data)
+        err = lambda *a, **k: urllib.error.HTTPError(
+            "https://example/x", 451, "Unavailable For Legal Reasons",
+            None, None)
+        self._patch(direct=mock.Mock(side_effect=err()),
+                    mirror=mock.Mock(side_effect=err()),
+                    tvcli=mock.Mock(side_effect=RuntimeError("tvcli down")))
+        with self.assertRaises(RuntimeError):
+            market_regime.fetch_candles("binance", "GIGGLEUSDT", "1h", 2)
+        self.assertEqual(market_regime.fetch_events_tail(50), [])
+
+    def test_fetch_events_tail_newest_last_and_capped(self):
+        def direct(e, s, i, l, mk):
+            return _rows(1, 400.0 + int(s[1:]))
+        ps = [mock.patch.object(market_regime, "_fetch_direct",
+                                side_effect=direct)]
+        for p_ in ps:
+            p_.start()
+        self.addCleanup(lambda: [p_.stop() for p_ in ps])
+        for i in range(7):
+            market_regime.fetch_candles("hyperliquid", f"S{i}", "15m", 1)
+        tail = market_regime.fetch_events_tail(3)
+        self.assertEqual([e["symbol"] for e in tail], ["S4", "S5", "S6"])
+        self.assertEqual(market_regime.fetch_events_tail(50)[-1]["symbol"],
+                         "S6")
+        self.assertEqual(market_regime.fetch_events_tail(0), [])
+
+    def test_ring_is_bounded(self):
+        ps = [mock.patch.object(market_regime, "_fetch_direct",
+                                return_value=_rows(1))]
+        for p_ in ps:
+            p_.start()
+        self.addCleanup(lambda: [p_.stop() for p_ in ps])
+        for _ in range(market_regime.FETCH_EVENTS.maxlen + 5):
+            market_regime.fetch_candles("hyperliquid", "BTC", "1h", 1)
+        self.assertEqual(len(market_regime.FETCH_EVENTS),
+                         market_regime.FETCH_EVENTS.maxlen)
+
+    def test_debug_env_prints_one_stderr_line(self):
+        ps = [mock.patch.object(market_regime, "_fetch_direct",
+                                return_value=_rows(2))]
+        for p_ in ps:
+            p_.start()
+        self.addCleanup(lambda: [p_.stop() for p_ in ps])
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, {"MARKET_REGIME_DEBUG": "1"}), \
+                mock.patch("sys.stderr", buf):
+            market_regime.fetch_candles("hyperliquid", "BTC", "1h", 2)
+        line = buf.getvalue().strip()
+        self.assertIn("hyperliquid:BTC 1h", line)
+        self.assertIn("direct", line)
+        # without the env var: no stderr chatter
+        buf2 = io.StringIO()
+        with mock.patch.dict(os.environ, {"MARKET_REGIME_DEBUG": ""}), \
+                mock.patch("sys.stderr", buf2):
+            market_regime.fetch_candles("hyperliquid", "BTC", "1h", 2)
+        self.assertEqual(buf2.getvalue(), "")
+
+
 class ConfluenceOkTest(unittest.TestCase):
     def _load(self):
         sys.path.insert(0, GRID)

@@ -463,5 +463,227 @@ class TestPostDeploy(unittest.TestCase):
         self.assertEqual(bot["position_optimizer"]["last_analyzed_at"], NOW)
 
 
+class TestLastBotFields(unittest.TestCase):
+    """Per-bot position_optimizer bookkeeping: what was recommended, how
+    confident, why it ran, and WHICH data hop served the candles."""
+
+    def setUp(self):
+        # _last_fetch_hop reads market_regime.FETCH_EVENTS (lazy import in
+        # the engine); seed it hermetically and reset between tests
+        sys.path.insert(0, po.WUN_SCRIPTS)
+        import market_regime
+        self.mr = market_regime
+        market_regime.FETCH_EVENTS.clear()
+
+    def tearDown(self):
+        self.mr.FETCH_EVENTS.clear()
+
+    def test_last_fields_written_on_keep(self):
+        bot = flat_bot()  # aligned channel → keep
+        opt, _, _ = make_optimizer()
+        rec = opt.analyze_bot(bot, "7", trigger="periodic", now=NOW)
+        self.assertEqual(rec["recommendation"], "keep")
+        bk = bot["position_optimizer"]
+        self.assertEqual(bk["last_analyzed_at"], NOW)
+        self.assertEqual(bk["last_recommendation"], "keep")
+        self.assertEqual(bk["last_trigger"], "periodic")
+        self.assertEqual(bk["last_delta_pct"], 0.0)
+        self.assertEqual(bk["last_confidence"], rec["confidence"])
+        # injected fetcher records no events → hop unknown, fail-soft
+        self.assertIsNone(bk["last_fetch_hop"])
+
+    def test_last_delta_pct_rounded_to_two(self):
+        bot = flat_bot()
+        bot["channel"]["mid"] = 90.0     # drift → recenter
+        bot["observed"]["fills_24h"] = 5
+        opt, _, _ = make_optimizer()
+        rec = opt.analyze_bot(bot, "7", trigger="periodic", now=NOW)
+        self.assertEqual(rec["recommendation"], "recenter")
+        bk = bot["position_optimizer"]
+        self.assertEqual(bk["last_delta_pct"], round(rec["expected_delta_pct"], 2))
+        self.assertEqual(bk["last_trigger"], "periodic")
+        self.assertIsNotNone(bk["last_confidence"])
+
+    def test_last_fetch_hop_read_from_fetch_events(self):
+        # a matching event (symbol + interval) surfaces its hop
+        bot = flat_bot()  # hyperliquid HYPE
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 60, "venue": "hyperliquid", "symbol": "HYPE",
+             "interval": "1h", "hop": "vision", "rows": 300, "ms": 42})
+        opt, _, _ = make_optimizer()
+        opt.analyze_bot(bot, "7", now=NOW)
+        self.assertEqual(bot["position_optimizer"]["last_fetch_hop"],
+                         "vision")
+
+    def test_last_fetch_hop_newest_matching_event_wins(self):
+        bot = flat_bot()
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 120, "venue": "hyperliquid", "symbol": "HYPE",
+             "interval": "1h", "hop": "direct", "rows": 300, "ms": 42})
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 60, "venue": "hyperliquid", "symbol": "HYPE",
+             "interval": "1h", "hop": "tvcli", "rows": 300, "ms": 42})
+        opt, _, _ = make_optimizer()
+        opt.analyze_bot(bot, "7", now=NOW)
+        self.assertEqual(bot["position_optimizer"]["last_fetch_hop"],
+                         "tvcli")
+
+    def test_last_fetch_hop_binance_symbol_and_interval_match(self):
+        # the fetch uses the FULL pair (ROBO → ROBOUSDT) on interval 1h;
+        # a 15m event or a base-symbol event must not match
+        bot = flat_bot(venue="binance", symbol="ROBO")
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 90, "venue": "binance", "symbol": "ROBO",
+             "interval": "1h", "hop": "direct", "rows": 300, "ms": 42})
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 60, "venue": "binance", "symbol": "ROBOUSDT",
+             "interval": "15m", "hop": "tvcli", "rows": 96, "ms": 42})
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 30, "venue": "binance", "symbol": "ROBOUSDT",
+             "interval": "1h", "hop": "vision", "rows": 300, "ms": 42})
+        opt, _, _ = make_optimizer()
+        opt.analyze_bot(bot, "3", now=NOW)
+        self.assertEqual(bot["position_optimizer"]["last_fetch_hop"],
+                         "vision")
+
+
+class TestSweepJournal(unittest.TestCase):
+    """cycle() journals ONE compact position-optimizer-sweep entry per
+    noteworthy cycle (rec / fetch failure / first / ≥2h) so all-keep
+    periodic passes do not flood the 200-entry state journal ring."""
+
+    def setUp(self):
+        sys.path.insert(0, po.WUN_SCRIPTS)
+        import market_regime
+        self.mr = market_regime
+        market_regime.FETCH_EVENTS.clear()
+
+    def tearDown(self):
+        self.mr.FETCH_EVENTS.clear()
+
+    def _sweeps(self, journal):
+        return [e for e in journal.events
+                if e.get("kind") == "position-optimizer-sweep"]
+
+    def test_first_cycle_journals_full_sweep(self):
+        bots = {str(i): flat_bot() for i in range(3)}
+        opt, journal, _ = make_optimizer()
+        recs = opt.cycle(bots, dry_run=True, now=NOW)
+        self.assertEqual(len(recs), 3)
+        sweeps = self._sweeps(journal)
+        self.assertEqual(len(sweeps), 1)
+        ev = sweeps[0]
+        for key in ("msg", "analyzed", "skipped_cooldown", "keeps",
+                    "recs", "fetch_failures", "fetch_hops", "at"):
+            self.assertIn(key, ev)
+        self.assertEqual(ev["analyzed"], 3)
+        self.assertEqual(ev["keeps"], 3)
+        self.assertEqual(ev["recs"], [])
+        self.assertEqual(ev["fetch_failures"], [])
+        self.assertEqual(ev["fetch_hops"], {})
+        self.assertEqual(ev["skipped_cooldown"], 0)
+        self.assertIn("3 bots: 3 keep, 0 recs", ev["msg"])
+        self.assertIn("0 fetch failures", ev["msg"])
+
+    def test_all_keep_within_2h_is_silent_but_stats_computed(self):
+        opt, journal, _ = make_optimizer()
+        opt.cycle({"7": flat_bot()}, dry_run=True, now=NOW)
+        # 65 min later: cooldown passed, all keep, nothing notable → the
+        # state journal stays quiet …
+        opt.cycle({"7": flat_bot()}, dry_run=True, now=NOW + 65 * 60)
+        self.assertEqual(len(self._sweeps(journal)), 1)
+        # … but the stats were still computed and are readable
+        st = opt.last_sweep_stats
+        self.assertIsNotNone(st)
+        self.assertEqual(st["analyzed"], 1)
+        self.assertEqual(st["keeps"], 1)
+        self.assertEqual(st["skipped_cooldown"], 0)
+        self.assertEqual(st["fetch_failures"], [])
+        self.assertIn("1 bots: 1 keep, 0 recs", st["msg"])
+
+    def test_non_keep_rec_journals_within_2h(self):
+        bot = flat_bot()
+        bot["channel"]["mid"] = 90.0     # drift → recenter
+        bot["observed"]["fills_24h"] = 5
+        opt, journal, _ = make_optimizer()
+        opt.cycle({"7": flat_bot()}, dry_run=True, now=NOW)  # first
+        opt.cycle({"8": bot}, dry_run=True, now=NOW + 65 * 60)
+        sweeps = self._sweeps(journal)
+        self.assertEqual(len(sweeps), 2)
+        ev = sweeps[-1]
+        self.assertEqual(ev["analyzed"], 1)
+        self.assertEqual(ev["keeps"], 0)
+        self.assertEqual(len(ev["recs"]), 1)
+        self.assertEqual(ev["recs"][0]["slot"], "8")
+        self.assertEqual(ev["recs"][0]["symbol"], "HYPE")
+        self.assertEqual(ev["recs"][0]["rec"], "recenter")
+        self.assertIn("delta_pct", ev["recs"][0])
+
+    def test_empty_rows_fetch_failure_surfaces_in_sweep(self):
+        # silent-failure visibility: an empty candle fetch used to return
+        # None with NOTHING journaled (only exceptions were journaled)
+        opt, journal, _ = make_optimizer()
+        opt.cycle({"7": flat_bot()}, dry_run=True, now=NOW)  # first, keep
+        opt2, journal2, _ = make_optimizer(rows=[])
+        bot = flat_bot()
+        recs = opt2.cycle({"8": bot}, dry_run=True, now=NOW + 65 * 60)
+        self.assertEqual(recs, [])
+        sweeps = self._sweeps(journal2)
+        self.assertEqual(len(sweeps), 1)     # failure forces the journal
+        ev = sweeps[0]
+        self.assertEqual(ev["analyzed"], 0)
+        self.assertEqual(ev["keeps"], 0)
+        self.assertEqual(len(ev["fetch_failures"]), 1)
+        self.assertIn("hyperliquid:HYPE", ev["fetch_failures"][0])
+        self.assertIn("0 candle rows", ev["fetch_failures"][0])
+        # and the per-bot marker is readable for the next cycle too
+        self.assertIn("last_fetch_failure",
+                      bot["position_optimizer"])
+        # a later successful analysis clears the stale marker
+        opt3, _, _ = make_optimizer()
+        opt3.analyze_bot(bot, "8", now=NOW + 70 * 60)
+        self.assertNotIn("last_fetch_failure", bot["position_optimizer"])
+
+    def test_two_hours_since_last_sweep_journals_again(self):
+        opt, journal, _ = make_optimizer()
+        opt.cycle({"7": flat_bot()}, dry_run=True, now=NOW)
+        opt.cycle({"7": flat_bot()}, dry_run=True,
+                  now=NOW + 2 * 3600)      # exactly 2h → due
+        self.assertEqual(len(self._sweeps(journal)), 2)
+
+    def test_skipped_cooldown_counted(self):
+        bot = flat_bot()
+        bot["position_optimizer"] = {"last_analyzed_at": NOW - 600}
+        opt, journal, _ = make_optimizer()
+        recs = opt.cycle({"7": bot}, dry_run=True, now=NOW)  # 10min < 60
+        self.assertEqual(recs, [])
+        sweeps = self._sweeps(journal)
+        self.assertEqual(len(sweeps), 1)
+        self.assertEqual(sweeps[0]["skipped_cooldown"], 1)
+        self.assertIn("0 bots: 0 keep, 0 recs", sweeps[0]["msg"])
+
+    def test_fetch_hops_counted_per_hop(self):
+        # two analyzed bots whose fetches were served by different hops
+        bots = {"7": flat_bot(symbol="HYPE"), "8": flat_bot(symbol="PUMP")}
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 60, "venue": "hyperliquid", "symbol": "HYPE",
+             "interval": "1h", "hop": "vision", "rows": 300, "ms": 42})
+        self.mr.FETCH_EVENTS.append(
+            {"ts": NOW - 30, "venue": "hyperliquid", "symbol": "PUMP",
+             "interval": "1h", "hop": "tvcli", "rows": 300, "ms": 42})
+        opt, journal, _ = make_optimizer()
+        recs = opt.cycle(bots, dry_run=True, now=NOW)
+        self.assertEqual(len(recs), 2)
+        sweeps = self._sweeps(journal)
+        self.assertEqual(sweeps[0]["fetch_hops"], {"vision": 1, "tvcli": 1})
+        self.assertIn("candles tvcli 1, vision 1", sweeps[0]["msg"])
+
+    def test_no_candidates_no_sweep(self):
+        # empty fleet (or disabled engine) → cycle returns early, no entry
+        opt, journal, _ = make_optimizer()
+        self.assertEqual(opt.cycle({}, dry_run=True, now=NOW), [])
+        self.assertEqual(self._sweeps(journal), [])
+
+
 if __name__ == "__main__":
     unittest.main()

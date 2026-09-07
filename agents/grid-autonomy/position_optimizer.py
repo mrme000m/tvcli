@@ -477,6 +477,10 @@ class PositionOptimizer:
     market_regime.fetch_candles — the module itself stays import-clean.
     """
 
+    # periodic all-keep sweeps journal at most this often (the state
+    # journal is a 200-entry ring — flooding it hides real events)
+    SWEEP_JOURNAL_INTERVAL_S = 2 * 3600
+
     def __init__(self, cfg=None, journal_fn=None, persist_fn=None,
                  fetch_candles_fn=None, hunt_fn=None, now_fn=None):
         merged = dict(POSITION_OPTIMIZER_DEFAULTS)
@@ -489,6 +493,12 @@ class PositionOptimizer:
         self.hunt_fn = hunt_fn
         self.now_fn = now_fn or (lambda: time.time())
         self._persisted_today = (self._day(), 0)
+        # sweep-journal frequency control: None = no sweep journaled yet
+        # (the first cycle after process start always journals once)
+        self._last_sweep_journal_at = None
+        # always-computed sweep stats from the last cycle() (even when the
+        # journal gate stays silent — operators/debuggers read this)
+        self.last_sweep_stats = None
 
     # ── small helpers ────────────────────────────────────────────────
     def _now(self):
@@ -600,6 +610,82 @@ class PositionOptimizer:
         """Public persistence hook (daemon/console may call directly)."""
         return self._persist(rec)
 
+    def _note_fetch_failure(self, bot, venue, symbol, detail):
+        """Silent-failure visibility: an empty/invalid candle fetch used
+        to vanish (analyze_bot → None, nothing journaled — only fetch
+        EXCEPTIONS were journaled). Mark it on the bot so the cycle sweep
+        can report it in fetch_failures. Fail-soft by construction."""
+        try:
+            po = bot.get("position_optimizer")
+            po = po if isinstance(po, dict) else {}
+            po["last_fetch_failure"] = f"{venue}:{symbol} 1h — {detail}"
+            bot["position_optimizer"] = po
+        except Exception:
+            pass
+
+    def _last_fetch_hop(self, venue, symbol, interval):
+        """Newest market_regime.FETCH_EVENTS entry matching this bot's
+        candle fetch → which hop served the data ("direct" | "vision" |
+        "tvcli"). Lazy import, fail-soft None (an injected fetch_candles_fn
+        records no events — tests/hermetic runs get None)."""
+        try:
+            if WUN_SCRIPTS not in sys.path:
+                sys.path.insert(0, WUN_SCRIPTS)
+            from market_regime import FETCH_EVENTS  # noqa: deferred
+            target = _fetch_symbol(venue, symbol)
+            for ev in reversed(list(FETCH_EVENTS)):
+                if not isinstance(ev, dict):
+                    continue
+                if ev.get("symbol") == target \
+                        and ev.get("interval") == interval:
+                    return ev.get("hop")
+        except Exception:
+            pass
+        return None
+
+    def _sweep_report(self, recs, skipped_cooldown, fetch_failures,
+                      fetch_hops, now, dry_run):
+        """Compact per-cycle sweep entry (journal frequency controlled in
+        cycle()). The stats are ALWAYS computed; the journal only fires on
+        noteworthy cycles (any non-keep rec, any fetch failure, first
+        cycle, or ≥ SWEEP_JOURNAL_INTERVAL_S since the last one) so the
+        200-entry state journal ring is not flooded with all-keep periodic
+        sweeps."""
+        keeps = sum(1 for r in recs if r.get("recommendation") == "keep")
+        non_keep = [r for r in recs if r.get("recommendation") != "keep"]
+        compact_recs = [{"slot": r.get("slot"), "symbol": r.get("symbol"),
+                         "rec": r.get("recommendation"),
+                         "delta_pct": r.get("expected_delta_pct")}
+                        for r in non_keep]
+        hop_txt = ", ".join(f"{hop} {n}" for hop, n in
+                            sorted((fetch_hops or {}).items())) \
+            or "no attribution"
+        msg = (f"{len(recs)} bots: {keeps} keep, {len(non_keep)} recs"
+               f" · candles {hop_txt}"
+               f" · {len(fetch_failures)} fetch failures")
+        sweep = {
+            "kind": "position-optimizer-sweep",
+            "msg": msg,
+            "analyzed": len(recs),
+            "skipped_cooldown": skipped_cooldown,
+            "keeps": keeps,
+            "recs": compact_recs,
+            "fetch_failures": list(fetch_failures or []),
+            "fetch_hops": dict(fetch_hops or {}),
+            "at": datetime.fromtimestamp(
+                now, tz=timezone.utc).isoformat(timespec="seconds"),
+            "dry_run": bool(dry_run),
+        }
+        self.last_sweep_stats = {k: v for k, v in sweep.items()
+                                 if k != "kind"}
+        noteworthy = bool(non_keep) or bool(fetch_failures)
+        due = (self._last_sweep_journal_at is None
+               or now - self._last_sweep_journal_at
+               >= self.SWEEP_JOURNAL_INTERVAL_S)
+        if noteworthy or due:
+            self._journal(sweep)
+            self._last_sweep_journal_at = now
+
     # ── the analysis pass ────────────────────────────────────────────
     def analyze_bot(self, bot, slot_key, trigger="periodic", dry_run=True,
                     now=None):
@@ -635,9 +721,14 @@ class PositionOptimizer:
         rows = self.fetch_candles_fn(venue, _fetch_symbol(venue, symbol),
                                      "1h", 300, self._market_for(venue))
         if not rows:
+            self._note_fetch_failure(bot, venue, symbol,
+                                     "fetch returned 0 candle rows")
             return None
         closes = [r[3] for r in rows if r and len(r) > 3]
         if not closes:
+            self._note_fetch_failure(
+                bot, venue, symbol,
+                f"{len(rows)} rows but none with a valid close")
             return None
         metrics = self._compute_metrics(rows) or {}
         price = _f(metrics.get("price"))
@@ -718,25 +809,39 @@ class PositionOptimizer:
                     rec["id"] = rid
                     rec["persisted"] = True
 
-        # 7. per-bot cooldown bookkeeping
+        # 7. per-bot cooldown bookkeeping (+ sweep visibility fields:
+        # what was recommended, how confident, why, and WHICH data hop
+        # served the candles — read by the cycle sweep journal)
         po = bot.setdefault("position_optimizer", {}) \
             if isinstance(bot.get("position_optimizer"), dict) \
             else {}
         bot["position_optimizer"] = po
         po["last_analyzed_at"] = now
         po["last_recommendation"] = rec["recommendation"]
+        po.pop("last_fetch_failure", None)
+        po["last_delta_pct"] = round(_f(rec.get("expected_delta_pct")), 2)
+        po["last_confidence"] = rec.get("confidence")
+        po["last_trigger"] = trigger
+        po["last_fetch_hop"] = self._last_fetch_hop(venue, symbol, "1h")
         return rec
 
     # ── the cycle ────────────────────────────────────────────────────
     def cycle(self, active_bots, dry_run=True, now=None):
         """Analyze every eligible active bot. Returns the recs (keeps
         included). Bots in error state and bots inside their cooldown are
-        skipped; nothing ever raises."""
+        skipped; nothing ever raises. After the loop ONE compact sweep
+        entry is journaled (frequency-gated: noteworthy recs / fetch
+        failures / first cycle / ≥2h) so operators can see what the
+        periodic pass found — including the previously-silent empty-fetch
+        failures."""
         recs = []
         if not self.cfg.get("enabled", True) or not active_bots:
             return recs
         now = float(now) if now is not None else self._now()
         cooldown_s = _f(self.cfg.get("cooldown_min"), 60) * 60
+        skipped_cooldown = 0
+        fetch_failures = []
+        fetch_hops = {}
         for slot_key, bot in (active_bots or {}).items():
             try:
                 if not isinstance(bot, dict):
@@ -748,13 +853,30 @@ class PositionOptimizer:
                 last = _f(po.get("last_analyzed_at"), None) \
                     if po.get("last_analyzed_at") is not None else None
                 if last and now - last < cooldown_s:
+                    skipped_cooldown += 1
                     continue
                 rec = self.analyze_bot(bot, slot_key, trigger="periodic",
                                        dry_run=dry_run, now=now)
                 if rec is not None:
                     recs.append(rec)
+                    hop = ((bot.get("position_optimizer") or {})
+                           .get("last_fetch_hop"))
+                    if hop:
+                        fetch_hops[hop] = fetch_hops.get(hop, 0) + 1
+                else:
+                    # silent-failure visibility: empty/invalid candle rows
+                    # left NO trace before — surface them in the sweep
+                    fail = ((bot.get("position_optimizer") or {})
+                            .get("last_fetch_failure"))
+                    if fail:
+                        fetch_failures.append(fail)
             except Exception:
                 continue
+        try:
+            self._sweep_report(recs, skipped_cooldown, fetch_failures,
+                               fetch_hops, now, dry_run)
+        except Exception:
+            pass
         return recs
 
     # ── entry hook ───────────────────────────────────────────────────

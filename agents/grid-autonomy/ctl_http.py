@@ -18,6 +18,7 @@ No daemon import — the served daemon instance is injected via
 """
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -26,6 +27,74 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 def _utcnow():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+# ctl-plane cache for the data-source observability block (5s — /status is
+# polled by the console this often; the tails below are cheap but must
+# never hammer the market-regime ring or disk on every call)
+_DS_TTL = 5.0
+_DS_CACHE = {"at": 0.0, "payload": None}
+
+
+def _data_sources_payload(state=None):
+    """Observability for the parallel data feeds, fail-soft on BOTH ends:
+
+      fetch_events  market_regime.fetch_events_tail(50) — the candle-hop
+                    ring (direct/vision/tvcli), IF the module + function
+                    exist (parallel worker's market_regime.py)
+      hunt_stats    the tvcli /hunt confluence counters. PRIMARY source is
+                    the daemon journal's newest kind=="screen" entry (the
+                    screen runs merge.py in a SUBPROCESS, so
+                    merge.last_hunt_stats() in this process only ever sees
+                    the in-process zero shape — kept as fallback for
+                    in-process callers).
+
+    Missing module/function/permission → the documented empty shape, so
+    the console can render "not reported yet" instead of erroring."""
+    import time as _time
+    now = _time.time()
+    if _DS_CACHE["payload"] is not None and now - _DS_CACHE["at"] < _DS_TTL:
+        return _DS_CACHE["payload"]
+    payload = {"fetch_events": [], "hunt_stats": {}}
+    try:
+        import market_regime as _mr
+        _fn = getattr(_mr, "fetch_events_tail", None)
+        if callable(_fn):
+            payload["fetch_events"] = _fn(50) or []
+    except Exception:
+        pass
+    # primary: the newest screen journal entry carries the subprocess's
+    # hunt_stats (per-skill hunted/ok, candidates boosted, errors)
+    try:
+        for ev in reversed((state or {}).get("journal") or []):
+            if isinstance(ev, dict) and ev.get("kind") == "screen":
+                hs = ev.get("hunt_stats")
+                if isinstance(hs, dict) and hs.get("skills"):
+                    payload["hunt_stats"] = hs
+                break
+    except Exception:
+        pass
+    if not payload["hunt_stats"].get("skills"):
+        try:
+            # merge.py lives in screen/ (daemon.py sys.paths it; a standalone
+            # ctl import needs the path added here, fail-soft on duplicates)
+            import merge as _merge
+            _fn = getattr(_merge, "last_hunt_stats", None)
+            if callable(_fn):
+                payload["hunt_stats"] = _fn() or {}
+        except ImportError:
+            try:
+                sys.path.insert(0, os.path.join(HERE, "screen"))
+                import merge as _merge
+                _fn = getattr(_merge, "last_hunt_stats", None)
+                if callable(_fn):
+                    payload["hunt_stats"] = _fn() or {}
+            except Exception:
+                pass
+        except Exception:
+            pass
+    _DS_CACHE["at"], _DS_CACHE["payload"] = now, payload
+    return payload
 
 
 def _cache_age(st):
@@ -79,6 +148,10 @@ def status_payload(daemon):
         "pnl": pnl,
         "demo_cap": {"cap": cap, "active": active_n,
                      "headroom": headroom},
+        # loop-health heartbeat block (None until the first cycle) + the
+        # data-feed observability tails (fail-soft empty shapes)
+        "heartbeat": st.get("heartbeat"),
+        "data_sources": _data_sources_payload(st),
     }
 
 

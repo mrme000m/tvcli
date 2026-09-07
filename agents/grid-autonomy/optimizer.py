@@ -782,9 +782,26 @@ class SlotOptimizer:
                                if isinstance(r, dict)
                                and r.get("result") is not None)
                         for s, h in hunts.items()}
+            # hunt observability: which skills errored (the {"_error":
+            # ...} fail-soft markers) and per-skill hunted/ok counts —
+            # a down tvcli used to show up only as zeros in "tvcli"
+            hunt_errors = [f"{s}: {h.get('_error')}"
+                           for s, h in (hunts or {}).items()
+                           if isinstance(h, dict) and h.get("_error")]
+            hunt_skills = {}
+            for s, h in (hunts or {}).items():
+                if not isinstance(h, dict):
+                    continue
+                entries = [r for r in h.values() if isinstance(r, dict)]
+                hunt_skills[s] = {
+                    "hunted": len(entries),
+                    "ok": sum(1 for r in entries
+                              if r.get("result") is not None)}
             report["hunt"] = {
                 "refreshed": len(refreshed),
                 "tvcli": ok_hunts,
+                "errors": hunt_errors,
+                "skills": hunt_skills,
                 "top3": [{"venue": c.get("venue"), "symbol": c.get("symbol"),
                           "regime": c.get("regime"),
                           "score_final": c.get("score_final"),

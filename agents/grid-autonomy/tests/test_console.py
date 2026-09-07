@@ -210,6 +210,32 @@ class TestShaping(ConsoleTestCase):
         self.assertEqual(scr["n_candidates"], 54)
         self.assertEqual(scr["top"][0]["symbol"], "PUMP")
 
+    def test_position_sweeps_payload(self):
+        self.write_state({"journal": [
+            {"kind": "screen", "msg": "unrelated", "at": "2026-09-07T00:00:00"},
+            {"kind": "position-optimizer", "msg": "keep hyperliquid:DOGE",
+             "at": "2026-09-07T01:00:00"},
+            {"kind": "position-optimizer-applied", "msg": "recenter slot 2",
+             "at": "2026-09-07T02:00:00"},
+            {"kind": "position-optimizer-sweep", "msg": "3 bots analyzed",
+             "at": "2026-09-07T03:00:00"},
+            {"kind": "position-optimizer-skip", "msg": "cooldown",
+             "at": "2026-09-07T04:00:00"},   # near-miss kind: excluded
+        ]})
+        sweeps = server.position_sweeps_payload()
+        self.assertEqual([e["kind"] for e in sweeps],
+                         ["position-optimizer-sweep",
+                          "position-optimizer-applied",
+                          "position-optimizer"])   # newest first, filtered
+        # limit keeps the TAIL (most recent), not the head
+        self.assertEqual(len(server.position_sweeps_payload(2)), 2)
+        self.assertEqual(server.position_sweeps_payload(2)[0]["kind"],
+                         "position-optimizer-sweep")
+
+    def test_position_sweeps_fail_soft_no_state(self):
+        # no state.json written yet → [] , never an exception
+        self.assertEqual(server.position_sweeps_payload(), [])
+
     def test_logs_grep(self):
         with open(os.path.join(server.STATE_DIR, "daemon.log"), "w") as f:
             f.write("a stale line\nb stagnant line\nc veto line\n")
@@ -308,6 +334,21 @@ class TestHTTP(ConsoleTestCase):
                                {"confirm": True, "live_paper": True})
         self.assertEqual(code, 409)
         self.assertTrue(body.get("kill_present"))
+
+    def test_position_sweeps_endpoint(self):
+        self.write_state({"journal": [
+            {"kind": "position-optimizer", "msg": "keep binance:AAA",
+             "at": "2026-09-07T05:00:00"},
+        ]})
+        code, body = self.call("/api/position-sweeps")
+        self.assertEqual(code, 200)
+        self.assertEqual(len(body["sweeps"]), 1)
+        self.assertEqual(body["sweeps"][0]["kind"], "position-optimizer")
+        # no state at all → 200 with the empty shape (fail-soft)
+        self.write_state({})
+        code, body = self.call("/api/position-sweeps")
+        self.assertEqual(code, 200)
+        self.assertEqual(body["sweeps"], [])
 
     def test_static_index_served(self):
         with urllib.request.urlopen(

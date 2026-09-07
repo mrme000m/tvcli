@@ -901,6 +901,78 @@ class TestCycle(unittest.TestCase):
         self.assertFalse(rep["refill"]["nudged"])
 
 
+class FlakyHuntHunter(StubHunter):
+    """StubHunter shape + the hunt-report error surface: one skill hard
+    failing ({"_error": ...}), one with per-symbol errors mixed in."""
+
+    def apply_structure(self, cands, skills, tf, bars):
+        hunts = {
+            "squeeze": {c["tv_symbol"]: {"result": {"structure": {}}}
+                        for c in cands if c.get("tv_symbol")},
+            "choppiness": {
+                "BINANCE:SOLUSDT": {"error": "no data"},
+                "BINANCE:PUMPUSDT": {"result": {"structure": {}}},
+                "BINANCE:DOGEUSDT": {"result": {"structure": {}}},
+            },
+            "mtf-confluence": {"_error": "tvcli down"},
+        }
+        for c in cands:
+            if c.get("symbol") == "SOL":
+                c["score_final"] = (c.get("score_final") or 0) + self.sol_bonus
+        return cands, hunts
+
+
+class TestHuntReport(unittest.TestCase):
+    """report["hunt"] surfaces WHAT the tvcli hunts found: per-skill
+    error strings and hunted/ok counts (the {"_error": ...} markers used
+    to be swallowed — only zeros in "tvcli" hinted at a down tvcli)."""
+
+    def setUp(self):
+        p = mock.patch.object(optimizer, "HAS_LLM", False)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def _cycle(self, hunter):
+        d = FakeDaemon(cycle_state(), config={
+            "optimizer": {"hunt_skills": ["squeeze", "choppiness",
+                                          "mtf-confluence"]},
+            "screen": {"open_slot_min_score": 40.0}})
+        opt = SlotOptimizer(d, journal_fn=lambda st, ev: None,
+                            hunter=hunter)
+        return opt.run_cycle(dry_run=False)
+
+    def test_hunt_errors_surface_per_skill(self):
+        rep = self._cycle(FlakyHuntHunter())
+        self.assertEqual(rep["hunt"]["errors"],
+                         ["mtf-confluence: tvcli down"])
+
+    def test_hunt_skills_counts(self):
+        rep = self._cycle(FlakyHuntHunter())
+        skills = rep["hunt"]["skills"]
+        # pool = SOL challenger + PUMP/DOGE incumbent views → 3 symbols
+        self.assertEqual(skills["squeeze"], {"hunted": 3, "ok": 3})
+        self.assertEqual(skills["choppiness"], {"hunted": 3, "ok": 2})
+        # a hard-failed skill hunted nothing
+        self.assertEqual(skills["mtf-confluence"], {"hunted": 0, "ok": 0})
+
+    def test_tvcli_counts_untouched(self):
+        # other consumers read report["hunt"]["tvcli"] — it keeps counting
+        # per-skill ok results only, errors excluded
+        rep = self._cycle(FlakyHuntHunter())
+        self.assertEqual(rep["hunt"]["tvcli"],
+                         {"squeeze": 3, "choppiness": 2,
+                          "mtf-confluence": 0})
+        self.assertEqual(rep["hunt"]["tvcli"]["choppiness"],
+                         rep["hunt"]["skills"]["choppiness"]["ok"])
+
+    def test_all_ok_hunt_reports_no_errors(self):
+        rep = self._cycle(StubHunter())
+        self.assertEqual(rep["hunt"]["errors"], [])
+        for st in rep["hunt"]["skills"].values():
+            self.assertEqual(st["ok"], st["hunted"])
+            self.assertGreater(st["hunted"], 0)
+
+
 class TestStatus(unittest.TestCase):
     def test_status_snapshot(self):
         st = cycle_state()

@@ -54,6 +54,13 @@ function relTime(iso) {
   if (s < 86400 * 2) return `${(s / 3600).toFixed(1)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+
+/* epoch-seconds variant (daemon state uses epoch floats, not ISO) */
+function relTimeEpoch(ts) {
+  const n = Number(ts);
+  if (!isFinite(n) || n <= 0) return "\u2014";
+  return relTime(new Date(n * 1000).toISOString());
+}
 const heldFor = (iso) => {
   if (!iso) return null;
   const h = (Date.now() - Date.parse(iso)) / 3600000;
@@ -162,6 +169,7 @@ async function loadOverview() {
     renderFleet(ov, st);
     renderFleetHeader(ov, st);
     renderVetoStrip(ov, st);
+    renderHeartbeatCard(st);
     renderFeed(ov.journal_tail || []);
     renderScreen(ov.screen);
     renderSummary(ov);
@@ -298,6 +306,8 @@ function slotCard(bot) {
       <div class="metric"><div class="m-label">dd vs band</div>
         <div class="m-value ${outsideBand ? "m-value--bad" : ""}">${isNum(dd) ? `${fmtNum(dd, 2)}×` : "—"}</div></div>
       <div class="metric"><div class="m-label">budget</div><div class="m-value">${fmtUsd(bot.committed)}</div></div>
+      <div class="metric"><div class="m-label" title="model-based expected grid income per 24h, net of round-trip fees">proj /24h</div>
+        <div class="m-value ${bot.projected_24h_usd > 0 ? "m-value--good" : "m-value--dim"}">${bot.projected_24h_usd == null ? "\u2014" : fmtUsd(bot.projected_24h_usd)}</div></div>
     </div>
     <div class="slot-foot">
       <span class="slot-since">held ${esc(heldFor(bot.since) ?? "—")}</span>
@@ -402,10 +412,16 @@ function renderFleet(ov, st) {
   board.innerHTML = "";
   // prefer the live ctl /status observations over state.json's last snapshot
   const liveObs = (st && st.active_bots) || {};
+  const livePnl = (st && st.pnl && typeof st.pnl.bots === "object" && st.pnl.bots) || {};
   const bots = (ov.bots || []).map((b) => {
     const lo = liveObs[String(b.slot)];
-    return (lo && lo.observed && Object.keys(lo.observed).length)
-      ? { ...b, observed: { ...b.observed, ...lo.observed } } : b;
+    const out = (lo && lo.observed && Object.keys(lo.observed).length)
+      ? { ...b, observed: { ...b.observed, ...lo.observed } } : { ...b };
+    // per-bot projected /24h income from the daemon's pnl snapshot
+    const pb = livePnl[String(b.slot)];
+    if (pb && isNum(pb.projected_24h_usd))
+      out.projected_24h_usd = Number(pb.projected_24h_usd);
+    return out;
   });
   const bySlot = new Map(bots.map((b) => [String(b.slot), b]));
   const slots = (ov.slots || []).length
@@ -515,7 +531,7 @@ function fleetPnlData(ov, st) {
      null when the running daemon predates the field. */
   const out = { source: null, realized: null, unrealized: null, net: null,
     completed: null, panic: null, fills: null,
-    committed: null, idle: null, total: null };
+    committed: null, idle: null, total: null, projected: null };
   const ab = (st && st.active_bots) || {};
   const obsList = Object.values(ab).map((b) => (b && b.observed) || {});
   const has = (f) => obsList.some((o) => isNum(o[f]));
@@ -531,6 +547,9 @@ function fleetPnlData(ov, st) {
     : (out.realized !== null || out.unrealized !== null)
       ? (out.realized || 0) + (out.unrealized || 0) : null;
   out.fills = p && isNum(p.fills_24h) ? p.fills_24h : (has("fills_24h") ? sum("fills_24h") : null);
+  // projected /24h has no per-bot fallback derivation (it needs the
+  // stagnation-policy model inputs) — present only when the daemon reports it
+  out.projected = p && isNum(p.projected_24h_usd) ? p.projected_24h_usd : null;
   const committedMap = (st && st.committed) || {};
   out.committed = p && isNum(p.committed_usd) ? p.committed_usd
     : Object.values(committedMap).reduce((a, v) => a + (isNum(v) ? Number(v) : 0), 0) || null;
@@ -579,6 +598,15 @@ function renderFleetHeader(ov, st) {
     realizedSub = `<div class="pnl-sub pnl-sub--faint" title="per-bot completed/panic split arrives with the daemon restart">split (completed/panic) not reported \u2014 daemon pre-restart</div>`;
   }
 
+  // projected /24h: model-based expected grid income (net of round-trip
+  // fees) from the daemon's /status pnl block — the instantaneous
+  // performance measure beside the realized mark
+  const proj = isNum(p.projected) ? Number(p.projected) : null;
+  const projCell = `<div class="pnl-cell" title="model-based expected grid income per 24h, net of round-trip fees">
+      <div class="m-label">proj /24h</div>
+      <div class="m-value ${proj != null && proj > 0 ? "m-value--good" : "m-value--dim"}">${proj == null ? "\u2014" : `\u2248 ${fmtUsd(proj)}`}</div>
+      <div class="pnl-sub pnl-sub--faint">expected grid income (model)</div></div>`;
+
   // demo-cap meter: 5/5 means every new deploy is vetoed at the platform cap
   let capCell;
   if (cap.cap != null && cap.cap > 0) {
@@ -614,6 +642,7 @@ function renderFleetHeader(ov, st) {
         <div class="pnl-cell"><div class="m-label">fills 24h</div>
           <div class="m-value">${p.fills == null ? "\u2014" : p.fills}</div>
           <div class="pnl-sub">${nBots} active bot${nBots === 1 ? "" : "s"}</div></div>
+        ${projCell}
         ${capCell}
       </div>
       <div class="pnl-chart">
@@ -622,6 +651,34 @@ function renderFleetHeader(ov, st) {
       </div>
     </div>`;
   drawPnlChart(lastPnlPoints || []);
+}
+
+/* heartbeat card — rendered ONLY when a check fails (a healthy heartbeat
+   is already visible as the ♥ chip in the veto strip). Lists the failed
+   checks with details + the last improving nudges. */
+function renderHeartbeatCard(st) {
+  const wrap = $("#heartbeat-wrap");
+  if (!wrap) return;
+  const hb = (st && typeof st.heartbeat === "object" && st.heartbeat) || null;
+  const failed = (hb && Object.entries(hb.checks || {})
+    .filter(([, c]) => c && !c.ok)) || [];
+  if (!hb || !failed.length) { wrap.hidden = true; wrap.innerHTML = ""; return; }
+  const score = isNum(hb.score) ? Number(hb.score) : null;
+  const nudges = (hb.nudges || []).slice(-3);
+  wrap.innerHTML = `
+    <div class="card" style="border-color:#E8C2BE">
+      <div class="card-head"><span class="card-title">Heartbeat \u2014 ${score == null ? "degraded" : `${score}/100`}</span>
+        <span class="spacer"></span><span class="mono" style="font-size:10.5px;color:var(--ink-faint)" title="last heartbeat">${esc(relTime(hb.at))}</span></div>
+      <div class="card-body"><div class="mini-kv">
+        ${failed.map(([name, c]) => `
+        <div class="row"><span class="k"><span class="badge badge--bad">${esc(name)}</span></span>
+          <span class="v" title="${esc(c.detail || "")}">${esc(c.detail || "\u2014")}</span></div>`).join("")}
+        ${nudges.length ? `
+        <div class="row"><span class="k">nudges</span>
+          <span class="v" title="improving actions taken by the heartbeat cycle">${nudges.map((n) => esc(n)).join(" \u00b7 ")}</span></div>` : ""}
+      </div></div>
+    </div>`;
+  wrap.hidden = false;
 }
 
 function renderVetoStrip(ov, st) {
@@ -639,6 +696,16 @@ function renderVetoStrip(ov, st) {
   if (guard) chips.push(`<span class="veto-chip veto-chip--warn" title="a guardrail refused a candidate">guard ${guard}</span>`);
   if (capac) chips.push(`<span class="veto-chip veto-chip--warn" title="plan/venue capacity refused a deploy">capacity ${capac}</span>`);
   chips.push(`<span class="veto-chip" title="top of the last screen board">screen top <b>${top ? `${esc(top.venue)}:${esc(top.symbol)} ${fmtNum(top.score_final, 1)}` : "\u2014"}</b></span>`);
+  // heartbeat: daemon loop-health score (state.heartbeat, ctl /status) —
+  // green ≥90, amber 70–89, red <70; the title lists failed checks
+  const hb = (st && typeof st.heartbeat === "object" && st.heartbeat) || null;
+  if (hb && isNum(hb.score)) {
+    const s = Number(hb.score);
+    const col = s >= 90 ? "var(--teal)" : s >= 70 ? "var(--amber)" : "var(--crimson)";
+    const failed = Object.entries(hb.checks || {})
+      .filter(([, c]) => c && !c.ok).map(([k]) => k);
+    chips.push(`<span class="veto-chip" style="border-color:${col};color:${col}" title="loop-health heartbeat (8 fail-soft checks)${failed.length ? ` \u00b7 failed: ${esc(failed.join(", "))}` : " \u00b7 all checks passing"}">\u2665 ${s} \u00b7 ${esc(relTime(hb.at))}</span>`);
+  }
   chips.push(`<span class="veto-chip veto-chip--dim" title="last journal event">last ${esc(relTime(last && last.at))} \u00b7 ${esc((last && last.kind) || "\u2014")}</span>`);
   box.innerHTML = `<div class="veto-cells">${chips.join("")}</div>`;
 }
@@ -858,7 +925,18 @@ async function loadOptimizer() {
   let f = null;
   try { f = await api("/api/optimizer"); }
   catch (e) { f = null; }
-  renderFastOptimizer(f);
+  // fail-soft companions: the ctl /status block (per-bot position
+  // analysis + the fleet pnl projection) and the sweep-history log
+  let st = null;
+  try { st = await api("/api/status"); }
+  catch (e) { st = null; }
+  if (!st || st.error) st = null;
+  let sweeps = null;
+  try { sweeps = await api("/api/position-sweeps"); }
+  catch (e) { sweeps = null; }
+  renderFastOptimizer(f, st);
+  renderPositionAnalysis(st, sweeps);
+  renderDataSources(st);
 }
 
 function blockedByBadge(b) {
@@ -916,7 +994,7 @@ function renderOptimizer(d) {
 
 /* ── fast slot optimizer (2–5m cadence capital reallocation) ───────── */
 
-function renderFastOptimizer(f) {
+function renderFastOptimizer(f, st) {
   const box = $("#opt-fast");
   if (!box) return;
   const o = f && f.optimizer;
@@ -946,6 +1024,7 @@ function renderFastOptimizer(f) {
       ${kv("Cycles", `${esc(o.cycles ?? "—")} · swaps ${esc(o.swaps_total ?? 0)}`, "completed cycles; total slot swaps executed through the guard/churn machinery")}
       ${kv("Last cycle", esc(relTime(o.last_at)))}
       ${kv("Capital", `${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd)} idle · ${esc(cap.free_slots ?? "—")} free slot(s)`, "deployable ceiling = free capital available to commit to challengers")}
+      ${kv("Projected /24h", (st && st.pnl && isNum(st.pnl.projected_24h_usd)) ? fmtUsd(Number(st.pnl.projected_24h_usd)) : "—", "model-based expected grid income per 24h, net of round-trip fees (from the fleet PnL snapshot)")}
     </div></div>
     <div class="card-body--tight table-wrap">
       <table class="ledger">
@@ -983,6 +1062,134 @@ function renderFastOptimizer(f) {
         </tbody>
       </table>
     </div>`;
+}
+
+/* ── position optimizer: latest per-bot analysis + sweep log ──────── */
+
+/* The Pending/Applied tables below only carry recs gated at Δ≥2% — by
+   design, so they sit empty most of the time. This card shows what the
+   engine LAST concluded per bot (state.active_bots[*].position_optimizer,
+   via ctl /status), including keeps and sub-threshold deltas, plus the
+   journal sweep log underneath. */
+function renderPositionAnalysis(st, sweeps) {
+  const box = $("#opt-latest-analysis");
+  if (!box) return;
+  const ab = (st && typeof st.active_bots === "object" && st.active_bots) || {};
+  const rows = Object.entries(ab).map(([slot, bot]) => {
+    const po = (bot && typeof bot.position_optimizer === "object"
+      && bot.position_optimizer) || {};
+    return {
+      slot, symbol: (bot || {}).symbol, venue: (bot || {}).venue,
+      rec: po.last_recommendation ?? null,
+      delta: isNum(po.last_delta_pct) ? Number(po.last_delta_pct) : null,
+      conf: isNum(po.last_confidence) ? Number(po.last_confidence) : null,
+      trigger: po.last_trigger ?? null,
+      at: po.last_analyzed_at ?? null,
+      hop: po.last_fetch_hop ?? null,
+    };
+  }).filter((r) => r.at != null || r.rec != null)
+    .sort((a, b) => (Number(b.at) || 0) - (Number(a.at) || 0));
+
+  const sweepList = (sweeps && Array.isArray(sweeps.sweeps)
+    ? sweeps.sweeps : []).slice(0, 10);
+  const recBadge = (rec) => rec === "keep"
+    ? `<span class="badge badge--dim">keep</span>`
+    : `<span class="badge badge--violet">${esc(rec || "?")}</span>`;
+
+  box.innerHTML = `
+    <div class="card-head"><span class="card-title">Latest position analysis</span>
+      <span class="spacer"></span><span class="mono" style="font-size:11px;color:var(--ink-faint)" title="per-bot last analysis from state.active_bots[*].position_optimizer (all recs, including keeps and sub-threshold Δ — the Pending/Applied tables below only carry Δ≥2% gated recs)">${rows.length} bot${rows.length === 1 ? "" : "s"} analyzed</span></div>
+    <div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr>
+          <th>slot</th><th>market</th><th>rec</th><th>Δ%</th>
+          <th>conf</th><th>trigger</th><th>analyzed</th><th>candle hop</th>
+        </tr></thead>
+        <tbody>
+          ${rows.map((r) => `<tr>
+            <td class="td-mono">${esc(r.slot)}</td>
+            <td class="td-mono"><span class="venue-tag venue-tag--${esc(r.venue || "")}">${esc(r.venue || "")}</span>:${esc(r.symbol || "?")}</td>
+            <td>${recBadge(r.rec)}</td>
+            <td class="td-mono ${(r.delta || 0) >= 0 ? "m-value--good" : "m-value--bad"}">${r.delta == null ? "\u2014" : `${r.delta >= 0 ? "+" : ""}${fmtNum(r.delta, 2)}`}</td>
+            <td class="td-mono">${r.conf == null ? "\u2014" : fmtNum(r.conf, 2)}</td>
+            <td class="td-mono">${esc(r.trigger || "\u2014")}</td>
+            <td class="td-mono" title="${esc(r.at != null ? String(r.at) : "")}">${esc(relTimeEpoch(r.at))}</td>
+            <td>${r.hop == null ? "\u2014" : `<span class="badge badge--dim" title="how the analysis candles were fetched">${esc(r.hop)}</span>`}</td>
+          </tr>`).join("") || `<tr><td colspan="8"><div class="empty-note">No bot has been analyzed yet \u2014 the position optimizer runs on its 15 min cadence (plus an on-entry pass after every deploy).</div></td></tr>`}
+        </tbody>
+      </table>
+    </div>
+    <details style="padding:10px 14px;border-top:1px solid var(--rule)">
+      <summary class="mono" style="font-size:11px;color:var(--ink-faint);cursor:pointer">sweep history \u00b7 last ${sweepList.length} (journal)</summary>
+      <ul class="feed" style="max-height:220px;overflow:auto">
+        ${sweepList.map((e) => `<li><span class="f-at">${esc(String(e.at || "").replace("T", " ").slice(5, 16))}</span><span class="f-kind k--${esc(String(e.kind || "?").replace(/_/g, "-"))}">${esc(String(e.kind || "?").replace(/_/g, "-"))}</span><span class="f-msg">${esc(e.msg || "")}</span></li>`).join("") || `<li><span class="f-msg">No position-optimizer journal entries yet.</span></li>`}
+      </ul>
+    </details>`;
+}
+
+/* ── tvcli data sources: what the candle/confluence feeds found ───── */
+
+/* Debugging surface for every tvcli-backed consumer: which hop served
+   each candle fetch (direct / vision mirror / tvcli), and what the
+   screen's /hunt confluence pass found per skill. All from ctl /status
+   data_sources (fail-soft empty shapes). */
+function renderDataSources(st) {
+  const box = $("#opt-data-sources");
+  if (!box) return;
+  const ds = (st && typeof st.data_sources === "object"
+    && st.data_sources) || null;
+  if (!ds) {
+    box.innerHTML = `
+      <div class="card-head"><span class="card-title">tvcli data sources</span>
+        <span class="spacer"></span><span class="badge badge--warn" title="ctl /status not responding">offline</span></div>
+      <div class="card-body"><div class="empty-note">Data-source observability unavailable — this panel refills automatically once the daemon ctl plane is reachable again.</div></div>`;
+    return;
+  }
+  const events = Array.isArray(ds.fetch_events) ? ds.fetch_events : [];
+  const hs = (ds.hunt_stats && typeof ds.hunt_stats === "object")
+    ? ds.hunt_stats : {};
+  const skills = (hs.skills && typeof hs.skills === "object") ? hs.skills : {};
+  const hopCounts = {};
+  for (const e of events) {
+    const h = e && e.hop;
+    if (h) hopCounts[h] = (hopCounts[h] || 0) + 1;
+  }
+  const hops = Object.entries(hopCounts).sort((a, b) => b[1] - a[1]);
+  const hopBadge = (h) => h === "tvcli"
+    ? `<span class="badge badge--violet" title="TradingView WebSocket via the tvcli /fetch fallback">${esc(h)}</span>`
+    : h === "vision"
+      ? `<span class="badge badge--ok" title="Binance public data mirror (data-api.binance.vision)">${esc(h)}</span>`
+      : `<span class="badge badge--dim" title="primary venue API (e.g. Hyperliquid)">${esc(h)}</span>`;
+  const skillRows = Object.entries(skills).map(([name, s]) => {
+    const hunted = Number((s || {}).hunted) || 0;
+    const ok = Number((s || {}).ok) || 0;
+    const allOk = hunted > 0 && ok === hunted;
+    return `<tr>
+      <td class="td-mono">${esc(name)}</td>
+      <td class="td-mono">${ok}/${hunted}</td>
+      <td>${allOk ? '<span class="badge badge--ok">all parsed</span>' : hunted === 0 ? '<span class="badge badge--dim">not hunted</span>' : `<span class="badge badge--warn">${hunted - ok} failed</span>`}</td>
+    </tr>`;
+  }).join("");
+
+  box.innerHTML = `
+    <div class="card-head"><span class="card-title">tvcli data sources</span>
+      <span class="spacer"></span><span class="mono" style="font-size:10.5px;color:var(--ink-faint)" title="candle-hop attribution (market_regime fetch ring) + screen /hunt confluence counters — what the tvcli-backed systems found">${events.length ? `${events.length} recent fetch(es)` : "no fetches yet"}</span></div>
+    <div class="card-body"><div class="mini-kv">
+      <div class="row"><span class="k">candle hops</span><span class="v">${hops.length ? hops.map(([h, n]) => `${hopBadge(h)} \u00d7${n}`).join(" ") : "\u2014"}</span></div>
+      <div class="row"><span class="k">confluence boosted</span><span class="v" title="candidates whose score_final the tvcli bonus moved in the last screen">${esc(String(hs.candidates_boosted ?? "\u2014"))} candidate(s)</span></div>
+    </div></div>
+    ${skillRows ? `<div class="card-body--tight table-wrap">
+      <table class="ledger">
+        <thead><tr><th>hunt skill</th><th>ok / hunted</th><th>state</th></tr></thead>
+        <tbody>${skillRows}</tbody>
+      </table>
+    </div>` : `<div class="card-body"><div class="empty-note">No confluence hunt reported yet — the screen runs it over its top candidates (every rescreen).</div></div>`}
+    <details style="padding:10px 14px;border-top:1px solid var(--rule)">
+      <summary class="mono" style="font-size:11px;color:var(--ink-faint);cursor:pointer">candle fetch log \u00b7 last ${Math.min(events.length, 12)}</summary>
+      <ul class="feed" style="max-height:200px;overflow:auto">
+        ${events.slice(-12).reverse().map((e) => `<li><span class="f-at">${esc(relTimeEpoch(e && e.ts))}</span><span class="f-kind">${esc(String((e && e.venue) || "?"))}:${esc(String((e && e.symbol) || "?"))} ${esc(String((e && e.interval) || ""))}</span><span class="f-msg">${esc(String((e && e.hop) || "?"))} \u00b7 ${esc(String((e && e.rows) ?? "?"))} rows \u00b7 ${esc(String((e && e.ms) ?? "?"))} ms</span></li>`).join("") || `<li><span class="f-msg">No candle fetches recorded yet this daemon process.</span></li>`}
+      </ul>
+    </details>`;
 }
 
 /* ── reliability ──────────────────────────────────────────────────── */
