@@ -4,8 +4,10 @@
 # Brings up, in order: config patch, Xvfb, PocketBase, tvcli serve,
 # CloakBrowser (launch.mjs + wt.mjs session restore), the daemon, the
 # console — then supervises: if the DAEMON dies the whole container shuts
-# down (the VPS restart policy brings it back); any other component dying
-# is logged and the rest keep running.
+# down (the VPS restart policy brings it back) — EXCEPT an operator stop
+# (KILL file present), which keeps the console up so the daemon can be
+# restarted from the UI (mirroring the Mac's launchd split); any other
+# component dying is logged and the rest keep running.
 #
 # GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console (default: all)
 set -uo pipefail
@@ -61,8 +63,8 @@ rm -f "$GRID/state/daemon.pid"
 
 # ── (4) operator stop flag ──────────────────────────────────────────────────
 if [ -e "$GRID/KILL" ]; then
-  warn "KILL file present at $GRID/KILL — the daemon will refuse to start!"
-  warn "operator stop is intentional; clear it with: docker exec <ctr> rm -f /app/agents/grid-autonomy/KILL"
+  warn "KILL file present at $GRID/KILL — the daemon will NOT be started (operator stop)"
+  warn "the console stays up; resume with its Start action (clears KILL) or: docker exec <ctr> rm -f /app/agents/grid-autonomy/KILL"
 fi
 
 # ── (5) env validation (WARN by default; GRID_STRICT_ENV=1 → fatal) ─────────
@@ -142,17 +144,20 @@ shutdown() {
   # next boot (an auto-restarting container would stay bricked). Plain
   # SIGTERM is the graceful path (same as scripts/stop.sh).
   local i pid
-  # SIGTERM every tracked child first (the daemon exits gracefully on TERM).
+  # SIGTERM every tracked child first (the daemon exits gracefully on TERM);
+  # an adopted console-started daemon is tracked via DAEMON_PID only.
   for i in "${!CHILD_PIDS[@]}"; do
     pid="${CHILD_PIDS[$i]}"
     kill -TERM "$pid" 2>/dev/null || true
   done
+  [ -n "${DAEMON_PID:-}" ] && kill -TERM "$DAEMON_PID" 2>/dev/null || true
   [ -n "${KEEPER_PID:-}" ] && kill -TERM "$KEEPER_PID" 2>/dev/null || true
   pkill -TERM -f "browser-debug/cloakbrowser" 2>/dev/null || true
   # Give the daemon up to ~25s to exit cleanly, then SIGKILL stragglers.
   for _ in $(seq 1 125); do
     local any=0
     for i in "${!CHILD_PIDS[@]}"; do kill -0 "${CHILD_PIDS[$i]}" 2>/dev/null && any=1; done
+    [ -n "${DAEMON_PID:-}" ] && kill -0 "$DAEMON_PID" 2>/dev/null && any=1
     [ "$any" = "0" ] && break
     sleep 0.2
   done
@@ -279,11 +284,20 @@ fi
 
 # ── (10) daemon (the reason this container exists) ───────────────────────────
 if has daemon; then
-  (cd "$GRID" && exec python3 daemon.py $DAEMON_ARGS) >>"$GRID/state/daemon.log" 2>&1 &
-  track daemon
-  DAEMON_PID=$!
-  echo "$DAEMON_PID" > "$GRID/state/daemon.pid"
-  log "daemon started (pid $DAEMON_PID, args: '${DAEMON_ARGS:-dry-run planning}')"
+  if [ -e "$GRID/KILL" ]; then
+    # Operator stop: the daemon stays down but the REST of the stack
+    # (console incl.) keeps running, so the stop is recoverable from the
+    # UI — mirroring the Mac's launchd split where KILL pauses only the
+    # daemon job. The supervisor (13) re-adopts the daemon once the
+    # console starts it (scripts/start.sh rewrites state/daemon.pid).
+    warn "KILL file present — daemon NOT started (operator stop); Start it from the console (clears KILL) or: docker exec <ctr> rm -f $GRID/KILL"
+  else
+    (cd "$GRID" && exec python3 daemon.py $DAEMON_ARGS) >>"$GRID/state/daemon.log" 2>&1 &
+    track daemon
+    DAEMON_PID=$!
+    echo "$DAEMON_PID" > "$GRID/state/daemon.pid"
+    log "daemon started (pid $DAEMON_PID, args: '${DAEMON_ARGS:-dry-run planning}')"
+  fi
 fi
 
 # ── (11) console ────────────────────────────────────────────────────────────
@@ -333,18 +347,45 @@ if has browser && has daemon; then
   log "WT session keeper started (pid $KEEPER_PID, interval ${WT_KEEPER_INTERVAL:-1800}s)"
 fi
 
-# ── (13) supervise: daemon death = container death; others = warn ───────────
+# ── (13) supervise: daemon death = container death (unless KILL); others = warn ──
 log "all components launched; supervising (${#CHILD_PIDS[@]} tracked children)"
+daemon_live() { [ -n "$DAEMON_PID" ] && kill -0 "$DAEMON_PID" 2>/dev/null; }
+is_zombie() {
+  # kill -0 reports an exited-but-unreaped child as alive; the /proc stat
+  # state field (Z) tells them apart so a daemon crash is never missed.
+  [ "$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null)" = "Z" ]
+}
+adopt_daemon() {
+  # The console can (re)start the daemon in place via scripts/start.sh after
+  # an operator stop. Adopt its pid (verified against the pidfile + cmdline)
+  # so a later daemon crash still shuts the container down for a restart.
+  [ -e "$GRID/KILL" ] && return 1
+  [ -r "$GRID/state/daemon.pid" ] || return 1
+  local newpid
+  newpid="$(cat "$GRID/state/daemon.pid" 2>/dev/null || true)"
+  [ -n "$newpid" ] || return 1
+  kill -0 "$newpid" 2>/dev/null || return 1
+  grep -qa "daemon.py" "/proc/$newpid/cmdline" 2>/dev/null || return 1
+  DAEMON_PID="$newpid"
+  log "adopted console-started daemon (pid $newpid)"
+  return 0
+}
 while :; do
-  if [ "${#CHILD_PIDS[@]}" = "0" ]; then
-    # No tracked children left (e.g. only pb/browser enabled — those self-daemonize).
-    while :; do sleep 3600 & wait $!; done
-  fi
-  # Block until any tracked child exits (signals interrupt the wait and run
-  # the traps). wait -n returns the child's status — we don't care, the
-  # liveness scan below identifies WHO exited.
-  wait -n || true
-  # Identify who exited.
+  sleep 2
+  # Reap any zombie children first — otherwise the liveness scan below sees
+  # them as alive and their exit (a daemon crash!) goes unnoticed.
+  while :; do
+    any_zombie=0
+    for i in "${!CHILD_PIDS[@]}"; do
+      if is_zombie "${CHILD_PIDS[$i]}"; then any_zombie=1; break; fi
+    done
+    [ "$any_zombie" = "1" ] || break
+    wait -n || true   # instant: at least one child has exited
+  done
+  # Re-adopt a console-started daemon so supervision survives operator
+  # stop→start cycles.
+  daemon_live || adopt_daemon
+  # Identify who exited (gone, not zombie — zombies were reaped above).
   exited=""
   for i in "${!CHILD_PIDS[@]}"; do
     pid="${CHILD_PIDS[$i]}"
@@ -360,8 +401,18 @@ while :; do
   if [ -n "$exited" ]; then
     if [ "$exited" = "daemon" ]; then
       DAEMON_PID=""
-      log "daemon exited — shutting the container down (restart policy will bring it back)"
-      shutdown "daemon-exit"
+      if [ -e "$GRID/KILL" ]; then
+        # Operator stop via the console (KILL + SIGTERM): the container must
+        # NOT suicide-restart here — the KILL file persists in the container's
+        # writable layer, so every restart would re-refuse the daemon and
+        # boot-loop the console into 502s. Keep the console up; the UI's
+        # Start/Restart actions recover the daemon, and the supervisor
+        # re-adopts it via state/daemon.pid.
+        log "daemon exited with KILL present (operator stop) — console stays up; start the daemon from the console (clears KILL)"
+      else
+        log "daemon exited — shutting the container down (restart policy will bring it back)"
+        shutdown "daemon-exit"
+      fi
     else
       warn "component '$exited' exited — continuing without it (remaining: ${CHILD_NAMES[*]:-none})"
     fi

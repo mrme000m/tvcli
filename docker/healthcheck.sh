@@ -15,6 +15,14 @@ has() { case ",$COMPONENTS," in *",$1,"*) return 0;; *) return 1;; esac; }
 
 if has daemon; then
   if ! curl -fsS -m 5 http://127.0.0.1:8799/health >/dev/null 2>&1; then
+    # Operator stop (KILL file): the daemon is deliberately down while the
+    # console keeps serving — a designed, recoverable state, not a failure.
+    # (The entrypoint supervises the same way: KILL keeps the console up.)
+    if [ -e /app/agents/grid-autonomy/KILL ] && has console && \
+       pgrep -f "console/server.py" >/dev/null 2>&1; then
+      echo "healthcheck: daemon down by operator KILL; console serving — healthy by design" >&2
+      exit 0
+    fi
     echo "healthcheck: no answer from daemon ctl :8799/health" >&2
     exit 1
   fi

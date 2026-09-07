@@ -1902,7 +1902,11 @@ def daemon_restart(clear_kill=False, live_paper=None) -> tuple[int, dict]:
     time.sleep(1.0)
     if live_paper is None:
         live_paper = current_mode == "live-paper"
-    return daemon_start(live_paper=live_paper)
+    # daemon_stop() deliberately arms the KILL file (that is what keeps a
+    # supervisor from racing the restart); starting again right after means
+    # clearing exactly that marker — otherwise the manual path (the VPS
+    # container, where launchd is absent) 409s on its own stop every time.
+    return daemon_start(live_paper=live_paper, clear_kill=True)
 
 
 # ── HTTP handler ───────────────────────────────────────────────────────

@@ -466,12 +466,14 @@ curl -s -X POST http://localhost:8799/rotate -d '{"slot": 2}'   # force-rotate s
   the flow for config edits, host maintenance, reboots.
 - *Operator halt ("stop and keep stopped")* —
   `curl -X POST http://localhost:8799/kill` (or `docker compose exec
-  grid-autonomy curl -X POST http://127.0.0.1:8799/kill`). This writes
-  `agents/grid-autonomy/KILL`, halts the loop at the next tick, and — by
-  design — survives container restarts: the daemon refuses to start while
-  the file exists, and the entrypoint logs a loud boot-time warning
-  ("KILL file present — the daemon will refuse to start!"). Use it when
-  the fleet must stay down. Clear it to run again:
+  grid-autonomy curl -X POST http://127.0.0.1:8799/kill`), or the console
+  UI's Stop action. This writes `agents/grid-autonomy/KILL`, halts the
+  loop at the next tick, and — by design — survives container restarts:
+  the daemon stays down while the file exists, but the **console keeps
+  serving** (the entrypoint treats a KILL-stop as a designed state, not a
+  crash, so the container no longer suicide-restarts — mirroring the
+  Mac's launchd split where KILL pauses only the daemon job). Resume from
+  the console UI (Start/Restart clears KILL) or manually:
 
 ```sh
 docker compose exec grid-autonomy rm -f /app/agents/grid-autonomy/KILL
@@ -596,7 +598,7 @@ ssh -L 8798:localhost:8798 -L 8799:localhost:8799 user@vps   # then use localhos
 | `llm_degraded: true` on decisions | LLM keys missing/expired. Not fatal — rule-map fallback. Check `CLOUDFLARE_*` in `grid.env`, restart. |
 | PocketBase gone / collections stale | PB is a side channel — the file layer (`state/`) is the system of record, the daemon keeps running. Check `docker compose exec grid-autonomy curl -s http://127.0.0.1:8090/api/health`; if dead, `docker compose restart` re-runs the (idempotent) PB setup. |
 | tvcli serve down (confluence disabled) | Screens still work — `/hunt` fitness fails soft and candidates lose the confluence bonus. Check the bind-mounted `/app/.env` TV auth (expired cookies → re-extract per §d.1) and `docker compose logs -f serve`. |
-| Daemon refuses to start; logs show "KILL present — refusing to run" + the entrypoint's boot warning | A previous intentional `POST :8799/kill` left `agents/grid-autonomy/KILL` (it survives restarts by design). Clear it: `docker compose exec grid-autonomy rm -f /app/agents/grid-autonomy/KILL`, then `docker compose restart`. |
+| Daemon refuses to start; logs show "KILL present — refusing to run" + the entrypoint's boot warning | An intentional stop left `agents/grid-autonomy/KILL` (it survives restarts by design). The console stays up: use its Start/Restart action (clears KILL), or `docker compose exec grid-autonomy rm -f /app/agents/grid-autonomy/KILL` + `docker compose restart`. |
 | "daemon already running (PID …)" | Stale `state/daemon.pid` — auto-cleared at boot; if it ever persists, `docker compose restart`. (Override knob `GRID_NO_PIDGUARD=1` exists but should not be needed in Docker, where exactly one daemon runs per container.) |
 | `capacity-veto` / `demo-cap-veto` journal entries | WunderTrading plan caps (1 active grid bot on non-Hyperliquid exchanges, 5 demo bots on the free plan) — capacity, not an error. See the operating manual's troubleshooting table. |
 | Healthcheck never green | `curl -s http://localhost:8799/health` from the host; if it answers but Docker still shows unhealthy, check the image's `grid-healthcheck` interval/start-period. If it does not answer: `docker compose logs -f` and walk §h top-down. |

@@ -576,6 +576,35 @@ class TestHTTP(ConsoleTestCase):
         finally:
             server.daemon_restart = real
 
+    def test_daemon_restart_clears_its_own_stop_kill(self):
+        # daemon_stop() arms the KILL file; the manual restart path must pass
+        # clear_kill=True to daemon_start — otherwise a restart 409s on its
+        # own stop marker and, in the VPS container, bricks the daemon into a
+        # KILL boot-loop (console 502s).
+        calls = {}
+        real_lm, real_pid, real_stop, real_start = (
+            server._launchd_managed, server._pid, server.daemon_stop,
+            server.daemon_start)
+        server._launchd_managed = lambda: False
+        server._pid = lambda: None
+        def spy_stop(force=False):
+            calls["stop"] = True
+            return 200, {"stopped": True}
+        def spy_start(live_paper=False, clear_kill=False):
+            calls["start_clear_kill"] = clear_kill
+            calls["start_live_paper"] = live_paper
+            return 200, {"started": True}
+        server.daemon_stop, server.daemon_start = spy_stop, spy_start
+        try:
+            code, body = server.daemon_restart()
+            self.assertEqual(code, 200)
+            self.assertTrue(calls["stop"])
+            self.assertTrue(calls["start_clear_kill"])
+            self.assertFalse(calls["start_live_paper"])
+        finally:
+            server._launchd_managed, server._pid = real_lm, real_pid
+            server.daemon_stop, server.daemon_start = real_stop, real_start
+
     def test_position_sweeps_endpoint(self):
         self.write_state({"journal": [
             {"kind": "position-optimizer", "msg": "keep binance:AAA",
