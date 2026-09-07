@@ -1248,12 +1248,33 @@ def recommendations_payload(limit: int) -> dict:
     """Position-optimizer recommendations from the PocketBase side channel
     (newest first). Non-fatal: an empty list when PB is down or the
     collection does not exist yet. Sorted by the engine's ISO `at` field —
-    PB 0.40 has no auto `created` system field, so `sort=-created` 400s."""
+    PB 0.40 has no auto `created` system field, so `sort=-created` 400s.
+
+    Auth: the collection rules block public reads, so this goes through the
+    same ladder as pnl_payload — pbclient (pb.env-seeded superuser re-auth),
+    then raw HTTP with the sidecar's stored PB_TOKEN. A bare unauthenticated
+    read used to 401/404 here, so the view always looked empty even when
+    records existed."""
     limit = max(1, min(limit, 500))
-    ok, body = _http_json(
-        f"{PB_URL}/api/collections/recommendations/records"
-        f"?perPage={limit}&sort=-at", 2.0)
-    items = (body or {}).get("items") if ok and isinstance(body, dict) else None
+    items = None
+    pb = _pb_client()
+    if pb is not None:
+        try:
+            items = pb.list("recommendations", sort="-at",
+                            per_page=limit)
+        except Exception:
+            items = None
+    if not items:
+        url = (f"{PB_URL}/api/collections/recommendations/records"
+               f"?perPage={limit}&sort=-at")
+        ok, body = _pb_get(url)
+        items = (body or {}).get("items") if ok and isinstance(body, dict) else None
+        if not items:
+            token = _pb_env().get("PB_TOKEN")
+            if token:
+                ok, body = _pb_get(url, token=token)
+                items = (body or {}).get("items") \
+                    if ok and isinstance(body, dict) else None
     items = [dict(r) for r in items if isinstance(r, dict)] \
         if isinstance(items, list) else []
 
