@@ -28,6 +28,16 @@ Design contract (mirrors optimizer.py):
     daemon wires wt_library.grid_set_exits, exit-only live edit), an
     exit-add rec is EXECUTED through it and the outcome recorded on the
     rec. apply stays FALSE by default — advisory only, no WT mutation.
+  * Opt-in BACKTEST VALIDATION: with cfg backtest_validate=true AND an
+    injected backtest_fn (the daemon wires wtclient's pure grid-backtest
+    engine over its OWN candle chain — never GridClient.backtest's
+    network fetch), an exit-add rec is first played over the recent
+    candles: the candidate exit config must beat the current-exit
+    baseline's realized PnL by backtest_min_edge_pct% of the slot,
+    else the rec is downgraded to "keep" with the veto journaled
+    carrying BOTH backtest results. backtest_validate defaults FALSE
+    (off); a missing library or an engine error fails OPEN (the rec
+    passes unvalidated, exactly the pre-stage behavior).
   * Never raises out of analyze_bot / cycle / post_deploy: on any fetch
     or metrics failure the bot is skipped (None / omitted) — fail-soft.
 
@@ -69,6 +79,10 @@ POSITION_OPTIMIZER_DEFAULTS = {
     "band_atr": 3.0,             # ATR multiples each side of price
     "drift_steps": 2.0,         # recenter after N × step_pct drift
     "atr_change_pct": 15.0,     # widen/narrow after N% channel-width change
+    # opt-in backtest validation of exit-add recs (wtclient engine):
+    "backtest_validate": False,  # OFF by default — advisory-safe
+    "backtest_candles": 300,     # 1h-candle lookback for the window
+    "backtest_min_edge_pct": 0.5,  # required realized-PnL edge, % of slot
 }
 
 # regimes where per-position trailing recycles capital fastest
@@ -95,6 +109,13 @@ FILLS_HEALTHY_RATIO = 0.5   # healthy = fills_24h >= 0.5 × expected
 DD_BAND_TRIGGER = 1.5       # drawdown vs ATR band → full revalue
 WIDEN_MAX_GRIDS = 30        # never widen beyond this many lines
 NARROW_MIN_GRIDS = 8        # never narrow below this many lines
+
+# backtest-engine parity (wtclient.backtest): 0.2% fee per closed grid
+# position; every closed LONG banks exactly step% − fee of the per-trade
+# amount, every closed SHORT banks step/(100+step)% − fee (adjacent grid
+# levels are geometric with ratio 1 + step/100).
+BACKTEST_FEE = 0.002
+ENGINE_CANDLE_MS = 3600000  # synthetic 1h candle clocks (ms)
 
 
 # ── pure helpers ──────────────────────────────────────────────────────
@@ -639,6 +660,302 @@ def _edit_payload(bot, revalue, exits):
     return payload
 
 
+# ── pure: backtest-validation stage (opt-in, default OFF) ──────────────
+# wtclient.backtest (the pure client-side port of the configurator's
+# grid backtest engine) simulates the GRID only — the same parity the
+# WT UI's Backtest button has: exit fields ride along in the upsert
+# payload but the engine ignores them. The helpers below (a) build the
+# baseline/candidate configs, (b) convert the daemon's timestamp-less
+# (o,h,l,c) fetch rows into engine candles, and (c) model the exit
+# profile ON TOP of an engine result so a candidate exit can be
+# compared against the current-exit baseline over the SAME candles.
+# All pure: the injected backtest_fn does the actual engine run.
+
+def _num_or_none(v):
+    """float(v) or None — a missing/invalid exit field stays unset (a
+    0.0 default would mean "TP at $0" and instantly veto everything)."""
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def engine_candles(rows, now=None, interval_ms=ENGINE_CANDLE_MS):
+    """(o, h, l, c) fetch rows → wtclient engine candle dicts (pure).
+
+    The daemon's candle chain (market_regime.fetch_candles) returns
+    timestamp-less 4-tuples; the engine needs time/high/low/close with
+    millisecond clocks. Timestamps are synthesized backwards from
+    ``now`` at ``interval_ms`` steps — the engine only uses them for
+    ordering/reporting (dateStarted, trade records), never for price
+    math, so a synthetic clock changes nothing in the PnL.
+    """
+    rows = rows or []
+    try:
+        now = float(now) if now is not None else time.time()
+    except (TypeError, ValueError):
+        now = time.time()
+    n = len(rows)
+    out = []
+    for i, r in enumerate(rows):
+        if not r or len(r) < 4:
+            continue
+        out.append({
+            "time": (now - (n - 1 - i) * interval_ms / 1000.0) * 1000.0,
+            "high": _f(r[1]), "low": _f(r[2]), "close": _f(r[3]),
+        })
+    return out
+
+
+def backtest_grid_cfg(bot, revalue=None):
+    """upsert-style grid config for the backtest engine (pure).
+
+    Uses the bot's DEPLOYED geometry (channel + upsert), falling back
+    to the fresh revaluation — an exit-add rec never changes geometry,
+    so the validation window must replay the bot as it actually runs.
+    Field names follow the wtclient engine's upsert conventions
+    (``percents`` is the step in PERCENT, like the UI posts).
+    """
+    bot = bot if isinstance(bot, dict) else {}
+    up = bot.get("upsert") or {}
+    channel = bot.get("channel") or {}
+    revalue = revalue or {}
+
+    step_pct = _f(channel.get("step_pct"),
+                  _f(up.get("gridPercentStep")) * 100.0)
+    if step_pct <= 0:
+        step_pct = _f(revalue.get("step_pct"))
+    low = _f(channel.get("low"), _f(up.get("lowPrice")))
+    high = _f(channel.get("high"), _f(up.get("highPrice")))
+    mid = _f(channel.get("mid"), _f(up.get("midPrice")))
+    if mid <= 0 and low > 0 and high > 0:
+        mid = (low + high) / 2.0
+    return {
+        "gridType": up.get("gridType") or "interval",
+        "gridTradingType": up.get("gridTradingType") or "neutral",
+        "percents": step_pct,
+        "lowPrice": low,
+        "midPrice": mid if mid > 0 else None,
+        "highPrice": high,
+        "amountPerTrade": _f(up.get("amountPerTrade"),
+                             _f(bot.get("amount_per_trade"))),
+        "decimalsQty": int(_f(up.get("decimalsQty"), 4.0)),
+        "pumpProtection": bool(up.get("pumpProtection")),
+        "stopOnOutOfGrid": bool(up.get("stopOnOutOfGrid")),
+    }
+
+
+def current_exit_fields(current):
+    """current_exits(bot) → upsert-style exit fields (pure).
+
+    WT's grid_list carries the exits under its own names; ``stop_loss``
+    is normalized to a POSITIVE magnitude (the convention
+    exit_edit_kwargs/grid_adapter use when talking to set_exits).
+    """
+    current = current if isinstance(current, dict) else {}
+    out = {}
+    tp = _num_or_none(current.get("takeProfit"))
+    sl = _num_or_none(current.get("stopLoss"))
+    act = _num_or_none(current.get("trailingStopActivation"))
+    exe = _num_or_none(current.get("trailingStopExecute"))
+    if tp is not None:
+        out["takeProfitUsd"] = tp
+    if sl is not None:
+        out["stopLossUsd"] = abs(sl)
+    if act is not None:
+        out["trailingActivationPct"] = act
+    if exe is not None:
+        out["trailingExecutePct"] = exe
+    return out
+
+
+def candidate_exit_fields(exits, recommendation, current):
+    """current exit fields + the recommended exit overlaid (pure).
+
+    Reuses exit_edit_kwargs (the SAME kwargs the opt-in apply path
+    would send to GridClient.set_exits) so what is validated is exactly
+    what would be applied.
+    """
+    fields = current_exit_fields(current)
+    kw = exit_edit_kwargs(exits, recommendation=recommendation,
+                         current=current)
+    if kw.get("take_profit") is not None:
+        fields["takeProfitUsd"] = float(kw["take_profit"])
+    if kw.get("stop_loss") is not None:
+        fields["stopLossUsd"] = float(kw["stop_loss"])
+    if kw.get("trailing_activation") is not None:
+        fields["trailingActivationPct"] = float(kw["trailing_activation"])
+        if kw.get("trailing_execute") is not None:
+            fields["trailingExecutePct"] = float(kw["trailing_execute"])
+    return fields
+
+
+def backtest_configs(bot, revalue, exits, current, recommendation):
+    """(baseline_cfg, candidate_cfg) for the validation run (pure).
+
+    Identical grid geometry; only the exit fields differ — baseline = the
+    bot's CURRENT exits, candidate = current + the recommended one.
+    """
+    grid = backtest_grid_cfg(bot, revalue)
+    baseline = dict(grid)
+    baseline.update(current_exit_fields(current))
+    candidate = dict(grid)
+    candidate.update(candidate_exit_fields(exits, recommendation, current))
+    return baseline, candidate
+
+
+def exit_overlay_pnl(result, exit_fields, amount, slot_balance=0.0):
+    """Locked-in PnL after modeling an exit profile on an engine result.
+
+    The engine's trade list is a complete, ordered ledger of the run:
+    an OPEN records its grid level (``side == strategy``), a CLOSE
+    records the crossed level (``side != strategy``). Walking it
+    reconstructs the exact position book, so the cumulative TOTAL PnL
+    (realized + unrealized marked at the last trade price) is available
+    at every event — and WT compares its USD exit thresholds against
+    exactly that (``$ thresholds compare against cumulative TOTAL PnL``,
+    grid_adapter / grid-bot-api.md §9). The exit rules are applied on
+    top of it at every trade:
+
+      * ``takeProfitUsd`` — total PnL >= target → the bot closes
+        everything: profit is LOCKED at that point.
+      * ``stopLossUsd`` (positive magnitude, "total" compare) — total
+        PnL <= −cap → the bot closes everything (loss contained near
+        the cap; trade-granularity overshoot possible).
+      * ``trailingActivationPct``/``trailingExecutePct`` (percent OF
+        the slot balance, same base as evaluate_exits) — arms at
+        activation, executes when total PnL gives back execute% of the
+        slot from its post-arm peak.
+
+    Returns ``{"realized_fiat", "stopped_at", "reason", "closes"}``.
+    ``realized_fiat`` is the PnL LOCKED IN by the end of the window,
+    symmetric on both sides of the validation comparison: the total at
+    the exit trigger when one fired (closing everything converts
+    unrealized into realized), else the window wound down at the final
+    mark (realized + marked unrealized ≈ the engine's
+    ``totalResultFiat``). Comparing locked-in PnL is what makes the
+    gate meaningful: a take-profit that fires before the window reverses
+    locks MORE than a baseline that rides the reversal holding
+    underwater positions, and loses to a baseline that keeps banking
+    grid steps — exactly the trade-off an exit-add rec must justify.
+
+    Approximation (documented): exits are evaluated only AT trade
+    events, marked at the trade price — intra-candle extremes between
+    trades can trip a real TP/trailing slightly earlier. Fine for a
+    validation gate.
+    """
+    result = result if isinstance(result, dict) else {}
+    exit_fields = exit_fields if isinstance(exit_fields, dict) else {}
+    trades = result.get("trades")
+    trades = trades if isinstance(trades, list) else []
+    # wind-down PnL when NO exit fires: the window ends and the open
+    # book is marked at the final close — realized + marked unrealized
+    # (≈ the engine's totalResultFiat; fakes without an
+    # unrealizedPnlFiat key wind down at plain realized)
+    realized_full = (_f(result.get("pnlFiat"))
+                     + _f(result.get("unrealizedPnlFiat")))
+    amount = _f(amount)
+    if not trades:
+        return {"realized_fiat": realized_full, "stopped_at": None,
+                "reason": None, "closes": 0}
+
+    tp = _num_or_none(exit_fields.get("takeProfitUsd"))
+    sl = _num_or_none(exit_fields.get("stopLossUsd"))
+    act = _num_or_none(exit_fields.get("trailingActivationPct"))
+    exe = _num_or_none(exit_fields.get("trailingExecutePct"))
+    slot_balance = _f(slot_balance)
+    act_usd = (act / 100.0 * slot_balance
+               if act is not None and slot_balance > 0 else None)
+    exe_usd = (exe / 100.0 * slot_balance
+               if exe is not None and slot_balance > 0 else None)
+
+    open_longs = []   # entry prices of open long positions
+    open_shorts = []  # entry prices of open short positions
+    realized = 0.0    # banked PnL (fiat)
+    closes = 0
+    armed = False     # trailing armed?
+    peak = 0.0        # post-arm total-PnL peak
+
+    def unrealized(mark):
+        total = 0.0
+        for e in open_longs:
+            total += (mark - e) / e
+        for e in open_shorts:
+            total += (e - mark) / e
+        return total * amount
+
+    for trade in trades:
+        if not isinstance(trade, dict):
+            continue
+        side, strat = trade.get("side"), trade.get("strategy")
+        price = _f(trade.get("price"))
+        if not side or not strat or price <= 0:
+            continue
+        if side == strat:                       # an OPEN at its level
+            (open_longs if side == "long" else open_shorts).append(price)
+        else:                                    # a CLOSE at the crossed level
+            closes += 1
+            if strat == "long":                  # closed a long: entry is
+                entry = max((e for e in open_longs if e < price),
+                            default=None)        # the level just below
+                if entry is not None:
+                    open_longs.remove(entry)
+                    realized += ((price - entry) / entry
+                                 - BACKTEST_FEE) * amount
+            else:                                # closed a short: entry is
+                entry = min((e for e in open_shorts if e > price),
+                            default=None)        # the level just above
+                if entry is not None:
+                    open_shorts.remove(entry)
+                    realized += ((entry - price) / entry
+                                 - BACKTEST_FEE) * amount
+        # exit checks on cumulative TOTAL PnL, marked at this trade
+        total_pnl = realized + unrealized(price)
+        if tp is not None and total_pnl >= tp:
+            return {"realized_fiat": round(total_pnl, 6),
+                    "stopped_at": trade.get("timestamp"),
+                    "reason": "take-profit", "closes": closes}
+        if sl is not None and total_pnl <= -sl:
+            return {"realized_fiat": round(total_pnl, 6),
+                    "stopped_at": trade.get("timestamp"),
+                    "reason": "stop-loss", "closes": closes}
+        if act_usd is not None:
+            if not armed:
+                if total_pnl >= act_usd:
+                    armed = True
+                    peak = total_pnl
+            else:
+                peak = max(peak, total_pnl)
+                if exe_usd is not None and peak - total_pnl >= exe_usd:
+                    return {"realized_fiat": round(total_pnl, 6),
+                            "stopped_at": trade.get("timestamp"),
+                            "reason": "trailing", "closes": closes}
+    return {"realized_fiat": realized_full, "stopped_at": None,
+            "reason": None, "closes": closes}
+
+
+def backtest_result_compact(result, verdict=None):
+    """Journal/rec-sized summary of a backtest run (no trade lists)."""
+    result = result if isinstance(result, dict) else {}
+    out = {
+        "pnl": result.get("pnl"),
+        "pnlFiat": result.get("pnlFiat"),
+        "totalResult": result.get("totalResult"),
+        "tradesCount": result.get("tradesCount"),
+        "positionsLong": result.get("positionsLong"),
+        "positionsShort": result.get("positionsShort"),
+        "gridLevelsQty": result.get("gridLevelsQty"),
+    }
+    if isinstance(verdict, dict):
+        out["realized_fiat"] = round(_f(verdict.get("realized_fiat")), 4)
+        out["stopped_at"] = verdict.get("stopped_at")
+        out["reason"] = verdict.get("reason")
+        out["closes"] = verdict.get("closes")
+    return out
+
+
 # ── symbol normalization (pure) ────────────────────────────────────────
 def _fetch_symbol(venue, symbol):
     """Full ticker for the public candle APIs — binance needs BTCUSDT,
@@ -669,7 +986,7 @@ class PositionOptimizer:
 
     def __init__(self, cfg=None, journal_fn=None, persist_fn=None,
                  fetch_candles_fn=None, hunt_fn=None, now_fn=None,
-                 apply_fn=None):
+                 apply_fn=None, backtest_fn=None):
         merged = dict(POSITION_OPTIMIZER_DEFAULTS)
         if cfg:
             merged.update({k: v for k, v in cfg.items() if v is not None})
@@ -685,6 +1002,14 @@ class PositionOptimizer:
         # the DEFAULT) keeps everything advisory — exactly the
         # pre-seam behavior. Never called for geometry recs.
         self.apply_fn = apply_fn
+        # opt-in backtest-validation seam: backtest_fn(grid_cfg, candles)
+        # -> engine result dict. Injected by the daemon (wtclient's pure
+        # grid-backtest engine run over candles the ENGINE fetched via
+        # its own fetch_candles_fn chain — never GridClient.backtest's
+        # :2087 network fetch). None (or cfg backtest_validate=False,
+        # the DEFAULT) keeps the flow exactly as before — advisory recs
+        # with no validation stage.
+        self.backtest_fn = backtest_fn
         self._persisted_today = (self._day(), 0)
         # per-day cap counter for EXECUTED exit edits (successful
         # applications only — dry-run rehearsals do not burn the cap;
@@ -908,6 +1233,144 @@ class PositionOptimizer:
                            "slot": rec.get("slot"),
                            "symbol": rec.get("symbol")})
 
+    def _backtest_candles(self, bot, rows):
+        """Candles for the validation window (never raises; may re-fetch).
+
+        Reuses the analysis rows when they already cover the configured
+        lookback (the default backtest_candles=300 matches the analysis
+        fetch), otherwise pulls a longer window through the SAME injected
+        fetch_candles_fn — one hop, same geo-aware chain, no extra
+        source of truth.
+        """
+        n = int(_f(self.cfg.get("backtest_candles"), 300))
+        if n <= 0:
+            return []
+        if rows and len(rows) >= n:
+            return rows[-n:]
+        venue = bot.get("venue")
+        fetched = self.fetch_candles_fn(
+            venue, _fetch_symbol(venue, bot.get("symbol")), "1h", n,
+            self._market_for(venue))
+        return list(fetched or [])[-n:]
+
+    def _backtest_validate(self, bot, rec, exits, current, revalue, rows,
+                          slot_key, now):
+        """OPT-IN backtest validation of an exit-add rec (fail-soft).
+
+        Fires only when cfg ``backtest_validate`` is on (default OFF)
+        and the rec is one of EXIT_APPLY_RECS. Plays the CANDIDATE exit
+        config and the CURRENT-exit baseline — identical grid geometry,
+        identical recent candles — through the injected ``backtest_fn``
+        (wtclient's pure grid-backtest engine), models the exit profile
+        on each result (exit_overlay_pnl) and keeps the rec only when
+        the candidate's realized PnL beats the baseline by
+        ``backtest_min_edge_pct``% of the slot balance. On a veto the
+        rec is downgraded to "keep" (delta zeroed, exit kwargs
+        stripped) and ONE ``position-optimizer-backtest-veto`` event is
+        journaled carrying BOTH backtest results. Missing backtest_fn
+        (library not importable) or ANY engine error fails OPEN — the
+        advisory rec passes unvalidated, exactly the pre-stage
+        behavior. Never raises.
+        """
+        name = rec.get("recommendation")
+        if name not in EXIT_APPLY_RECS:
+            return
+        try:
+            if self.backtest_fn is None:
+                self._journal({
+                    "kind": "position-optimizer-backtest-skip",
+                    "msg": "backtest_validate on but no backtest_fn "
+                           "injected (wtclient unavailable?) — rec "
+                           "stays advisory, unvalidated",
+                    "slot": str(slot_key),
+                    "symbol": bot.get("symbol"),
+                    "recommendation": name,
+                })
+                return
+            candles = self._backtest_candles(bot, rows)
+            if not candles:
+                self._journal({
+                    "kind": "position-optimizer-backtest-skip",
+                    "msg": "no candles for the backtest window — rec "
+                           "stays advisory, unvalidated",
+                    "slot": str(slot_key),
+                    "symbol": bot.get("symbol"),
+                    "recommendation": name,
+                })
+                return
+            baseline_cfg, candidate_cfg = backtest_configs(
+                bot, revalue, exits, current, name)
+            base_res = self.backtest_fn(baseline_cfg, candles)
+            cand_res = self.backtest_fn(candidate_cfg, candles)
+            amount = _f(candidate_cfg.get("amountPerTrade"))
+            slot_balance = _slot_balance(bot)
+            base_v = exit_overlay_pnl(base_res, baseline_cfg, amount,
+                                      slot_balance)
+            cand_v = exit_overlay_pnl(cand_res, candidate_cfg, amount,
+                                      slot_balance)
+            edge = cand_v["realized_fiat"] - base_v["realized_fiat"]
+            margin = (_f(self.cfg.get("backtest_min_edge_pct"), 0.5)
+                      / 100.0 * slot_balance)
+            rec["backtest"] = {
+                "validated": True,
+                "passed": edge >= margin,
+                "edge_usd": round(edge, 4),
+                "margin_usd": round(margin, 4),
+                "candles": len(candles),
+                "baseline": backtest_result_compact(base_res, base_v),
+                "candidate": backtest_result_compact(cand_res, cand_v),
+            }
+            if edge >= margin:
+                self._journal({
+                    "kind": "position-optimizer-backtest",
+                    "msg": (f"{name} validated: candidate realized "
+                            f"${cand_v['realized_fiat']:.2f} beats "
+                            f"baseline ${base_v['realized_fiat']:.2f} "
+                            f"by ${edge:.2f} (margin ${margin:.2f})"),
+                    "slot": str(slot_key),
+                    "symbol": bot.get("symbol"),
+                    "bot_code": bot.get("bot_code"),
+                    "recommendation": name,
+                    "passed": True,
+                    "edge_usd": round(edge, 4),
+                    "margin_usd": round(margin, 4),
+                })
+                return
+            # VETO — downgrade to keep, journal both backtest results
+            rec["recommendation"] = "keep"
+            rec["expected_delta_pct"] = 0.0
+            if isinstance(rec.get("action"), dict):
+                rec["action"].pop("exit_kwargs", None)
+            rec["rationale"] = (
+                f"{rec.get('rationale')} — backtest veto: candidate "
+                f"realized ${cand_v['realized_fiat']:.2f} vs baseline "
+                f"${base_v['realized_fiat']:.2f} (edge ${edge:.2f} < "
+                f"margin ${margin:.2f})")
+            self._journal({
+                "kind": "position-optimizer-backtest-veto",
+                "msg": (f"{name} vetoed by backtest: candidate realized "
+                        f"${cand_v['realized_fiat']:.2f} does not beat "
+                        f"baseline ${base_v['realized_fiat']:.2f} by "
+                        f"the ${margin:.2f} margin"),
+                "slot": str(slot_key),
+                "symbol": bot.get("symbol"),
+                "bot_code": bot.get("bot_code"),
+                "recommendation": name,
+                "edge_usd": round(edge, 4),
+                "margin_usd": round(margin, 4),
+                "baseline": rec["backtest"]["baseline"],
+                "candidate": rec["backtest"]["candidate"],
+            })
+        except Exception as exc:
+            self._journal({
+                "kind": "position-optimizer-error",
+                "msg": (f"backtest validation failed (fail-open): "
+                        f"{str(exc)[:160]}"),
+                "slot": str(slot_key),
+                "symbol": bot.get("symbol"),
+                "recommendation": name,
+            })
+
     def _note_fetch_failure(self, bot, venue, symbol, detail):
         """Silent-failure visibility: an empty/invalid candle fetch used
         to vanish (analyze_bot → None, nothing journaled — only fetch
@@ -1073,6 +1536,18 @@ class PositionOptimizer:
                 rec["tvcli_structure"] = self.hunt_fn(bot)
             except Exception:
                 pass
+
+        # 4b. OPT-IN backtest validation of exit-add recs
+        # (backtest_validate, default False): the candidate exit config
+        # must beat the current-exit baseline's realized PnL over the
+        # same recent candles through the injected backtest_fn, else the
+        # rec is downgraded to "keep" with the veto journaled. Runs
+        # BEFORE the apply path (5b) and before the rec is emitted — a
+        # vetoed rec is never applied either.
+        if rec["recommendation"] in EXIT_APPLY_RECS \
+                and self.cfg.get("backtest_validate"):
+            self._backtest_validate(bot, rec, exits, current, revalue,
+                                    rows, slot_key, now)
 
         # 5. complete the record schema
         rec["id"] = uuid.uuid4().hex

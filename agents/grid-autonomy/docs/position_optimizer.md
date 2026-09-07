@@ -157,6 +157,9 @@ position_optimizer:            # as shipped in config.yaml
   trailing_execute_pct: 2.0        # give-back % that executes the trailing exit
   positions_trailing: true         # strategyProfitCondition: trailing_stop
   stop_loss_enabled: false         # never by default (never-close-at-a-loss)
+  backtest_validate: false         # OFF by default (see §4c)
+  backtest_candles: 300            # 1h-candle lookback of the validation window
+  backtest_min_edge_pct: 0.5       # required locked-PnL edge, % of slot balance
 ```
 
 ## 4b. Exit awareness + the opt-in set_exits apply path (2026-09-08)
@@ -202,6 +205,72 @@ already in `strategyProfitCondition: "trailing_stop"`); `stop_loss_usd
 threshold as a positive $ compared against cumulative PnL — same
 convention as `grid_adapter.compute_upsert`).
 
+## 4c. Opt-in backtest validation of exit-add recs (2026-09-08)
+
+`wtclient.backtest` is the pure-Python port of the configurator's
+client-side grid backtest engine (digit-for-digit parity with
+`wt-backtest.mjs` — §5). With `position_optimizer.backtest_validate:
+true` the engine runs an extra validation stage before an
+`add-take-profit` / `add-trailing` / `add-stop-loss` rec is emitted —
+and before the opt-in apply path could execute it:
+
+1. **Same candles, same geometry.** The candidate exit config
+   (`current exits + the recommended one`, built from the SAME
+   `exit_edit_kwargs` the apply path would send) and the current-exit
+   baseline (identical grid geometry, the bot's exits as configured
+   today) are both replayed through the wtclient grid backtest engine
+   over the same recent candles (`backtest_candles` 1h bars, default
+   300 — reused from the analysis fetch when it already covers the
+   window, else one extra pull through the same injected
+   `fetch_candles_fn` chain; the daemon's `_po_backtest` seam runs the
+   PURE engine on those candles and NEVER touches
+   `GridClient.backtest`'s `:2087` network fetch, so free-tier /
+   geo-block behavior stays consistent).
+2. **Exit overlay.** The engine itself simulates the grid only (WT
+   parity: the UI's Backtest button likewise ignores exit fields in
+   the payload). `exit_overlay_pnl` models the exit profile ON TOP of
+   the engine's trade ledger: the ordered trade list is a complete
+   position book (opens record their level, closes the crossed
+   level), so cumulative TOTAL PnL is available at every event — and
+   WT compares its USD exit thresholds against exactly that
+   (`$ thresholds compare against cumulative TOTAL PnL`).
+   `takeProfitUsd` locks when total ≥ target; `stopLossUsd` (positive,
+   "total" compare) closes everything near the cap;
+   `trailingActivationPct`/`trailingExecutePct` (percent of slot
+   balance, the same base as `evaluate_exits`) arm and execute on the
+   post-arm give-back. Exits are evaluated at trade events, marked at
+   the trade price — intra-candle extremes between trades can trip a
+   real exit slightly earlier (documented approximation).
+3. **Locked-in PnL comparison.** Both sides are compared on the PnL
+   LOCKED IN by the end of the window: the total at the exit trigger
+   when one fired (closing everything converts unrealized into
+   realized), else the window wound down at the final mark (realized +
+   marked unrealized ≈ the engine's `totalResultFiat`). That
+   convention is what makes the gate meaningful: a take-profit that
+   fires before the window reverses locks MORE than a baseline that
+   rides the reversal holding underwater positions, and loses to a
+   baseline that keeps banking grid steps — exactly the trade-off an
+   exit-add rec must justify.
+4. **Verdict.** The rec survives only when the candidate's locked-in
+   PnL beats the baseline by `backtest_min_edge_pct`% of slot balance
+   (default 0.5% → $0.50 on a $100 slot). On a veto the rec is
+   downgraded to `keep` (`expected_delta_pct` zeroed, `exit_kwargs`
+   stripped) and ONE `position-optimizer-backtest-veto` journal event
+   carries BOTH backtest results (compact summaries + the overlay
+   verdicts). A pass is journaled as `position-optimizer-backtest` and
+   stamped on the rec as `rec["backtest"]` (`validated` / `passed` /
+   `edge_usd` / `margin_usd` / both result compacts).
+
+**Fail-open by design:** the stage is OFF by default
+(`backtest_validate: false`); a missing backtest seam (wtclient not
+importable → the daemon injects `backtest_fn=None`) or ANY engine
+error skips validation and emits the advisory rec unvalidated — the
+daemon always boots, and the gate never blocks recs on infrastructure
+failure. Only a completed comparison with an insufficient edge vetoes.
+`apply` semantics are unchanged and independent: a vetoed rec is never
+applied (validation runs before the apply path), and an unvalidated
+rec is exactly the pre-stage advisory behavior.
+
 ## 5. How to validate
 
 `browser-debug/wt-backtest.mjs` is the verbatim Node port of the
@@ -225,3 +294,9 @@ node browser-debug/wt-backtest.mjs backtest cfg_trailing.json   # same history
 - Also spot-check one choppy and one trending window manually: trailing
   should win on the trend window, fixed TP (or plain daemon exit) on the
   choppy one — that asymmetry is the regime gate in §4.
+- In-process alternative: with `position_optimizer.backtest_validate:
+  true` (§4c) the engine now runs exactly this comparison itself — the
+  same pure engine (the `wtclient.backtest` port), the same candles
+  from the daemon's own fetch chain, and a locked-in-PnL verdict per
+  exit-add rec — no browser, no `:2087` fetch, vetoed recs downgraded
+  to `keep` with both results journaled.

@@ -216,6 +216,21 @@ try:
 except Exception:
     HAS_WT_LIBRARY = False
 
+# ── wtclient grid-backtest engine (defensive) ──────────────────────────
+# position_optimizer's OPT-IN backtest-validation stage (cfg
+# position_optimizer.backtest_validate, default off) plays exit-add recs
+# through the pure client-side grid backtest engine — the same engine
+# behind the configurator's Backtest button / GridClient.backtest, minus
+# the :2087 network fetch (the engine supplies its own candles through
+# the daemon's geo-aware fetch chain). Fail-soft import so the daemon
+# boots without it; the engine then skips validation (fail-open).
+try:
+    from wtclient import backtest as _wt_backtest_engine  # noqa: E402
+    HAS_WT_BACKTEST = True
+except Exception:
+    HAS_WT_BACKTEST = False
+    _wt_backtest_engine = None
+
 # Paper-profile ensure retry cadence on the health cycle (the boot attempt
 # is immediate; failures here back off). Configurable via
 # autonomy.profile_bootstrap_cooldown_s.
@@ -1196,7 +1211,14 @@ class Daemon:
             # position_optimizer.apply is on) with (code, exit_kwargs)
             # shaped for wt_library.grid_set_exits; the daemon-level
             # dry-run gate lives inside (see _po_apply_exit)
-            apply_fn=self._po_apply_exit) \
+            apply_fn=self._po_apply_exit,
+            # opt-in backtest-validation seam: engine calls it (only
+            # when position_optimizer.backtest_validate is on) with
+            # (grid_cfg, candles) — the pure wtclient grid-backtest
+            # engine over candles the ENGINE fetched through its own
+            # injected fetcher (see _po_backtest)
+            backtest_fn=(self._po_backtest if HAS_WT_BACKTEST
+                        else None)) \
             if _PositionOptimizer else None
         self._browser_down_since = None
         self._last_browser_restart = 0.0
@@ -1454,6 +1476,30 @@ class Daemon:
                 code, dry_run=not self._live_paper, **(exit_kwargs or {}))
         except Exception as exc:
             return {"ok": False, "error": str(exc)[:160]}
+
+    def _po_backtest(self, grid_cfg, candles):
+        """Position-optimizer backtest seam → wtclient grid-backtest engine.
+
+        Called by the engine (position_optimizer._backtest_validate)
+        only when position_optimizer.backtest_validate is on (default
+        off) to validate an exit-add rec: runs the PURE client-side
+        grid backtest engine (the engine behind the configurator's
+        Backtest button / GridClient.backtest) on the GIVEN candles.
+        Those candles came through the engine's own injected
+        fetch_candles_fn — the daemon's geo-aware market_regime chain —
+        NOT GridClient.backtest's :2087 network fetch, so free-tier /
+        geo-block behavior stays consistent. Pure computation, zero
+        network. Raises on missing engine/bad input (the caller fails
+        open and keeps the rec advisory).
+        """
+        from position_optimizer import engine_candles  # pure helper
+        if not HAS_WT_BACKTEST or _wt_backtest_engine is None:
+            raise RuntimeError("wtclient.backtest not importable")
+        bars = engine_candles(candles)
+        if not bars:
+            raise ValueError("no candles to backtest")
+        engine_input = _wt_backtest_engine.build_input(grid_cfg, bars)
+        return _wt_backtest_engine.run_backtest(engine_input, bars)
 
     def optimizer_status(self):
         """Snapshot for GET /optimizer (never raises)."""
