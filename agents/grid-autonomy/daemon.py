@@ -599,6 +599,44 @@ def _round_trip_fee_pct(venue):
         return 0.15
 
 
+def _return_pct(num, den):
+    """num/den*100 as a rounded percent, or None when the denominator is
+    missing/<=0 — observability only, never raises."""
+    try:
+        den = float(den or 0)
+        if den <= 0:
+            return None
+        return round(float(num or 0) / den * 100.0, 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _double_days(annual_return_pct):
+    """Time (whole days) for capital to double at an annualized return %,
+    using the exact compound-doubling formula ln(2)/ln(1+r). None when the
+    return is missing/<=0 — observability only, never raises."""
+    try:
+        r = float(annual_return_pct or 0)
+        if r <= 0:
+            return None
+        return round(math.log(2.0) / math.log(1.0 + r / 100.0) * 365.0)
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
+def _fmt_double(days):
+    """Humanized doubling time: '~214d' / '~11mo' / '~5.9y'."""
+    try:
+        d = float(days or 0)
+    except (TypeError, ValueError):
+        return "—"
+    if d < 365:
+        return f"~{round(d)}d"
+    if d < 730:
+        return f"~{round(d / 30.44)}mo"
+    return f"~{d / 365.0:.1f}y"
+
+
 def _tvcli_health(base_url, timeout=5.0):
     """GET {base}/health probe for the tvcli server → (ok, detail).
 
@@ -3563,10 +3601,23 @@ class Daemon:
                 f = 0.0
             proj = self._projected_24h_usd(bot)
             projected += proj
+            try:
+                slot_committed = float((self.state.get("committed")
+                                       or {}).get(slot_key) or 0.0)
+            except (TypeError, ValueError):
+                slot_committed = 0.0
             bots[str(slot_key)] = {"symbol": (bot or {}).get("symbol"),
                                    "realized": r, "unrealized": u,
                                    "fills_24h": f,
-                                   "projected_24h_usd": proj}
+                                   "projected_24h_usd": proj,
+                                   "projected_annual_usd":
+                                       round(proj * 365.0, 2),
+                                   "projected_annual_return_pct":
+                                       _return_pct(proj * 365.0,
+                                                   slot_committed),
+                                   "projected_double_days":
+                                       _double_days(_return_pct(
+                                           proj * 365.0, slot_committed))}
             realized += r
             unrealized += u
             fills += f
@@ -3588,7 +3639,17 @@ class Daemon:
                     "committed_usd": committed,
                     "idle_usd": round(max(total - committed, 0.0), 2),
                     "fills_24h": round(fills, 1),
-                    "projected_24h_usd": round(projected, 2)},
+                    "projected_24h_usd": round(projected, 2),
+                    "projected_annual_usd": round(projected * 365.0, 2),
+                    "projected_24h_return_pct":
+                        _return_pct(projected, committed),
+                    "projected_annual_return_pct":
+                        _return_pct(projected * 365.0, committed),
+                    "projected_annual_return_total_pct":
+                        _return_pct(projected * 365.0, total),
+                    "projected_double_days":
+                        _double_days(_return_pct(projected * 365.0,
+                                                 committed))},
                 "bots": bots}
 
     def _projected_24h_usd(self, bot):
@@ -3646,7 +3707,15 @@ class Daemon:
                     f"{f['unrealized']:+.4f}) — committed "
                     f"${f['committed_usd']:.2f}, idle ${f['idle_usd']:.2f}, "
                     f"fills {f['fills_24h']:.0f}/24h, "
-                    f"proj/24h ${f['projected_24h_usd']:.2f}"),
+                    f"proj/24h ${f['projected_24h_usd']:.2f}"
+                    + (f", proj/yr ${f['projected_annual_usd']:.2f} "
+                       f"(~{f['projected_annual_return_pct']:.1f}%/yr on "
+                       f"committed)"
+                       if f.get("projected_annual_return_pct") is not None
+                       else "")
+                    + (f", double {_fmt_double(f['projected_double_days'])}"
+                       if f.get("projected_double_days") is not None
+                       else "")),
             **snap})
 
     # ── heartbeat: loop-health monitor + safe self-nudges ────────────

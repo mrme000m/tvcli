@@ -125,6 +125,46 @@ class TestProjected24h(ManageHarness):
         with mock.patch("builtins.__import__", side_effect=boom):
             self.assertEqual(daemon._round_trip_fee_pct("hyperliquid"), 0.15)
 
+    def test_returns_metrics_annualize_and_denominators(self):
+        # proj $0.40/24h on $100 committed / $500 fund → $146/yr,
+        # 0.40%/24h, 146%/yr on committed, 29.2%/yr on the full fund
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = bot()
+        d.state["committed"]["1"] = 100.0
+        f = d.pnl_snapshot()["fleet"]
+        self.assertEqual(f["projected_24h_usd"], 0.40)
+        self.assertEqual(f["projected_annual_usd"], 146.0)
+        self.assertEqual(f["projected_24h_return_pct"], 0.40)
+        self.assertEqual(f["projected_annual_return_pct"], 146.0)
+        self.assertEqual(f["projected_annual_return_total_pct"], 29.2)
+        self.assertEqual(f["projected_double_days"], 281)  # ln2/ln(2.46)*365
+        self.assertEqual(d.pnl_snapshot()["bots"]["1"]
+                         ["projected_annual_usd"], 146.0)
+        self.assertEqual(d.pnl_snapshot()["bots"]["1"]
+                         ["projected_annual_return_pct"], 146.0)
+        self.assertEqual(d.pnl_snapshot()["bots"]["1"]
+                         ["projected_double_days"], 281)
+
+    def test_returns_metrics_zero_denominator_fail_soft(self):
+        # no committed capital → % returns are None (never a raise, never
+        # a division by zero); annual USD and the fund-denominated % stay
+        d = self.make_daemon()
+        d.state["active_bots"]["1"] = bot()
+        snap = d.pnl_snapshot()
+        self.assertEqual(snap["fleet"]["projected_annual_usd"], 146.0)
+        self.assertIsNone(snap["fleet"]["projected_24h_return_pct"])
+        self.assertIsNone(snap["fleet"]["projected_annual_return_pct"])
+        self.assertIsNone(snap["fleet"]["projected_double_days"])
+        self.assertEqual(snap["fleet"]
+                         ["projected_annual_return_total_pct"], 29.2)
+        self.assertIsNone(snap["bots"]["1"]
+                          ["projected_annual_return_pct"])
+        self.assertIsNone(snap["bots"]["1"]["projected_double_days"])
+        # zero fund → even the fund-denominated % degrades to None
+        d.config["portfolio"]["total_usd"] = 0
+        self.assertIsNone(d.pnl_snapshot()["fleet"]
+                          ["projected_annual_return_total_pct"])
+
     def test_journal_msg_carries_projection(self):
         d = self.make_daemon()
         d.state["active_bots"]["1"] = bot()

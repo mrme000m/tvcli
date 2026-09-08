@@ -43,6 +43,10 @@ const fmtNum = (v, d = 2) => (v === null || v === undefined || isNaN(v))
   ? "—" : Number(v).toFixed(d);
 const fmtPct = (v) => (v === null || v === undefined || isNaN(v))
   ? "—" : `${(Number(v) * 100).toFixed(1)}%`;
+const fmtDouble = (days) => (days === null || days === undefined || isNaN(days) || Number(days) <= 0)
+  ? "—" : Number(days) < 365 ? `~${Math.round(Number(days))}d`
+  : Number(days) < 730 ? `~${Math.round(Number(days) / 30.44)}mo`
+  : `~${(Number(days) / 365).toFixed(1)}y`;
 
 function relTime(iso) {
   if (!iso) return "—";
@@ -537,7 +541,9 @@ function slotCard(bot) {
         <div class="m-value ${outsideBand ? "m-value--bad" : ""}">${isNum(dd) ? `${fmtNum(dd, 2)}×` : "—"}</div></div>
       <div class="metric"><div class="m-label">budget</div><div class="m-value">${fmtUsd(bot.committed)}</div></div>
       <div class="metric"><div class="m-label" title="model-based expected grid income per 24h, net of round-trip fees">proj /24h</div>
-        <div class="m-value ${bot.projected_24h_usd > 0 ? "m-value--good" : "m-value--dim"}">${bot.projected_24h_usd == null ? "\u2014" : fmtUsd(bot.projected_24h_usd)}</div></div>
+        <div class="m-value ${bot.projected_24h_usd > 0 ? "m-value--good" : "m-value--dim"}">${bot.projected_24h_usd == null ? "\u2014" : `\u2248 ${fmtUsd(bot.projected_24h_usd)}`}</div></div>
+      <div class="metric"><div class="m-label" title="approximate annualized return on this slot's committed budget if the projected grid-income rate held for a year">~ret/yr</div>
+        <div class="m-value ${isNum(bot.projected_annual_return_pct) && Number(bot.projected_annual_return_pct) > 0 ? "m-value--good" : "m-value--dim"}">${isNum(bot.projected_annual_return_pct) ? `\u2248 ${fmtNum(Number(bot.projected_annual_return_pct), 1)}%` : "\u2014"}${isNum(bot.projected_double_days) ? `<span style="color:var(--ink-faint);font-weight:400"> \u00b7 dbl ${fmtDouble(bot.projected_double_days)}</span>` : ""}</div></div>
     </div>
     ${positionOptimizerHTML(bot)}
     ${optimizerTrackerHTML(bot)}
@@ -931,6 +937,12 @@ function renderFleet(ov, st) {
     const pb = livePnl[String(b.slot)];
     if (pb && isNum(pb.projected_24h_usd))
       out.projected_24h_usd = Number(pb.projected_24h_usd);
+    if (pb && isNum(pb.projected_annual_usd))
+      out.projected_annual_usd = Number(pb.projected_annual_usd);
+    if (pb && isNum(pb.projected_annual_return_pct))
+      out.projected_annual_return_pct = Number(pb.projected_annual_return_pct);
+    if (pb && isNum(pb.projected_double_days))
+      out.projected_double_days = Number(pb.projected_double_days);
     return out;
   });
   const bySlot = new Map(bots.map((b) => [String(b.slot), b]));
@@ -1241,7 +1253,10 @@ function fleetPnlData(ov, st) {
      null when the running daemon predates the field. */
   const out = { source: null, realized: null, unrealized: null, net: null,
     completed: null, panic: null, fills: null,
-    committed: null, idle: null, total: null, projected: null };
+    committed: null, idle: null, total: null, projected: null,
+    projected_annual_usd: null, projected_24h_return_pct: null,
+    projected_annual_return_pct: null,
+    projected_annual_return_total_pct: null, projected_double_days: null };
   const ab = (st && st.active_bots) || {};
   const obsList = Object.values(ab).map((b) => (b && b.observed) || {});
   const has = (f) => obsList.some((o) => isNum(o[f]));
@@ -1260,6 +1275,13 @@ function fleetPnlData(ov, st) {
   // projected /24h has no per-bot fallback derivation (it needs the
   // stagnation-policy model inputs) — present only when the daemon reports it
   out.projected = p && isNum(p.projected_24h_usd) ? p.projected_24h_usd : null;
+  // annualized-return extension: also daemon-model-only (needs committed
+  // capital + the projection model), null when the daemon predates them
+  out.projected_annual_usd = p && isNum(p.projected_annual_usd) ? Number(p.projected_annual_usd) : null;
+  out.projected_24h_return_pct = p && isNum(p.projected_24h_return_pct) ? Number(p.projected_24h_return_pct) : null;
+  out.projected_annual_return_pct = p && isNum(p.projected_annual_return_pct) ? Number(p.projected_annual_return_pct) : null;
+  out.projected_annual_return_total_pct = p && isNum(p.projected_annual_return_total_pct) ? Number(p.projected_annual_return_total_pct) : null;
+  out.projected_double_days = p && isNum(p.projected_double_days) ? Number(p.projected_double_days) : null;
   const committedMap = (st && st.committed) || {};
   out.committed = p && isNum(p.committed_usd) ? p.committed_usd
     : Object.values(committedMap).reduce((a, v) => a + (isNum(v) ? Number(v) : 0), 0) || null;
@@ -1330,7 +1352,17 @@ function renderFleetHeader(ov, st) {
   const projCell = `<div class="pnl-cell" title="model-based expected grid income per 24h, net of round-trip fees">
       <div class="m-label">proj /24h</div>
       <div class="m-value ${proj != null && proj > 0 ? "m-value--good" : "m-value--dim"}">${proj == null ? "\u2014" : `\u2248 ${fmtUsd(proj)}`}</div>
-      <div class="pnl-sub pnl-sub--faint">expected grid income (model)</div></div>`;
+      <div class="pnl-sub pnl-sub--faint">expected grid income (model)${p.projected_annual_usd != null && isNum(p.projected_annual_usd) ? ` \u00b7 \u2248 ${fmtUsd(p.projected_annual_usd)}/yr` : ""}</div></div>`;
+
+  // approximate annualized return: the projection rate held for a year,
+  // as a % of committed capital (headline) and of the full fund. Model
+  // estimate only — assumes income persists, ignores compounding.
+  const apr = isNum(p.projected_annual_return_pct) ? Number(p.projected_annual_return_pct) : null;
+  const aprTotal = isNum(p.projected_annual_return_total_pct) ? Number(p.projected_annual_return_total_pct) : null;
+  const retCell = `<div class="pnl-cell" title="approximate annualized return IF the current model-based projected grid-income rate held for a full year (not compounded, not a guarantee) \u00b7 committed = capital at work in grid positions \u00b7 fund = committed + idle">
+      <div class="m-label">~ret /yr</div>
+      <div class="m-value ${apr == null ? "m-value--dim" : apr > 0 ? "m-value--good" : apr < 0 ? "m-value--bad" : "m-value--dim"}">${apr == null ? "\u2014" : `\u2248 ${fmtNum(apr, 1)}%`}</div>
+      <div class="pnl-sub pnl-sub--faint">on committed${aprTotal != null ? ` \u00b7 ${fmtNum(aprTotal, 1)}%/yr on fund` : ""}${isNum(p.projected_double_days) ? ` \u00b7 double \u2248 ${fmtDouble(p.projected_double_days)}` : ""}</div></div>`;
 
   // demo-cap meter: 5/5 means every new deploy is vetoed at the platform cap
   let capCell;
@@ -1373,6 +1405,7 @@ function renderFleetHeader(ov, st) {
           <div class="m-value">${p.fills == null ? "\u2014" : p.fills}</div>
           <div class="pnl-sub">${nBots} active bot${nBots === 1 ? "" : "s"}</div></div>
         ${projCell}
+        ${retCell}
         ${capCell}
       </div>
       <div class="pnl-chart">
@@ -2177,6 +2210,8 @@ function renderFastOptimizer(f, st) {
       ${kv("Last cycle", esc(relTime(o.last_at)))}
       ${kv("Capital", `${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd)} idle · ${esc(cap.free_slots ?? "—")} free slot(s)`, "deployable ceiling = free capital available to commit to challengers")}
       ${kv("Projected /24h", (st && st.pnl && isNum(st.pnl.projected_24h_usd)) ? fmtUsd(Number(st.pnl.projected_24h_usd)) : "—", "model-based expected grid income per 24h, net of round-trip fees (from the fleet PnL snapshot)")}
+      ${kv("Projected return /yr", (st && st.pnl && isNum(st.pnl.projected_annual_return_pct)) ? `${fmtNum(Number(st.pnl.projected_annual_return_pct), 1)}%` : "—", "approximate annualized return on committed capital")}
+      ${kv("Projected doubling time", (st && st.pnl && isNum(st.pnl.projected_double_days)) ? fmtDouble(Number(st.pnl.projected_double_days)) : "—", "approximate time for committed capital to double if the projected rate held")}
     </div></div>
     <div class="card-body--tight table-wrap">
       <table class="ledger">
