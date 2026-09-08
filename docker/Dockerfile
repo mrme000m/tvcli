@@ -50,7 +50,11 @@ RUN npm install -g --no-fund --no-audit @bitwarden/cli \
     && bw --version
 
 # ── Python deps for the daemon's helper imports (wt_browser.py) + tests ────
-RUN pip3 install --break-system-packages --no-cache-dir httpx websockets pytest
+#    pydantic: the wtclient library (paper-profile bootstrap, the wt_library
+#    exit-edit seam, the grid-backtest engine — all fail-soft imports) needs
+#    it at import time; without it every seam silently degrades to its
+#    no-wtclient fallback and the 6 wtclient-dependent tests error on import.
+RUN pip3 install --break-system-packages --no-cache-dir httpx websockets pytest pydantic
 
 # ── PocketBase, pinned per-TARGETARCH (baked; the entrypoint copies it into
 #    agents/grid-autonomy/.pocketbase/ and scripts/setup_pocketbase.sh runs it) ──
