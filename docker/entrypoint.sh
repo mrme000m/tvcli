@@ -3,13 +3,13 @@
 #
 # Brings up, in order: config patch, Xvfb, PocketBase, tvcli serve,
 # CloakBrowser (launch.mjs + wt.mjs session restore), the daemon, the
-# console, dsh web (the GA agent) — then supervises: if the DAEMON dies the
-# whole container shuts down (the VPS restart policy brings it back) —
-# EXCEPT an operator stop (KILL file present), which keeps the console up so
-# the daemon can be restarted from the UI (mirroring the Mac's launchd
-# split); any other component dying is logged and the rest keep running.
+# console — then supervises: if the DAEMON dies the whole container shuts
+# down (the VPS restart policy brings it back) — EXCEPT an operator stop
+# (KILL file present), which keeps the console up so the daemon can be
+# restarted from the UI (mirroring the Mac's launchd split); any other
+# component dying is logged and the rest keep running.
 #
-# GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console,dsh (default: all)
+# GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console (default: all)
 set -uo pipefail
 
 APP=/app
@@ -24,9 +24,9 @@ export PB_PORT="${PB_PORT:-8090}"
 export PB_VERSION="${PB_VERSION:-0.40.2}"
 export PB_ADMIN_EMAIL="${PB_ADMIN_EMAIL:-admin@example.com}"
 
-COMPONENTS="${GRID_COMPONENTS:-xvfb,pb,serve,browser,daemon,console,dsh}"
+COMPONENTS="${GRID_COMPONENTS:-xvfb,pb,serve,browser,daemon,console}"
 has() { case ",$COMPONENTS," in *",$1,"*) return 0;; *) return 1;; esac; }
-enabled_count() { local n=0 c; for c in xvfb pb serve browser daemon console dsh; do has "$c" && n=$((n+1)); done; echo "$n"; }
+enabled_count() { local n=0 c; for c in xvfb pb serve browser daemon console; do has "$c" && n=$((n+1)); done; echo "$n"; }
 
 log() { echo "[grid-entrypoint $(date -u +%H:%M:%S)] $*"; }
 warn() { echo "[grid-entrypoint $(date -u +%H:%M:%S)] WARN: $*" >&2; }
@@ -306,117 +306,6 @@ if has console; then
   track console
   log "console started on :8798"
 fi
-# ── (11b) dsh web — the GA agent (DeepSeek Harness + prime-agent) :3081 ─────
-# Serves the GA-preset default agent over the web UI. The runtime DSH home
-# is the persistent grid-dsh volume (DSH_HOME=/data/dsh, image env); it is
-# seeded from the baked seed home (/opt/dsh-home) on first boot, and on later
-# boots with a changed image revision (.baked-rev) the baked GA preset files
-# refresh per-file — a file the operator edited locally (no longer identical
-# to the previously seeded copy under .last-seed/) is preserved untouched —
-# while the pnpm-managed web profile is replaced wholesale unless
-# .keep-profile marks it. settings.yaml is DERIVED: rendered each boot from
-# the baked template with the runtime CF account id (never baked); the
-# render skips (warns) when a hand-edited settings.yaml is detected.
-# prime-agent's config (PRIME_AGENT_CODING_AGENT_DIR, also in the volume) is
-# rendered from runtime env by /app/docker/prime_agent_config.py — keyed
-# merges, 0600, the key never logged.
-if has dsh; then
-  SEED_HOME=/opt/dsh-home
-  RUN_HOME="${DSH_HOME:-/data/dsh}"
-  export DSH_HOME="$RUN_HOME"
-  export PRIME_AGENT_CODING_AGENT_DIR="$RUN_HOME/prime-agent"
-  mkdir -p "$RUN_HOME"
-
-  BAKED_REV="$(cat "$SEED_HOME/.baked-rev" 2>/dev/null || echo unknown)"
-  SEEDED_REV="$(cat "$RUN_HOME/.seeded-rev" 2>/dev/null || echo none)"
-  if [ "$BAKED_REV" != "$SEEDED_REV" ]; then
-    if [ "$SEEDED_REV" = "none" ]; then
-      log "dsh: first boot — seeding $RUN_HOME from $SEED_HOME (rev $BAKED_REV)"
-      cp -a "$SEED_HOME/." "$RUN_HOME/"
-    else
-      log "dsh: image revision changed ($SEEDED_REV → $BAKED_REV) — refreshing baked files"
-      for f in preset.yml agent.cordis.yml skills/ga-operations/SKILL.md; do
-        if [ ! -e "$RUN_HOME/.agent-presets/ga/$f" ] || cmp -s "$RUN_HOME/.last-seed/ga/$f" "$RUN_HOME/.agent-presets/ga/$f"; then
-          mkdir -p "$RUN_HOME/.agent-presets/ga/$(dirname "$f")"
-          cp -a "$SEED_HOME/.agent-presets/ga/$f" "$RUN_HOME/.agent-presets/ga/$f"
-        else
-          warn "dsh: .agent-presets/ga/$f was edited locally — preserved (image update skipped for it)"
-        fi
-      done
-      if [ -e "$RUN_HOME/.keep-profile" ]; then
-        log "dsh: .keep-profile present — baked web profile left untouched"
-      else
-        rm -rf "$RUN_HOME/profiles/web"
-        mkdir -p "$RUN_HOME/profiles"
-        cp -a "$SEED_HOME/profiles/web" "$RUN_HOME/profiles/web"
-      fi
-    fi
-    echo "$BAKED_REV" > "$RUN_HOME/.seeded-rev"
-    rm -rf "$RUN_HOME/.last-seed"
-    mkdir -p "$RUN_HOME/.last-seed"
-    cp -a "$SEED_HOME/.agent-presets/ga" "$RUN_HOME/.last-seed/ga"
-  fi
-
-  # env bridge — the exact names the dsh/prime-agent Cloudflare stack reads
-  # (prime_stack stages/env_bridge.py): token CLOUDFLARE_AI_TOKEN (falling
-  # back to CLOUDFLARE_API_KEY), account CF_ACCOUNT_ID (falling back to
-  # CLOUDFLARE_ACCOUNT_ID).
-  export CLOUDFLARE_AI_TOKEN="${CLOUDFLARE_AI_TOKEN:-${CLOUDFLARE_API_KEY:-}}"
-  export CF_ACCOUNT_ID="${CF_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:-}}"
-
-  # settings.yaml — derived from the baked template each boot. Skip (warn)
-  # when the current file differs from the last render (hand-edited).
-  if [ -n "$CF_ACCOUNT_ID" ]; then
-    render=1
-    if [ -f "$RUN_HOME/settings.yaml" ] && ! grep -q '@CF_ACCOUNT_ID@' "$RUN_HOME/settings.yaml"; then
-      CUR_SHA="$(sha256sum "$RUN_HOME/settings.yaml" | cut -d' ' -f1)"
-      OLD_SHA="$(cat "$RUN_HOME/.settings.sha256" 2>/dev/null || true)"
-      if [ -n "$OLD_SHA" ] && [ "$CUR_SHA" != "$OLD_SHA" ]; then
-        render=0
-        warn "dsh: $RUN_HOME/settings.yaml was edited locally — preserved (not re-rendered)"
-      fi
-    fi
-    if [ "$render" = "1" ]; then
-      sed "s|@CF_ACCOUNT_ID@|$CF_ACCOUNT_ID|g" "$SEED_HOME/settings.yaml" > "$RUN_HOME/settings.yaml"
-      chmod 600 "$RUN_HOME/settings.yaml"
-      sha256sum "$RUN_HOME/settings.yaml" | cut -d' ' -f1 > "$RUN_HOME/.settings.sha256"
-      log "dsh: settings.yaml rendered for the runtime CF account (default preset: ga)"
-    fi
-  else
-    warn "dsh: no CF account id in env — settings.yaml not rendered (GA LLM sessions need the CLOUDFLARE_* env)"
-  fi
-
-  # prime-agent runtime config — keyed merges from runtime env (never baked).
-  if [ -n "$CF_ACCOUNT_ID" ] && [ -n "$CLOUDFLARE_AI_TOKEN" ]; then
-    if python3 "$APP/docker/prime_agent_config.py"; then
-      log "dsh: prime-agent config rendered (workers delegate on Cloudflare Workers AI)"
-    else
-      warn "dsh: prime_agent_config.py failed — delegated prime-agent workers have no CF provider"
-    fi
-  else
-    warn "dsh: CF keys incomplete — prime-agent config not rendered (delegated workers cannot run CF models)"
-  fi
-
-  # --trusted-host: the /api browser-trust fence accepts the bind host by
-  # default — requests arriving through the CF tunnel carry
-  # Host: dsh.00m.indevs.in and would be rejected without it (dsh-web-app
-  # lib/startup.js; its 0.0.0.0 warning asks exactly for this flag).
-  dsh web --host "${GRID_BIND_HOST:-0.0.0.0}" --port "${DSH_WEB_PORT:-3081}" --no-open \
-    --trusted-host "${DSH_TRUSTED_HOST:-dsh.00m.indevs.in}" \
-    >>"$GRID/state/dsh-web.log" 2>&1 &
-  track dsh
-  up=0
-  for _ in $(seq 1 60); do
-    if curl -s -o /dev/null -m 3 "http://127.0.0.1:${DSH_WEB_PORT:-3081}/" 2>/dev/null; then up=1; break; fi
-    sleep 1
-  done
-  if [ "$up" = "1" ]; then
-    log "dsh web up on :${DSH_WEB_PORT:-3081} (GA agent, DSH_HOME=$RUN_HOME)"
-  else
-    warn "dsh web did not answer :${DSH_WEB_PORT:-3081} within 60s — continuing (see $GRID/state/dsh-web.log)"
-  fi
-fi
-
 
 # ── (12a) WT session keeper — periodic auth probe + credential re-login ────
 # Plain background subshell (NOT tracked in the supervisor: its death must

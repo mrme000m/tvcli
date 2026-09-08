@@ -51,13 +51,6 @@ services:
       # Daemon control plane: GET /health /status /reliability /observe
       # /optimizer, POST /kill /rescreen /optimize /rotate. Also NO AUTH.
       - "8799:8799"
-      # dsh web — the GA agent (DeepSeek Harness + prime-agent stack, GA
-      # preset default). NO AUTH: keep it private (SSH tunnel / firewall) or
-      # behind the Cloudflare tunnel's dsh.00m.indevs.in hostname (add a
-      # Cloudflare Access policy before exposing it — it shells into the
-      # container's world).
-      # host 3082, not 3081: az00's caddy already binds 127.0.0.1:3081.
-      - "3082:3081"
       # NEVER publish 8765 (tvcli serve) or 9222 (Chromium CDP) — they are
       # container-internal dependencies only.
       #
@@ -99,12 +92,6 @@ services:
       # wt-login.mjs (automatic credential re-login). To pre-seed manually:
       #   docker cp wt-session.env grid-autonomy:/app/browser-debug/secrets/runtime/
       - grid-secrets:/app/browser-debug/secrets/runtime
-      # dsh runtime home (DSH_HOME=/data/dsh): the GA agent preset, the
-      # seeded web profile (dsh-prime-orchestrator), settings.yaml and
-      # prime-agent's config + sessions — seeded from the baked /opt/dsh-home
-      # by the entrypoint on first boot, persistent (and operator-editable)
-      # across redeploys thereafter.
-      - grid-dsh:/data/dsh
 
     restart: unless-stopped
     # The daemon saves state and exits 0 on SIGTERM — give it a full minute
@@ -147,5 +134,3 @@ volumes:
     name: grid-pb
   grid-browser-profile:
     name: grid-browser-profile
-  grid-dsh:
-    name: grid-dsh

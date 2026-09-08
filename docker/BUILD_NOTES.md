@@ -33,51 +33,6 @@ docker build -t grid-autonomy:local -f docker/Dockerfile .
   Xvfb + the full Chromium runtime lib set, `xauth` (needed by xvfb-run — first build
   failed without it), procps/psmisc for the supervisor + healthcheck, openssl (PB password
   generation), tzdata.
-- **DSH + prime-agent stack (GA agent)** — inserted AFTER the browser bake and
-  BEFORE the app-source COPYs (both cache directions protected: browser/OS edits
-  don't rebuild it, grid-autonomy source edits don't rebuild it either):
-  - `git` (apt, one package — the `github:` plugin spec clone),
-  - `pnpm@10` + `@deepseek-ai/dsh@0.1.1-rc.2` (npm -g; the EXACT version the
-    dsh-prime-orchestrator compatibility table allows — 0.1.0-rc.7 / 0.1.1-rc.2;
-    `dsh --version` asserted in-build), with the published dsh-web-app's
-    `--host 0.0.0.0` hard-reject patched to the Mac's warn-only "ponytail"
-    form by `docker/dsh_ponytail_patch.py` (exact-string replace, build
-    fails if a future dsh changes the guard — the CF tunnel needs the
-    container bind; verified string-for-string against the 0.1.1-rc.2
-    registry tarball, run 34171775171's dsh-web.log showed the rejection),
-  - prime-agent CLI via the official installer
-    (`app.primeintellect.ai/prime-agent/install.sh`, `setsid --wait … </dev/null`
-    — the prime_stack agent-stage pattern; no controlling tty under buildkit so
-    every prompt takes its default; `command -v prime-agent` + `--version`
-    asserted; the npm-global install lands it on `/usr/bin`),
-  - dsh-prime-orchestrator (`dsh plugin --profile web add
-    github:mrme000m/dsh-prime-orchestrator`) into the baked SEED home
-    `/opt/dsh-home` — pnpm 10.x blocks the git-dep's prepare scripts
-    (ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED, CI run 34169182646), so the
-    install retries through the verified allowBuilds remedy
-    (`docker/pnpm_allowbuilds.py` parses the demanded keys from the failure
-    log into the profile's pnpm-workspace.yaml — a self-contained port of
-    the prime_stack plugin stage's pure functions); the built artifact
-    (`…/node_modules/dsh-prime-orchestrator/lib/index.js`) is asserted,
-  - `docker/ga-preset/` → `/opt/dsh-home/.agent-presets/ga/` (the vendored GA
-    preset, container paths — customSkillDirs second entry `/app/.agents/skills`),
-  - `docker/dsh-settings.yaml` → `/opt/dsh-home/settings.yaml` (template with
-    `@CF_ACCOUNT_ID@` placeholder — the account id is runtime env, never baked),
-  - `.agents/skills/grid-autonomy/` + `.agents/skills/grid-bot/` →
-    `/app/.agents/skills/` (the GA preset's customSkillDirs skill dirs),
-  - `/opt/dsh-home/.baked-rev` written from the `GA_PRESET_REV` build arg (the
-    deploy workflow passes `${{ github.sha }}`) — the entrypoint uses it to
-    detect image revisions and refresh the seeded GA preset / web profile in the
-    `grid-dsh` volume (operator-edited preset files are preserved via the
-    `.last-seed/` comparison).
-  - **No secrets baked**: the CF account id is the template placeholder, the
-    API key arrives at boot via vault_loader, and `docker/prime_agent_config.py`
-    (COPYed next to `patch_config.py`) renders prime-agent's
-    `models/auth/settings.json` from runtime env with keyed merges, mode 0600.
-  - Build-context additions (`.dockerignore` whitelist): `docker/ga-preset/**`,
-    `docker/dsh-settings.yaml`, `docker/prime_agent_config.py`,
-    `.agents/skills/grid-autonomy/**`, `.agents/skills/grid-bot/**` — all source,
-    no secrets (each new skill dir contains exactly one `SKILL.md`).
 - `/app/browser-debug/secrets/runtime/` — empty dir; operators bind-mount `wt-session.env`.
 
 ## Verified (in-container, `docker run --rm --entrypoint bash grid-autonomy:local -c …`)
@@ -116,20 +71,8 @@ daemon's ctl surface answered /health in-container without any external setup.
   other component deaths are logged and the rest keep running.
 - Missing LLM env keys are WARNs by default; `GRID_STRICT_ENV=1` upgrades to fatal
   (mirrors `scripts/start.sh`'s strictness, relaxed for Docker).
-- `GRID_COMPONENTS` subset control: `xvfb,pb,serve,browser,daemon,console,dsh`
+- `GRID_COMPONENTS` subset control: `xvfb,pb,serve,browser,daemon,console`
   (default all); excluding everything gives an idle toolbox shell (`sleep infinity`).
-- The `dsh` component (GA agent web UI, :3081): seeds `DSH_HOME=/data/dsh`
-  from the baked `/opt/dsh-home` on first boot (`.baked-rev` → `.seeded-rev`
-  revision check refreshes the GA preset — preserving operator-edited files —
-  and the web profile on image updates, unless `.keep-profile` exists),
-  renders `settings.yaml` (default preset `ga`, CF Workers AI provider) and
-  prime-agent's config from runtime env each boot, then runs
-  `dsh web --host $GRID_BIND_HOST --port 3081 --no-open
-  --trusted-host ${DSH_TRUSTED_HOST:-dsh.00m.indevs.in}` (the /api
-  browser-trust fence otherwise accepts only the bind host — tunnel requests
-  carry Host: dsh.00m.indevs.in). Its death is a WARN like any non-daemon
-  component; the healthcheck counts it via its HTTP surface on the no-daemon
-  fallback path.
 
 ## Known caveats
 

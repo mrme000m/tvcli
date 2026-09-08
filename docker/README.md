@@ -11,28 +11,17 @@ The image itself is built by `docker/Dockerfile` + `docker/entrypoint.sh`
 `.github/workflows/grid-autonomy-deploy.yml` (push to main on build-context
 paths — auto-deploys, preserving the running mode — plus manual
 `workflow_dispatch` with a `mode` input, `live-paper` default)
-builds the image in CI (stamping the GA preset revision into
-`/opt/dsh-home/.baked-rev` via the `GA_PRESET_REV` build arg), pushes it to
-GHCR (layer-diffed `docker pull` on the host; SSH-stream fallback when
-`GHCR_PULL_TOKEN` is absent), writes `/opt/grid-autonomy/.env` with the
-`BW_*` vault machine credentials from repo secrets, and (re)starts the
-container via `docker/vps-run.sh` with six named volumes (`grid-state`,
-`grid-pb`, `grid-profile`, `grid-secrets`, `grid-bwcli`, `grid-dsh`) so
-everything survives redeploys; `--restart unless-stopped` survives host
-reboots. It also ensures the Cloudflare tunnel ingress for
-`dsh.00m.indevs.in` → `http://grid-autonomy:3081` (the GA agent's web UI)
-when the optional `CF_API_TOKEN` / `CF_ACCOUNT_ID` / `CF_TUNNEL_ID` repo
-secrets are set — absent, the step warns and skips; it never fails the
-deploy, and every other ingress rule on the tunnel (plus the catch-all) is
-preserved verbatim.
+builds the image in CI, pushes it to GHCR (layer-diffed `docker pull` on the
+host; SSH-stream fallback when `GHCR_PULL_TOKEN` is absent), writes
+`/opt/grid-autonomy/.env` with the `BW_*` vault machine credentials from
+repo secrets, and (re)starts the container via `docker/vps-run.sh` with five
+named volumes (`grid-state`, `grid-pb`, `grid-profile`, `grid-secrets`,
+`grid-bwcli`) so everything survives redeploys; `--restart unless-stopped`
+survives host reboots.
 
 SSH host config lives in repo secrets: `SSH_HOST`, `SSH_USER`, `SSH_PORT`,
 `SSH_PRIVATE_KEY` (deploy key for a host user with passwordless sudo +
-docker access). The dsh tunnel step uses three OPTIONAL repo secrets —
-`CF_API_TOKEN` (Cloudflare API token with tunnel-configuration + DNS edit
-rights), `CF_ACCOUNT_ID`, `CF_TUNNEL_ID` (the remotely-managed
-`grid-autonomy` tunnel's id, the one whose connector token is
-`GRID_TUNNEL_TOKEN`). The workflow's `mode` input sets `GRID_MODE` (`live-paper`
+docker access). The workflow's `mode` input sets `GRID_MODE` (`live-paper`
 default, `dry-run` to plan only). Push deploys pass `preserve`: the running
 container's mode is kept (first deploy falls back to `live-paper`, the
 deployment default).
@@ -74,7 +63,7 @@ Consequences:
 
 ## Public hostnames (Cloudflare tunnel)
 
-All five services are published on the indevs domain through the
+All four services are published on the indevs domain through the
 remotely-managed `grid-autonomy` Cloudflare tunnel (managed with the
 [`cf` skill](../.agents/skills/cf/SKILL.md) — also baked into the image with
 its vault tokens, so agents can manage tunnels from inside the container):
@@ -85,23 +74,6 @@ its vault tokens, so agents can manage tunnels from inside the container):
 | `https://grid-ctl.00m.indevs.in` | daemon ctl API :8799 |
 | `https://grid-pb.00m.indevs.in` | PocketBase :8090 |
 | `https://grid-api.00m.indevs.in` | tvcli serve :8765 |
-| `https://dsh.00m.indevs.in` | dsh web — the GA agent (DSH + prime-agent stack, GA preset default) :3081 |
-
-The `dsh` hostname is ensured by the deploy workflow's Cloudflare-API step
-(add/replace the `dsh.00m.indevs.in` ingress rule preserving every other
-rule + the catch-all, plus the DNS CNAME to `<tunnel-id>.cfargotunnel.com`)
-— the tunnel's other hostnames are untouched by it. The dsh web app's
-`/api` browser-trust fence accepts the bind host by default, so the
-entrypoint launches it with
-`--trusted-host "${DSH_TRUSTED_HOST:-dsh.00m.indevs.in}"` — tunnel
-requests carry `Host: dsh.00m.indevs.in` and would be rejected without it
-(override `DSH_TRUSTED_HOST` in `grid.env` if you front `:3081` with a
-different hostname). :3081 is also published on `127.0.0.1:3082` (az00's caddy owns :3081) for SSH-tunnel
-parity:
-
-```sh
-ssh -L 8798:localhost:8798 -L 8799:localhost:8799 -L 3082:localhost:3081 <host>
-```
 
 The `grid-cloudflared` connector runs beside the stack on the `grid-net`
 docker network (ingress targets `http://grid-autonomy:PORT` — no host port
@@ -156,8 +128,8 @@ semantics (control plane, journal kinds, safety rails): the
 
 ## (a) What runs in the container
 
-One container, one supervisor (`docker/entrypoint.sh`), seven components
-selected by `GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console,dsh`:
+One container, one supervisor (`docker/entrypoint.sh`), six components
+selected by `GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console`:
 
 | Component | What it is | Port | Published? |
 |---|---|---|---|
@@ -167,7 +139,6 @@ selected by `GRID_COMPONENTS=xvfb,pb,serve,browser,daemon,console,dsh`:
 | `browser` | CloakBrowser — headful Chromium on CDP, inside Xvfb, profile in the `grid-browser-profile` volume. It is the **WunderTrading session-API transport** | 127.0.0.1:9222 | **never** |
 | `daemon` | `agents/grid-autonomy/daemon.py` — the whole autonomous loop (screen/deliberate/guard/deploy/watch/optimize/rotate/reflect) + its control plane | 8799 | **yes** (compose) |
 | `console` | Mission console — web UI + JSON API over the daemon's state | 8798 | **yes** (compose) |
-| `dsh` | dsh web — the **GA agent**: DeepSeek Harness + prime-agent stack, GA preset (`docker/ga-preset/`) as the default agent, CF Workers AI models from runtime env, prime-agent worker orchestration. Runtime home `DSH_HOME=/data/dsh` (the `grid-dsh` volume, seeded from the baked `/opt/dsh-home` on first boot) | 3081 | **yes** (compose) |
 
 Ports 8765 (tvcli) and 9222 (CDP) are hard dependencies that must stay
 container-internal: 9222 is a full remote-control surface for a logged-in
@@ -453,9 +424,8 @@ grid-autonomy` (daemon). The entrypoint also writes per-component logs into
 the `grid-state` volume — `docker compose exec grid-autonomy ls
 /app/agents/grid-autonomy/state/`:
 `daemon.log`, `console.log`, `tvcli-serve.log`, `browser-launch.log`,
-`wt-restore.log`, `dsh-web.log` (the GA agent's dsh web; the
-runtime home under `/data/dsh` holds its logs and sessions too)
-(PocketBase: `.pocketbase/pb.log` and `.pocketbase/setup.log`). Run cards and the decision journal are in the
+`wt-restore.log` (PocketBase: `.pocketbase/pb.log` and
+`.pocketbase/setup.log`). Run cards and the decision journal are in the
 same volume (`state/reports/`, `state/decisions.jsonl`) — the console's UI
 reads them; see also `agents/grid-autonomy/README.md` "State artifacts".
 
@@ -551,13 +521,6 @@ docker run --rm -v grid-pb:/data -v "$PWD:/backup" alpine tar czf /backup/grid-p
 docker run --rm -v grid-browser-profile:/data -v "$PWD:/backup" alpine tar czf /backup/grid-browser-profile.tgz /data
 ```
 
-`grid-dsh` (the GA agent's runtime home — preset, profile, sessions) backs
-up the same way when you also want the agent state:
-
-```sh
-docker run --rm -v grid-dsh:/data -v "$PWD:/backup" alpine tar czf /backup/grid-dsh.tgz /data
-```
-
 (Optionally stop the stack first for a consistent snapshot:
 `docker compose stop` → back up → `docker compose start`.)
 
@@ -609,14 +572,6 @@ ssh -L 8798:localhost:8798 -L 8799:localhost:8799 user@vps   # then use localhos
   logged-in session) or **8765** (TV-authenticated confluence backend).
   They stay container-internal by design; the compose file does not map
   them — keep it that way.
-- **3081 (dsh web, the GA agent) is an agent console with no built-in
-  auth** — a session there can run shell commands inside the container
-  with the daemon's full env (LLM keys, WT session transport). On the
-  public tunnel hostname (`dsh.00m.indevs.in`) put a Cloudflare Access
-  policy in front of it, exactly like `grid-ctl`/`grid-pb`; locally, use
-  the SSH tunnel. The GA preset itself is safety-briefed (never edit
-  WunderTrading account state without human confirmation, never print
-  secrets) — but the web UI's own surface is unauthenticated.
 - **Secret file permissions**: `grid.env`, `.env`, `wt-session.env` and any
   `accounts.json` → `chmod 600`. Never commit them; never `COPY` them into
   an image (`docker history` bakes layers forever).
