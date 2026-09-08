@@ -1503,9 +1503,9 @@ def llm_payload() -> dict:
     # Models: sidecar wins, then live env, then provider.py defaults.
     model_defaults = {
         "cf": os.environ.get("CF_MODEL", "@cf/zai-org/glm-5.3"),
-        "nvidia": os.environ.get("NVIDIA_MODEL", "meta/llama-3.3-70b-instruct"),
+        "nvidia": os.environ.get("NVIDIA_MODEL", "nvidia/nemotron-3.5-lightning-30b-a3b"),
         "openrouter": os.environ.get("OPENROUTER_MODEL",
-                                     "arcee-ai/trinity-large-preview:free"),
+                                     "nvidia/nemotron-3.5-lightning:free"),
         "mistral": os.environ.get("MISTRAL_MODEL", "mistral-large-latest"),
     }
     key_env = {

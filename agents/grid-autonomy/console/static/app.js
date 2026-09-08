@@ -1486,7 +1486,22 @@ function drawPnlChart(points) {
   const ctx = canvas.getContext && canvas.getContext("2d");
   if (!ctx) return;
   const dpr = window.devicePixelRatio || 1;
-  const W = 360, H = 96;
+  // container-driven width: measure the canvas's parent (.pnl-chart) content
+  // box — clientWidth includes padding, and desktop .pnl-chart carries
+  // padding-left 18px, so subtract both paddings or the canvas pokes past
+  // the card edge. 360 fallback for tests/headless where the element has
+  // no measured box. Clamped so tiny rails don't crush the chart.
+  const parentEl = canvas.parentElement;
+  let parentW = 0;
+  if (parentEl) {
+    const cs = (typeof getComputedStyle === "function")
+      ? getComputedStyle(parentEl) : null;
+    const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
+    const padR = cs ? parseFloat(cs.paddingRight) || 0 : 0;
+    parentW = Math.max(0, parentEl.clientWidth - padL - padR);
+  }
+  const W = parentW > 0 ? Math.min(480, Math.max(240, parentW)) : 360;
+  const H = 96;
   if (canvas.width !== W * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
   canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);

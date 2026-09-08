@@ -947,6 +947,101 @@ class TestPnlPayload(ConsoleTestCase):
         out = server.pnl_payload()
         self.assertEqual(out["source"], "state")   # PB dead/empty → fallback
         self.assertEqual(out["points"][0]["fleet"], {"net": 5.0})
+class TestMobileResponsive(ConsoleTestCase):
+    """Mobile/responsive layer: responsive.css + mobile.js + index wiring.
+
+    Mirrors the TestHTTP pattern — an in-process ThreadingHTTPServer against
+    server.Handler — and reads the static sources straight from disk, so every
+    test stays offline and fast.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
+        cls.port = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever, daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    @staticmethod
+    def static_path(name):
+        return os.path.join(GRID, "console", "static", name)
+
+    @classmethod
+    def read_static(cls, name):
+        with open(cls.static_path(name), encoding="utf-8") as f:
+            return f.read()
+
+    def get(self, path):
+        with urllib.request.urlopen(
+                f"http://127.0.0.1:{self.port}{path}", timeout=5) as resp:
+            return resp.status, resp.headers, resp.read()
+
+    def test_index_references_responsive_layer(self):
+        html = self.read_static("index.html")
+        self.assertIn('<link rel="stylesheet" href="/responsive.css">', html)
+        self.assertIn('<script src="/mobile.js"></script>', html)
+        # load order matters: responsive.css after styles.css, mobile.js after app.js
+        self.assertLess(html.index("/styles.css"), html.index("/responsive.css"))
+        self.assertLess(html.index("/app.js"), html.index("/mobile.js"))
+
+    def test_responsive_css_served(self):
+        status, headers, body = self.get("/responsive.css")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers.get("Content-Type", "").startswith("text/css"),
+                        headers.get("Content-Type"))
+        self.assertGreater(len(body), 1024)  # non-trivial body
+        text = body.decode("utf-8")
+        self.assertIn("@media", text)
+        self.assertIn(".fleet-grid", text)
+        self.assertIn("table.ledger", text)
+
+    def test_mobile_js_served(self):
+        status, headers, body = self.get("/mobile.js")
+        self.assertEqual(status, 200)
+        self.assertTrue(headers.get("Content-Type", "").startswith("text/javascript"),
+                        headers.get("Content-Type"))
+        text = body.decode("utf-8")
+        self.assertIn("bnav", text)          # bottom-nav builder
+        self.assertIn("data-label", text)    # table card-mode injection
+
+    def test_mobile_js_syntax(self):
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        proc = subprocess.run(
+            ["node", "--check", self.static_path("mobile.js")],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_app_js_syntax(self):
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node not available")
+        proc = subprocess.run(
+            ["node", "--check", self.static_path("app.js")],
+            capture_output=True, text=True, timeout=10)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_app_js_canvas_width_is_container_driven(self):
+        """drawPnlChart must derive W from the .pnl-chart parent, not a fixed
+        360px that overflows <360px viewports."""
+        src = self.read_static("app.js")
+        self.assertNotIn("const W = 360", src)
+        self.assertIn("parentElement", src)
+
+    def test_responsive_css_stays_mobile_scoped(self):
+        """The layer must not re-style the >=1180px desktop: no wide-screen
+        (min-width: 1500px) overrides that would fight styles.css."""
+        css_text = self.read_static("responsive.css")
+        self.assertNotIn("(min-width: 1500px)", css_text)
+
 
 
 if __name__ == "__main__":

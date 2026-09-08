@@ -3809,7 +3809,13 @@ class Daemon:
                 age = None
         if age is None:
             return False, "no optimizer cycle yet"
-        bound = 3 * opt_s
+        # 4× the interval (was 3×): the manage loop is sequential, so a
+        # rescreen cycle (~every 15 min) holds the loop for 6–9 min while
+        # the optimizer lane waits; at 3× (540s) the check flapped on
+        # every post-rescreen heartbeat (live az00 2026-09-08: 542s vs
+        # 540s) and the self-nudge it triggered was pure noise. 4× still
+        # catches a genuinely dead lane within ~12 min.
+        bound = 4 * opt_s
         return (age <= bound), f"last cycle {int(max(age, 0))}s ago (bound {int(bound)}s)"
 
     def _hb_check_po_fresh(self):
@@ -3852,7 +3858,8 @@ class Daemon:
         return (rate < warn_rate), f"{err}/{in_hour} error entries ({rate:.0%})"
 
     def _hb_check_pnl_feed(self):
-        """(8) pnl-snapshot feed — exists within 2× its interval."""
+        """(8) pnl-snapshot feed — exists within 3× its interval (the extra
+        slack absorbs one rescreen cycle blocking the sequential loop)."""
         pnl_s = self._pnl_snapshot_interval_s()
         if not pnl_s:
             return True, "pnl snapshots disabled — skipped"
@@ -3868,8 +3875,13 @@ class Daemon:
                 break
         if freshest is None:
             return False, "no pnl-snapshot in the journal ring"
-        return (freshest <= 2 * pnl_s), \
-            f"last snapshot {int(max(freshest, 0))}s ago (bound {int(2 * pnl_s)}s)"
+        # 3× the interval (was 2×): same sequential-loop rationale as the
+        # optimizer bound — a rescreen cycle blocks the snapshot lane for
+        # 6–9 min, so 2× (600s) flapped chronically (live az00 2026-09-08:
+        # 680s). 3× (900s) absorbs one blocked interval and still detects
+        # a dead feed inside 15 min.
+        return (freshest <= 3 * pnl_s), \
+            f"last snapshot {int(max(freshest, 0))}s ago (bound {int(3 * pnl_s)}s)"
 
     def heartbeat_cycle(self, dry_run=True):
         """One loop-health pass: 8 fail-soft checks, a 0–100 score, and

@@ -1,0 +1,280 @@
+/* responsive.css — mobile/tablet layer for the grid/autonomy mission console.
+   Loaded AFTER styles.css, so plain selector order wins over the desktop file.
+   Every rule here is either scoped under a max-width media query or bound to a
+   class that mobile.js toggles at runtime, so the desktop (>=1180px) rendering
+   is unchanged. Design language: the graph-paper ledger vars from styles.css. */
+
+/* ── global overflow guards (no horizontal page scroll, any width) ── */
+
+html, body { overflow-x: hidden; }
+
+main.main,
+.view,
+.card,
+.fleet-layout,
+.fleet-grid,
+.pnl-header,
+.pnl-header-grid,
+.pnl-cells,
+.dec-ev-grid,
+.llm-body,
+.llm-providers,
+.llm-matrix-wrap,
+.slot-card,
+.rail { min-width: 0; }
+
+/* ── table scroll hint (mobile.js adds .table-wrap--hint while a table
+      actually overflows; card mode at <=760px never sets it) ── */
+
+.table-wrap--hint { position: relative; }
+
+.table-wrap--hint::after {
+  content: "";
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 38px;
+  pointer-events: none;
+  background: linear-gradient(90deg, rgba(250, 252, 248, 0), var(--panel));
+}
+
+.table-wrap--hint::before {
+  content: "\2192"; /* → : more columns to the right */
+  position: absolute;
+  right: 8px; top: 10px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* ── modals + toasts: fit short screens, respect notches ── */
+
+.modal-backdrop {
+  padding: 16px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  align-items: center;
+}
+
+.modal {
+  max-height: calc(100dvh - 48px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.toast-wrap {
+  right: max(18px, env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  max-width: min(380px, calc(100vw - 24px));
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   PRIMARY MOBILE TIER — <=760px (phones, small tablets)
+   ══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 760px) {
+
+  /* -- topbar: compact, safe-area aware, chips wrap -- */
+  .topbar {
+    padding: 10px 12px 0;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+  .topbar-row { gap: 10px; align-items: flex-start; }
+  .brand { min-width: 0; }
+  .brand .brand-title { font-size: 18px; }
+  .brand .brand-sub { display: none; } /* account line is on the fleet header too */
+  .statusbar { margin-left: 0; padding-bottom: 8px; gap: 5px; }
+  .chip { font-size: 10px; padding: 3px 8px; gap: 5px; white-space: normal; }
+
+  /* -- tabs: horizontal scroll with affordance -- */
+  .tabs {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    margin-top: 6px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  /* mobile.js adds .tabs--more while the tab strip can still scroll right */
+  .tabs--more::after {
+    content: "";
+    position: sticky;
+    right: 0;
+    flex: none;
+    width: 30px;
+    margin-left: -30px;
+    align-self: stretch;
+    pointer-events: none;
+    background: linear-gradient(90deg, rgba(241, 244, 239, 0), var(--paper));
+  }
+  .tab { padding: 10px 12px 11px; box-sizing: border-box; }
+
+  /* -- main: tighter padding + room for the bottom nav -- */
+  .main {
+    padding: 14px 12px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* -- fleet: one column (kills the 330px minmax overflow) -- */
+  .fleet-grid { grid-template-columns: 1fr; gap: 12px; }
+  .fleet-layout { gap: 12px; }
+
+  /* -- PnL header: shrink the hero, tighter 2-col cells -- */
+  .pnl-header { padding: 12px 14px; }
+  .pnl-header-grid { gap: 10px; }
+  .pnl-hero { padding: 0 0 10px; }
+  .pnl-hero-value { font-size: 26px; }
+  .pnl-cells { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; }
+  .pnl-chart { padding: 10px 0 0; }
+  .veto-cells { gap: 6px; }
+  .veto-chip { font-size: 10px; padding: 3px 8px; white-space: normal; }
+
+  /* -- tables: stacked cards (mobile.js injects data-label + .ledger--cards) -- */
+  table.ledger.ledger--cards { font-size: 12.5px; }
+  table.ledger.ledger--cards thead { display: none; }
+  table.ledger.ledger--cards tbody { display: block; }
+  table.ledger.ledger--cards tr {
+    display: block;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+    background: var(--panel);
+    padding: 4px 10px;
+    margin-bottom: 10px;
+  }
+  table.ledger.ledger--cards tr:hover td { background: transparent; }
+  table.ledger.ledger--cards td {
+    display: block;
+    border-bottom: 1px solid var(--rule-faint);
+    padding: 7px 0;
+    overflow-wrap: anywhere;
+  }
+  table.ledger.ledger--cards td:last-child { border-bottom: none; }
+  table.ledger.ledger--cards td::before {
+    content: attr(data-label);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 2px;
+  }
+  table.ledger.ledger--cards td[data-label=""]::before,
+  table.ledger.ledger--cards td:not([data-label])::before { content: none; }
+  /* long rationale cells: full-width wrap, keep the 2-line clamp */
+  table.ledger.ledger--cards .rationale { max-width: 100%; }
+
+  /* -- iOS zoom guard: 16px controls -- */
+  input, select, textarea { font-size: 16px !important; }
+
+  /* -- touch targets -- */
+  .btn { min-height: 44px; padding: 10px 14px; }
+  .btn--wide { width: 100%; }
+  .tab { min-height: 44px; }
+  .runcard-item { padding: 13px 12px; }
+  .candidate { padding: 11px 12px; }
+
+  /* -- filters / log controls wrap, inputs give up min-width -- */
+  .filter-row { gap: 8px; }
+  .filter-row select,
+  .filter-row input { flex: 1 1 130px; min-width: 0; max-width: 100%; }
+  .log-controls { gap: 8px; }
+  .log-controls input[type="text"] { flex: 1 1 140px; min-width: 0; }
+  .log-controls select { flex: 0 1 auto; min-width: 0; }
+
+  /* -- LLM config panels: single column -- */
+  .llm-top { flex-direction: column; gap: 14px; }
+  .llm-prov-fields { grid-template-columns: 1fr; }
+  .llm-matrix { grid-template-columns: 1fr; }
+
+  /* -- toasts sit above the bottom nav -- */
+  .toast-wrap { bottom: calc(72px + env(safe-area-inset-bottom, 0px)); }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   NARROW PHONE TIER — <=430px
+   ══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 430px) {
+  .brand .brand-title { font-size: 16px; }
+  .chip { font-size: 9.5px; padding: 2px 7px; }
+  .pnl-hero-value { font-size: 24px; }
+  .pnl-cells { grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+  .ctl-grid { grid-template-columns: 1fr; }
+  .modal { padding: 16px 16px; }
+  .slot-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .field { grid-template-columns: 1fr 110px; }
+  .field .f-range { display: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   BOTTOM NAVIGATION — built by mobile.js, visible only <=760px
+   ══════════════════════════════════════════════════════════════════ */
+
+.bnav {
+  display: none; /* JS builds it; CSS decides when it shows */
+}
+
+@media (max-width: 760px) {
+  .bnav {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    z-index: 90;
+    display: flex;
+    gap: 2px;
+    background: var(--panel);
+    border-top: 1.5px solid var(--ink);
+    padding: 4px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+    padding-left: max(4px, env(safe-area-inset-left, 0px));
+    padding-right: max(4px, env(safe-area-inset-right, 0px));
+    box-shadow: 0 -6px 18px rgba(24, 36, 32, 0.08);
+  }
+
+  .bnav button {
+    appearance: none;
+    border: none;
+    background: transparent;
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 48px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 6px 2px;
+    border-radius: 8px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    cursor: pointer;
+    overflow: hidden;
+  }
+
+  .bnav button .bnav-ico {
+    font-size: 15px;
+    line-height: 1;
+    color: var(--ink-soft);
+  }
+
+  .bnav button .bnav-label {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .bnav button.is-active {
+    color: var(--teal);
+    background: var(--teal-wash);
+    font-weight: 600;
+  }
+
+  .bnav button.is-active .bnav-ico { color: var(--teal); }
+}

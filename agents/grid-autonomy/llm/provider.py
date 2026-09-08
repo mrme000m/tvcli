@@ -7,8 +7,8 @@ and models come from env so the harness stays extendable without code edits.
 Env:
   CLOUDFLARE_ACCOUNT_ID / CLOUDFLARE_API_KEY (or CLOUDFLARE_AI_TOKEN)
     CF_MODEL (default @cf/zai-org/glm-5.3)
-  NVIDIA_API_KEY, NVIDIA_MODEL (default meta/llama-3.3-70b-instruct)
-  OPENROUTER_API_KEY, OPENROUTER_MODEL (default arcee-ai/trinity-large-preview:free)
+  NVIDIA_API_KEY, NVIDIA_MODEL (default nvidia/nemotron-3.5-lightning-30b-a3b)
+  OPENROUTER_API_KEY, OPENROUTER_MODEL (default nvidia/nemotron-3.5-lightning:free)
   MISTRAL_API_KEY, MISTRAL_MODEL (default mistral-large-latest)
   GRID_LLM_CHAIN (default "cf,nvidia,openrouter,mistral" — comma order = fallback order)
 
@@ -27,8 +27,12 @@ import time
 import urllib.request
 
 CF_MODEL_DEFAULT = "@cf/zai-org/glm-5.3"
-NVIDIA_MODEL_DEFAULT = "meta/llama-3.3-70b-instruct"
-OPENROUTER_MODEL_DEFAULT = "arcee-ai/trinity-large-preview:free"
+# Defaults verified live 2026-09-08 (console /api/llm/validate all-OK):
+# meta/llama-3.3-70b-instruct now returns HTTP 410 and
+# arcee-ai/trinity-large-preview:free is delisted (404) — nemotron-3.5
+# lightning is the current in-catalog replacement on both providers.
+NVIDIA_MODEL_DEFAULT = "nvidia/nemotron-3.5-lightning-30b-a3b"
+OPENROUTER_MODEL_DEFAULT = "nvidia/nemotron-3.5-lightning:free"
 MISTRAL_MODEL_DEFAULT = "mistral-large-latest"
 
 # Stable role keys for per-agent routing (GRID_LLM_ROLES maps role -> provider).

@@ -227,7 +227,7 @@ class TestHeartbeatChecks(ManageHarness):
                                "at": daemon.utcnow()}]
         ok, detail = d._hb_check_pnl_feed()
         self.assertTrue(ok)
-        self.assertIn("bound 600s", detail)
+        self.assertIn("bound 900s", detail)
         # disabled feed (interval 0) → skipped, not failed
         d.config["watch"]["pnl_snapshot_interval_s"] = 0
         ok, detail = d._hb_check_pnl_feed()
@@ -264,10 +264,11 @@ class TestHeartbeatChecks(ManageHarness):
                 - _dt.timedelta(seconds=30)).isoformat()
             ok, detail = d._hb_check_optimizer_fresh()
             self.assertTrue(ok)
-            # ISO string 10 min old → stale (bound 3×180s = 540s)
+            # ISO string 13 min old → stale (bound 4×180s = 720s; the
+            # slack absorbs one rescreen cycle blocking the loop)
             d.state["optimizer"]["last_at"] = (
                 _dt.datetime.now(_dt.timezone.utc)
-                - _dt.timedelta(minutes=10)).isoformat()
+                - _dt.timedelta(minutes=13)).isoformat()
             ok, detail = d._hb_check_optimizer_fresh()
             self.assertFalse(ok)
             # raw epoch float still supported
