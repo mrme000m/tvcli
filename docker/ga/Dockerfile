@@ -62,8 +62,12 @@ RUN npm install -g --no-fund --no-audit @bitwarden/cli \
 
 # ── Python deps: the grid-autonomy unittest bar — the GA agent verifies its
 #    own improvement work packages against the same suite
-#    (python3 -m unittest discover -s tests -t .) inside the container. ────
-RUN pip3 install --break-system-packages --no-cache-dir httpx websockets pytest
+#    (python3 -m unittest discover -s tests -t .) inside the container.
+#    pydantic: required by the wtclient imports a subset of the suite pulls
+#    in (test_wt_library, test_paper_profile_bootstrap, the position-
+#    optimizer ExitApplySeam tests) — without it those 6 tests error on
+#    import and the verification bar is not honest. ────
+RUN pip3 install --break-system-packages --no-cache-dir httpx websockets pytest pydantic
 
 # ── DSH (deepseek-harness) + prime-agent — the GA agent stack ──────────────
 # The verified install set from bootstrapping/python/prime_stack (stages/

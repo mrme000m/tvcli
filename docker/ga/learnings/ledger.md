@@ -4,6 +4,27 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — Heartbeat freshness bounds must absorb rescreen blocking; delegation gates must be pure shell
+
+Two findings from the 2026-09-08 fresh-deploy audit: (1) The manage loop is sequential, so a rescreen cycle (~every 15 min, 6-9 min long) blocks the optimizer and pnl-snapshot lanes; heartbeat freshness bounds of 3x optimizer interval (540s) and 2x pnl interval (600s) sat right at the worst-case age and flapped amber on every post-rescreen heartbeat (542s vs 540s, 680s vs 600s), each flap firing a pointless self-nudge. Widened to 4x (optimizer) and 3x (pnl) — a dead lane is still caught within 12-15 min. Lesson: heartbeat bounds must be interval + worst-case-blocking, not small multiples. (2) prime-agent delegation autonomousGates strings are executed as shell commands verbatim — appending success-criterion prose like '(skips allowed)' after the command makes /bin/sh fail with a syntax error before anything runs, so the gate can never pass no matter the work quality (worker 0547f2a1 diagnosed this). Gate strings must be pure shell; put criteria in the task prose instead.
+
+Changes:
+- agents/grid-autonomy/daemon.py
+- agents/grid-autonomy/tests/test_daemon_heartbeat.py
+
+
+## 2026-09-08 — LLM fallback legs rot: verify with /api/llm/validate, not key presence
+
+The deployment audit checklist should include POST console /api/llm/validate (live provider ping), because provider keys can be present while the configured models are dead: az00 2026-09-08 nvidia leg returned HTTP 410 (meta/llama-3.3-70b-instruct removed from integrate.api.nvidia.com) and openrouter leg HTTP 404 (arcee-ai/trinity-large-preview:free delisted) — the chain ran fine on mistral+cf so nothing looked broken until the LLM brains panel showed two red legs. Fix path that needs NO restart: POST /api/llm {providers:{nvidia:{model:...},openrouter:{model:...}}} writes state/llm.env (sidecar), the daemon picks it up at the next LLM call via self-heal; then POST /api/llm/validate to confirm. NVIDIA's /v1/models list is public (no auth) and OpenRouter's /api/v1/models is public — use them to pick in-catalog ids. Verified replacements: nvidia/nemotron-3.5-lightning-30b-a3b (direct) and nvidia/nemotron-3.5-lightning:free (openrouter, slow ~40-60s free tier but alive). Source defaults updated so fresh deployments don't boot on dead ids.
+
+Changes:
+- agents/grid-autonomy/llm/provider.py
+- agents/grid-autonomy/console/server.py
+
+## 2026-09-08 — Deploy pipeline silently demotes the fleet to dry-run when the daemon was re-promoted in-container
+
+vps-run.sh GRID_MODE=preserve reads the OLD container's ENV (docker inspect .Config.Env), not the running daemon's ACTUAL mode. When the daemon is re-promoted to live-paper from inside the container (console lifecycle op / start.sh --live-paper), the container env keeps GRID_MODE=dry-run and goes stale — the next push deploy then 'preserves' the stale env and silently boots the new container in dry-run (az00 2026-09-08: the 04:51 push deploy logged 'preserving previous GRID_MODE (dry-run)' although the daemon had been creating paper bots all morning; the fleet ran planning-only for ~47 min until someone re-promoted it at 05:40). Remediation applied: dispatched grid-autonomy-deploy.yml with mode=live-paper explicitly (run 34192676894) so the env is honest again — the dispatch input is the only deliberate mode-change path. Permanent fix (pending): vps-run.sh should detect the daemon's real mode when preserving (e.g. docker exec pgrep -f 'daemon.py --live-paper' on the old container, or the daemon should write its mode to a state-volume marker vps-run.sh reads) — and the deploy health-gate should assert the post-deploy daemon mode matches the pre-deploy daemon mode.
+
 ## 2026-09-08 — Fresh-deploy audit: deploy-loop slot-consumption bug, WT paper-sleeve testnet constraint, workbench env fixes
 
 az00 2026-09-08 audit of the fresh grid-autonomy deployment found: (1) daemon.py rescreen deploy loop consumed the slot on a FAILED live create (deployments.append/free.remove/deployed+=1 ran unconditionally after commit_deploy) — the RAY WT-400 at 02:57 wrongly triggered open_slot, re-splitting the binance sleeve 1x$120 -> 2x$60 ($30 caps) which guard-vetoed every later binance candidate (12+ vetos, 3 rescreens); MON's demo-cap 400 on slot 7 then met slots_hard_max on the next HL candidate. Fix: gate the three consumption points on deploy_ok = dry_run or slot in active_bots (mirrors the existing capacity-note pattern); next same-venue candidate now falls through into the SAME slot in the same cycle. (2) The RAY 400 root cause is a WT-side constraint: RAYUSDT is ABSENT from the Binance futures TESTNET (the venue WT's Binance paper engine executes against) while ZROUSDT trades there — the pair resolves on mainnet futures so guardrails pass and only the create fails; ~10 of the top-60 spot universe affected. Fix: fail-open paper_pair_supported() guard in execution/resolve.py (24h-cached public testnet exchangeInfo) wired into screen_binance BEFORE candle fetches. (3) The grid-ga workbench container is missing pydantic (wtclient import) — 14 phantom test errors; fix: pip3 install --break-system-packages pydantic. (4) tests/test_repair_ledger depends on uncommitted local wt_audit fixtures (root .gitignore *.json rule) and errored in every fresh clone — added a fixture-presence skipUnless (8 expected skips). (5) prime-agent daemon must be started in this container (prime-agent --mode daemon) before daemonBacked:true delegations; delegation event logs may stay empty — poll the session JSONL at /data/dsh/prime-agent/sessions/ instead. (6) resolve.STATE_DIR is a module global that multiple test modules re-point at import time (last import wins) — cache tests must patch it per-test, not at import. Verification bar after all changes: 839 tests OK (skipped=8), order-robust, new regression tests fail on pre-fix code.
@@ -16,7 +37,6 @@ Changes:
 - agents/grid-autonomy/tests/test_paper_pair_guard.py
 - agents/grid-autonomy/tests/test_merge_screen.py
 - agents/grid-autonomy/tests/test_repair_ledger.py
-
 
 ## 2026-09-08 — dsh web --host 0.0.0.0 is hard-rejected in the published npm tarball
 
