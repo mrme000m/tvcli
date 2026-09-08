@@ -4,10 +4,21 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — Tier sizing divisor + WT edit contract: two live bugs that capped capital use and broke PO applies
+
+Verified live 2026-09-08 (fresh deployment, 5 paper bots, full-tier archetype at 40 samples / PF 99, committed $280 of $600, $320 idle): (1) build_ticket_payloads divided the tier worst-case budget by grids_n (ALL lines) though only side_lines ≈ half can fill adversely — the $10 exchange floor then dominated every tier, so even a full-tier neutral-risk bot could only reach ~33% of its $180 slot instead of the designed 50% cap ($90). The reliability ladder was symbolic on capital. Fix: per_line = max(min_cost, alloc_usd / side_lines) — worst-case lands exactly on the tier target; the guard chain (worst ≤ min(tier, 0.5)×slot, committed+worst ≤ 85% ceiling) still binds, size-fit math grids ≤ 2·cap/min_cost still exact. Fatter sizing reaches existing bots at their natural recycle points (profit-exit, rotation) because WT applies amountPerTrade only via stop→edit→restart (echoed-not-applied on live edits — verified in browser-debug/docs/wt/grid-bot-api.md) and stopping an underwater bot would realize losses (never-close-at-a-loss). (2) The position-optimizer apply path 500'd on WT while the daemon's own adjust path succeeded on the same bots: _edit_payload emitted a 7-field partial payload, but the upsert endpoint needs the full compute_upsert contract (exchangeCode, profilesCodes, gridType, initPrice, closest*LevelPrice, stopOnOutOfGrid, …). Fix: overlay the geometry onto a copy of the bot's stored deploy upsert (exit keys stripped first so geometry edits never silently rewrite server exits). (3) The 5-demo-bot paper cap (5/5 active) is the binding constraint on fleet size — fatter per-slot sizing is the only idle-capital lever; capital visibility now ships in the console capital-rail component. (4) Orchestrator gotcha: two delegated workers running the same unittest suite concurrently can fail each other's autonomous quality gate with exit-2 collection errors — always re-run the suite on the integrated tree yourself before trusting either worker's green.
+
+Changes:
+- agents/grid-autonomy/execution/grid_adapter.py
+- agents/grid-autonomy/position_optimizer.py
+- agents/grid-autonomy/tests/test_grid_adapter_exits.py
+- agents/grid-autonomy/tests/test_position_optimizer.py
+- agents/grid-autonomy/console/static/components/capital-rail.js
+
+
 ## 2026-09-08 — Orchestration: subprocess-backed prime-agent delegations cannot be steered mid-flight
 
 delegate without daemonBacked creates a subprocess-backed session: prime_agent send/send_message/prompt all fail with 'Unknown active session' because there is no daemon active session id to address. To add scope to a running subprocess delegation you must stop it and re-delegate a fully self-contained continuation brief (git diff carries the in-flight work; reference it in the new brief instead of describing the code again). Also observed twice this session: workers hitting their autonomousMaxTokens ceiling still finish their work and emit a complete final report while exiting code 1 ('Autonomous quality gate still failing after attempt 1/3: exited 1; autonomous limit reached: maxTokens reached') — the orchestrator must treat the exit code as 'verify me', run the verification bar itself, and not re-dispatch on the exit code alone. And: the delegate 'continue' flag can fail with 'Session is already active' if the most recent saved session is still held — a fresh delegation with a self-contained brief is the reliable path.
-
 
 ## 2026-09-08 — Console /api/llm/health: async pending pattern turns a 70s blocking ping into 13ms
 
