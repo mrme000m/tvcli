@@ -9,8 +9,9 @@
 # same docker network (grid-net) and is reached over docker DNS.
 #
 # Boot order:
-#   (1) vault_loader.sh with BW_VAULT_ONLY=cf — materialize ONLY the
+#   (1) vault_loader.sh with BW_VAULT_ONLY=cf,llm — materialize the
 #       Cloudflare vault items (opencode-cloudflare + cloudflare-tunnels)
+#       AND the LLM provider keys (provider-keys: NVIDIA/OpenRouter/Mistral)
 #       into /data/secrets/grid-vault.env; fail-soft when the BW_* env is
 #       unset (manual/local runs).
 #   (2) source the vault env when produced + bridge the CF env names the
@@ -42,16 +43,21 @@ log "  arch: $(uname -m)   node: $(node --version 2>/dev/null || echo n/a)   pyt
 
 mkdir -p "$DSH_HOME" /data/secrets /data/bw-cli
 
-# ── (1) vault-driven secrets (Cloudflare items only) ────────────────────────
-# The GA container needs NO trading secrets (no WT creds, no LLM chain keys
-# beyond CF) — BW_VAULT_ONLY=cf restricts vault_loader.sh to the two
+# ── (1) vault-driven secrets (Cloudflare + LLM provider items) ──────────────
+# The GA container loads NO trading secrets (no WT creds, no session
+# cookies) — BW_VAULT_ONLY=cf,llm restricts vault_loader.sh to: the two
 # Cloudflare items (opencode-cloudflare: CLOUDFLARE_ACCOUNT_ID/API_KEY;
 # cloudflare-tunnels: CF_ACCOUNT_ID + CF_API_TOKEN_READ/WRITE for the cf
-# skill). Fail-soft: no BW_* env → exit 0 "vault disabled" inside the
-# loader; a failed load warns and continues (bind-mounted/inline env).
+# skill) and the LLM provider keys (provider-keys → NVIDIA_API_KEY,
+# OPENROUTER_API_KEY, MISTRAL_API_KEY, NVIDIA_BASE_URL — the GA's worker
+# fallback chain on dsh's llm-pi-ai providers and prime-agent's
+# nvidia/openrouter/mistral providers, merged fail-soft by
+# prime_agent_config.py only for present keys). Fail-soft: no BW_* env →
+# exit 0 "vault disabled" inside the loader; a failed load warns and
+# continues (bind-mounted/inline env).
 if [ -n "${BW_URL:-}" ] && [ -n "${BW_CLIENTID:-}" ] && [ -n "${BW_CLIENTSECRET:-}" ] && [ -n "${BW_PASSWORD:-}" ]; then
-  log "vault enabled — running vault_loader.sh (BW_VAULT_ONLY=cf)"
-  if BW_VAULT_ONLY=cf bash "$GA/vault_loader.sh"; then
+  log "vault enabled — running vault_loader.sh (BW_VAULT_ONLY=cf,llm)"
+  if BW_VAULT_ONLY=cf,llm bash "$GA/vault_loader.sh"; then
     log "vault load complete"
   else
     warn "vault_loader.sh failed (exit $?) — continuing with inline env"

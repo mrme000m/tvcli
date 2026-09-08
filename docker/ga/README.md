@@ -96,19 +96,41 @@ On the VPS the same `ga-run.sh` is invoked over SSH by
 
 ## Secrets
 
-The container loads **only Cloudflare items** from the vault
-(`BW_VAULT_ONLY=cf` — no trading secrets in this image):
+The container loads **only the Cloudflare + LLM provider items** from the
+vault (`BW_VAULT_ONLY=cf,llm` — no trading secrets in this image):
 
 | Secret | Where | Used for |
 |--------|-------|---------|
 | `BW_URL` / `BW_CLIENTID` / `BW_CLIENTSECRET` / `BW_PASSWORD` | repo secrets → `/opt/grid-ga/.env` | vault_loader machine-auth (same Vaultwarden + creds as the grid deployment) |
 | vault item `opencode-cloudflare` | vault | `CLOUDFLARE_ACCOUNT_ID` + `CLOUDFLARE_API_KEY` → the dsh/prime-agent Cloudflare Workers AI provider (bridged to `CF_ACCOUNT_ID` / `CLOUDFLARE_AI_TOKEN`) |
 | vault item `cloudflare-tunnels` (folder `cloudflare`) | vault | `CF_ACCOUNT_ID` + `CF_API_TOKEN_READ/WRITE` → the `cf` skill inside the agent |
+| vault item `provider-keys` | vault | `NVIDIA_API_KEY` / `OPENROUTER_API_KEY` / `MISTRAL_API_KEY` (+ `NVIDIA_BASE_URL`) → the LLM worker fallback chain (below) |
 | `GH_PUSH_TOKEN` | repo secret → `.env` → container `GH_TOKEN` | `gh auth setup-git` — authenticated pushes from `/srv/tvcli` |
 
 Values are NEVER baked into the image (the settings template carries an
 `@CF_ACCOUNT_ID@` placeholder rendered at boot); `settings.yaml` is mode
 600 and the API key is only ever read from runtime env.
+
+## LLM providers
+
+**Cloudflare Workers AI is GA's own model** (`cloudflare-workers-ai`
+`@cf/zai-org/glm-5.3` — the `agent-default-model` in dsh-settings.yaml and
+prime-agent's `defaultProvider`/`defaultModel`). The vault's `provider-keys`
+item supplies the worker fallback chain, mirroring the grid-autonomy
+daemon's LLM chain order (CF → Nvidia → OpenRouter, plus Mistral):
+
+| Provider | Endpoint | Models | Role |
+|----------|----------|--------|------|
+| `cloudflare-workers-ai` | `…/accounts/<id>/ai/v1` | glm-5.3 (default), glm-5.2/-flash, DeepSeek v4, Qwen, Kimi | **GA default** |
+| `nvidia` | `https://integrate.api.nvidia.com/v1` (vault `NVIDIA_BASE_URL` override) | `meta/llama-3.3-70b-instruct` | fallback 1 (worker delegation) |
+| `openrouter` | `https://openrouter.ai/api/v1` | `arcee-ai/trinity-large-preview:free`, `nvidia/nemotron-3-nano-omni…-reasoning:free`, `poolside/laguna-s-2.1:free`, `nvidia/nemotron-3.5-lightning:free` | fallback 2 (free tier) |
+| `mistral` | `https://api.mistral.ai/v1` | `mistral-large-latest` | arbiters / pin-tolerant tasks |
+
+`prime_agent_config.py` keyed-merges nvidia/openrouter/mistral into the
+prime-agent `models.json`/`auth.json` **only when the provider's key is
+present** in the vault env (absent → skipped silently; CF stays required for
+exit 0 and remains the default); the dsh `llm-pi-ai.providers` section
+carries the same providers with `apiKeyEnv` resolution at request time.
 
 ## Deploying
 

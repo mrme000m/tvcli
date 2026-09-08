@@ -1,11 +1,17 @@
 # Managed template — rendered into the runtime DSH home by the image's
-# entrypoint (docker/entrypoint.sh, dsh component): the @CF_ACCOUNT_ID@
-# placeholder is substituted from the runtime environment (CF_ACCOUNT_ID,
-# falling back to CLOUDFLARE_ACCOUNT_ID — the env names the dsh/prime-agent
-# Cloudflare provider stack expects; see bootstrapping/python/prime_stack/
-# stages/{dsh_config,env_bridge}.py). NO secrets live here: the API key is
-# read at request time from the apiKeyEnv variable (CLOUDFLARE_AI_TOKEN,
-# bridged from CLOUDFLARE_API_KEY by the entrypoint when unset).
+# entrypoint (docker/ga/entrypoint.sh): the @CF_ACCOUNT_ID@ placeholder is
+# substituted from the runtime environment (CF_ACCOUNT_ID, falling back to
+# CLOUDFLARE_ACCOUNT_ID — the env names the dsh/prime-agent Cloudflare
+# provider stack expects; see bootstrapping/python/prime_stack/
+# stages/{dsh_config,env_bridge}.py). NO secrets live here: the API keys are
+# read at request time from the apiKeyEnv variables (CLOUDFLARE_AI_TOKEN,
+# bridged from CLOUDFLARE_API_KEY by the entrypoint when unset; NVIDIA/
+# OPENROUTER/MISTRAL_API_KEY sourced from the vault env via the entrypoint's
+# BW_VAULT_ONLY=cf,llm vault_loader run — absent keys simply fail at request
+# time, the provider entries themselves are harmless).
+# CF Workers AI is GA's own model (default); nvidia/openrouter/mistral are
+# the worker fallback chain, mirroring the grid-autonomy daemon's LLM chain
+# order (CF → Nvidia → OpenRouter, plus Mistral).
 agent-default-model:
   provider: cloudflare-workers-ai
   model: "@cf/zai-org/glm-5.3"
@@ -55,3 +61,45 @@ llm-pi-ai:
           name: "glm53flash"
           contextWindow: 1048576
           maxTokens: 128000
+    nvidia:
+      displayName: nvidia
+      apiKeyEnv: NVIDIA_API_KEY
+      api: openai-completions
+      baseURL: https://integrate.api.nvidia.com/v1
+      models:
+        - id: meta/llama-3.3-70b-instruct
+          name: "NVIDIA / Llama 3.3 70B Instruct"
+          contextWindow: 131072
+          maxTokens: 32768
+    openrouter:
+      displayName: openrouter
+      apiKeyEnv: OPENROUTER_API_KEY
+      api: openai-completions
+      baseURL: https://openrouter.ai/api/v1
+      models:
+        - id: arcee-ai/trinity-large-preview:free
+          name: "OpenRouter / Trinity Large Preview (free)"
+          contextWindow: 131072
+          maxTokens: 32768
+        - id: nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free
+          name: "NVIDIA / Nemotron 3 Nano Omni (free)"
+          contextWindow: 131072
+          maxTokens: 32768
+        - id: poolside/laguna-s-2.1:free
+          name: "Poolside / Laguna S 2.1 (free)"
+          contextWindow: 131072
+          maxTokens: 32768
+        - id: nvidia/nemotron-3.5-lightning:free
+          name: "NVIDIA / Nemotron 3.5 Lightning (free)"
+          contextWindow: 131072
+          maxTokens: 32768
+    mistral:
+      displayName: mistral
+      apiKeyEnv: MISTRAL_API_KEY
+      api: openai-completions
+      baseURL: https://api.mistral.ai/v1
+      models:
+        - id: mistral-large-latest
+          name: "Mistral / Large Latest"
+          contextWindow: 131072
+          maxTokens: 32768

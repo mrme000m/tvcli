@@ -134,8 +134,8 @@ RUN set -eux; \
 #    /srv/tvcli workbench (host-mounted git clone), NOT baked paths. ──────
 COPY docker/ga/ga-preset/ /opt/dsh-home/.agent-presets/ga/
 COPY docker/ga/dsh-settings.yaml /opt/dsh-home/settings.yaml
-# ga scripts: the runtime supervisor, healthcheck, vault loader (BW_VAULT_ONLY=cf
-# subset — only the Cloudflare items) and the prime-agent config renderer.
+# ga scripts: the runtime supervisor, healthcheck, vault loader (BW_VAULT_ONLY=cf,llm
+# subset — the Cloudflare + LLM provider items) and the prime-agent config renderer.
 COPY docker/ga/entrypoint.sh /app/ga/entrypoint.sh
 COPY docker/ga/healthcheck.sh /app/ga/healthcheck.sh
 COPY docker/ga/vault_loader.sh /app/ga/vault_loader.sh
