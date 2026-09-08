@@ -181,6 +181,42 @@ For every natural-language update request from the human:
    deploy picked it up (a push to main auto-deploys; the new container
    restarts the daemon with the new code and preserves all state volumes).
 
+## Self-improvement loop
+
+GA distills each session's findings into the repo so the same problem is
+never rediscovered twice. The loop contract, the entry format, and the
+write rules live in `docker/ga/learnings/README.md`; the ledger itself is
+`docker/ga/learnings/ledger.md` (reverse-chronological, newest first).
+
+Journal a learning with the repo's tool (stdlib-only, no network, no
+secrets, no git operations):
+
+```sh
+python3 /srv/tvcli/docker/ga/ga_learn.py add \
+  --title "Short imperative title" \
+  --body "The verified knowledge: cause, effect, consequence." \
+  [--changes "docker/ga/foo.py,docker/ga/bar.sh"]
+python3 /srv/tvcli/docker/ga/ga_learn.py tail [--count 5]
+```
+
+- **When to write**: end of every substantive session (the (4) SELF-IMPROVE
+  persona duty), after any incident or fix once the root cause is
+  understood, and the second time a gotcha bites — bump the existing entry
+  instead of writing a near-duplicate.
+- **Format**: one `## YYYY-MM-DD — <title>` entry: a short body of verified
+  knowledge, plus an optional `Changes:` list of the files the learning
+  caused to change.
+- **KNOWLEDGE, not logs**: never secrets, raw dumps, or transient progress;
+  verified true, concise, written for a reader who has not seen the session.
+- **Update the code path**: when a finding warrants it, update the GA
+  code/preset/skill under `docker/ga/**` accordingly — then commit and
+  (only with explicit human confirmation) push; pushes touching
+  `docker/ga/**` ride the ga-deploy workflow and rebuild THIS grid-ga
+  container, which is the delivery path for GA-stack changes.
+- **Confirmation guardrail**: `ga_learn.py` only WRITES the ledger — no
+  commit, no push. Pushing to main always requires explicit human
+  confirmation in the web UI (push = production auto-deploy).
+
 Hard rules: never push to main without explicit human confirmation in the
 web UI (push = production auto-deploy); never edit WunderTrading account
 state (bot apply paths stay advisory-only — `position_optimizer.apply:

@@ -140,7 +140,9 @@ COPY docker/ga/entrypoint.sh /app/ga/entrypoint.sh
 COPY docker/ga/healthcheck.sh /app/ga/healthcheck.sh
 COPY docker/ga/vault_loader.sh /app/ga/vault_loader.sh
 COPY docker/ga/prime_agent_config.py /app/ga/prime_agent_config.py
-RUN chmod +x /app/ga/entrypoint.sh /app/ga/healthcheck.sh /app/ga/vault_loader.sh \
+# ga_learn.py: the self-improvement-loop journaling tool (the ledger it writes lives in the repo/workbench, not the image).
+COPY docker/ga/ga_learn.py /app/ga/ga_learn.py
+RUN chmod +x /app/ga/entrypoint.sh /app/ga/healthcheck.sh /app/ga/vault_loader.sh /app/ga/ga_learn.py \
     && mkdir -p /data/dsh /data/secrets /data/bw-cli /srv/tvcli \
     && printf '%s\n' "${GA_PRESET_REV}" > /opt/dsh-home/.baked-rev
 
