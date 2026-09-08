@@ -186,11 +186,21 @@ else
     warn "workbench: git pull --ff-only failed (diverged or offline) — local work preserved, never reset"
   fi
 fi
+# Push auth: persist the token into gh's own config store, NOT just the
+# env. dsh model shells are spawned with a scrubbed parent env (dsh-subprocess
+# scrubbedParentEnv() drops token-named vars like GH_TOKEN/GITHUB_TOKEN), so a
+# GH_TOKEN env var alone never reaches the GA agent's bash tool — git push /
+# gh CLI auth failed with "token not found" in the dsh web UI. Persisting the
+# token via `gh auth login --with-token` (writes /root/.config/gh/hosts.yml)
+# makes `gh auth git-credential` (the /root/.gitconfig helper below) and
+# `gh run watch` resolve it WITHOUT any env var. Re-provisioned on every boot
+# (/root is not a volume) — idempotent.
 if [ -n "${GH_TOKEN:-}" ]; then
-  if gh auth setup-git >/dev/null 2>&1; then
-    log "workbench: gh auth setup-git done (GH_TOKEN present — pushes to origin enabled)"
+  if gh auth setup-git >/dev/null 2>&1 \
+     && printf '%s' "$GH_TOKEN" | gh auth login --with-token --hostname github.com >/dev/null 2>&1; then
+    log "workbench: gh auth persisted (GH_TOKEN → gh config; git push + gh CLI work env-free)"
   else
-    warn "workbench: gh auth setup-git failed — git pushes may lack credentials"
+    warn "workbench: gh auth setup-git / login failed — git pushes may lack credentials"
   fi
 else
   log "workbench: no GH_TOKEN — read-only workbench (no pushes from this boot)"
