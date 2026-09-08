@@ -76,6 +76,9 @@ on:
       # docs-only changes never redeploy (last match wins)
       - '!docker/README.md'
       - '!docker/BUILD_NOTES.md'
+      # the GA agent stack deploys via ga-deploy.yml ONLY — a grid-ga change
+      # must never restart the trading container (last match wins)
+      - '!docker/ga/**'
   workflow_dispatch:
     inputs:
       mode:
