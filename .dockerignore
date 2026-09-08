@@ -27,6 +27,7 @@
 !docker/vault_loader.sh
 !docker/prime_agent_config.py
 !docker/pnpm_allowbuilds.py
+!docker/dsh_ponytail_patch.py
 !docker/ga-preset/
 !docker/ga-preset/**
 !docker/dsh-settings.yaml

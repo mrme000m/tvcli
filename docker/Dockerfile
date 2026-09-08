@@ -112,6 +112,7 @@ RUN set -eux; \
 # is an @CF_ACCOUNT_ID@ placeholder in the settings template, rendered at
 # boot from runtime env; API keys stay runtime-env via vault_loader.
 ARG GA_PRESET_REV=dev
+COPY docker/dsh_ponytail_patch.py /tmp/dsh_ponytail_patch.py
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends git; \
@@ -119,6 +120,8 @@ RUN set -eux; \
     npm install -g --no-fund --no-audit pnpm@10; \
     npm install -g --no-fund --no-audit @deepseek-ai/dsh@0.1.1-rc.2; \
     rm -rf /root/.npm/_cacache; \
+    python3 /tmp/dsh_ponytail_patch.py \
+        "$(npm root -g)/@deepseek-ai/dsh/node_modules/@deepseek-ai/dsh-web-app/lib/startup.js"; \
     dsh --version
 
 # prime-agent CLI — official installer (the verified pattern from the

@@ -39,7 +39,12 @@ docker build -t grid-autonomy:local -f docker/Dockerfile .
   - `git` (apt, one package — the `github:` plugin spec clone),
   - `pnpm@10` + `@deepseek-ai/dsh@0.1.1-rc.2` (npm -g; the EXACT version the
     dsh-prime-orchestrator compatibility table allows — 0.1.0-rc.7 / 0.1.1-rc.2;
-    `dsh --version` asserted in-build),
+    `dsh --version` asserted in-build), with the published dsh-web-app's
+    `--host 0.0.0.0` hard-reject patched to the Mac's warn-only "ponytail"
+    form by `docker/dsh_ponytail_patch.py` (exact-string replace, build
+    fails if a future dsh changes the guard — the CF tunnel needs the
+    container bind; verified string-for-string against the 0.1.1-rc.2
+    registry tarball, run 34171775171's dsh-web.log showed the rejection),
   - prime-agent CLI via the official installer
     (`app.primeintellect.ai/prime-agent/install.sh`, `setsid --wait … </dev/null`
     — the prime_stack agent-stage pattern; no controlling tty under buildkit so
