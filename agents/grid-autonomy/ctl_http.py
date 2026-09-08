@@ -148,12 +148,32 @@ def status_payload(daemon):
             pnl["bots"] = snap.get("bots") or {}
     except Exception:
         pnl = {}
-    cap = st.get("demo_bot_cap")
-    active_n = len(st.get("active_bots") or {})
-    try:
-        headroom = int(cap) - active_n if cap is not None else None
-    except (TypeError, ValueError):
-        headroom = None
+    # demo_cap is per-paper-profile (gap-report 2026-09-07): project the
+    # per-profile map for the console rail, plus a `total` rollup for
+    # legacy readers and a fallback to the scalar when the per-profile
+    # dict is empty.
+    per = st.get("demo_bot_caps") or {}
+    profiles = st.get("profiles") or []
+    paper_codes = {p.get("code") for p in profiles if p.get("paperTrading")}
+    active = st.get("active_bots") or {}
+    per_profile = {}
+    for code in paper_codes:
+        n = sum(1 for b in active.values()
+                if isinstance(b, dict) and b.get("profile_code") == code)
+        per_profile[code] = {
+            "cap": per.get(code),
+            "active": n,
+            "headroom": (per[code] - n) if (code in per and isinstance(per[code], int)) else None,
+        }
+    total_cap = max((int(v["cap"]) for v in per_profile.values()
+                     if isinstance(v.get("cap"), int)), default=None)
+    total_active = sum((v.get("active") or 0) for v in per_profile.values())
+    demo_cap = {
+        "per_profile": per_profile,
+        "total": {"cap": total_cap,
+                  "active": total_active,
+                  "headroom": (total_cap - total_active) if total_cap else None},
+    }
     return {
         "slots": st["slots"],
         "active_bots": st["active_bots"],
@@ -168,8 +188,7 @@ def status_payload(daemon):
         "last_cycle": st.get("last_cycle"),
         "journal_tail": st["journal"][-10:],
         "pnl": pnl,
-        "demo_cap": {"cap": cap, "active": active_n,
-                     "headroom": headroom},
+        "demo_cap": demo_cap,
         # loop-health heartbeat block (None until the first cycle) + the
         # data-feed observability tails (fail-soft empty shapes)
         "heartbeat": st.get("heartbeat"),

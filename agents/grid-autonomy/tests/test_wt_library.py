@@ -150,6 +150,34 @@ class TestGridSetExits(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("bad exit", result["error"])
 
+    def test_live_wun_api_error_envelope_carries_status_and_body(self):
+        """The gap-report 2026-09-07: an HTTP 500 was journaled as just
+        'Internal Server Error' — the operator could not see the WT
+        response body. ``_wun_error_envelope`` must surface status_code
+        + response_text + exception_type from WunApiError."""
+        from wtclient.errors import WunApiError
+        body = '{"code": 500, "message": "Internal Server Error"}'
+        with patch("execution.wt_library.get_wun") as gw:
+            fake_wun = MagicMock()
+            fake_wun.grid.set_exits.side_effect = WunApiError(
+                "Internal Server Error", status_code=500,
+                url="https://api.wundertrading.com/grid_bots/upsert",
+                response_text=body)
+            gw.return_value = fake_wun
+            result = wt_library.grid_set_exits("bot1", take_profit=1.5,
+                                               dry_run=False)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status_code"], 500)
+        self.assertEqual(result["response_text"], body)
+        self.assertEqual(result["exception_type"], "WunApiError")
+        self.assertEqual(result["transport"], "wtclient.GridClient.set_exits")
+        # and the daemon's journal summary helper surfaces the status + body
+        # (imported here to verify the round trip; uses the same envelope)
+        import daemon as _daemon  # noqa: E402  (avoid module-level import cost)
+        summary = _daemon._edit_error_summary(result)
+        self.assertIn("HTTP 500", summary)
+        self.assertIn("Internal Server Error", summary)
+
     def test_live_generic_exception_returns_ok_false(self):
         with patch("execution.wt_library.get_wun") as gw:
             fake_wun = MagicMock()

@@ -776,17 +776,28 @@ class TestCtlStatusPayload(ManageHarness):
     def test_status_has_pnl_and_demo_cap(self):
         import ctl_http
         d = self.make_daemon()
+        # paper profile on the same exchange as the active bot so
+        # _count_paper_bots groups the active bot under that profile
+        d.state["profiles"] = [
+            {"code": "profile-1", "name": "demo-hype",
+             "exchange": "HYPERLIQUID_SWAP", "paperTrading": True},
+        ]
         d.state["active_bots"]["1"] = {
-            "symbol": "DOGE", "observed": {"status": "active",
-                                            "realized_pnl": 0.5,
-                                            "unrealized_pnl": -0.25,
-                                            "fills_24h": 2}}
-        d.state["demo_bot_cap"] = 5
+            "symbol": "DOGE", "venue": "hyperliquid",
+            "profile_code": "profile-1",
+            "observed": {"status": "active",
+                         "realized_pnl": 0.5,
+                         "unrealized_pnl": -0.25,
+                         "fills_24h": 2}}
+        d.state["demo_bot_caps"] = {"profile-1": 5}
         payload = ctl_http.status_payload(d)
         self.assertEqual(payload["pnl"]["realized"], 0.5)
         self.assertEqual(payload["pnl"]["unrealized"], -0.25)
         self.assertAlmostEqual(payload["pnl"]["net"], 0.25)
-        self.assertEqual(payload["demo_cap"],
+        # gap-report 2026-09-07: demo_cap is per-paper-profile now
+        self.assertEqual(payload["demo_cap"]["per_profile"]["profile-1"],
+                         {"cap": 5, "active": 1, "headroom": 4})
+        self.assertEqual(payload["demo_cap"]["total"],
                          {"cap": 5, "active": 1, "headroom": 4})
         # the pre-existing blocks are all still there
         for key in ("slots", "active_bots", "committed", "live_allow",
@@ -798,10 +809,11 @@ class TestCtlStatusPayload(ManageHarness):
         import ctl_http
         d = self.make_daemon()
         d.state["active_bots"]["1"] = {
-            "symbol": "DOGE", "observed": {"status": "active",
-                                            "realized_pnl": 0.5,
-                                            "unrealized_pnl": -0.25,
-                                            "fills_24h": 2}}
+            "symbol": "DOGE", "venue": "hyperliquid",
+            "observed": {"status": "active",
+                         "realized_pnl": 0.5,
+                         "unrealized_pnl": -0.25,
+                         "fills_24h": 2}}
         payload = ctl_http.status_payload(d)
         # the fleet totals stay flat alongside the per-bot map
         self.assertEqual(payload["pnl"]["realized"], 0.5)
@@ -816,9 +828,17 @@ class TestCtlStatusPayload(ManageHarness):
     def test_demo_cap_unknown_when_not_learned(self):
         import ctl_http
         d = self.make_daemon()
+        # clear the harness's pre-populated profiles + caps so the
+        # projection starts from the empty/None state
+        d.state["profiles"] = []
+        d.state["demo_bot_caps"] = {}
+        d.state["demo_bot_cap"] = None
         payload = ctl_http.status_payload(d)
-        self.assertIsNone(payload["demo_cap"]["cap"])
-        self.assertIsNone(payload["demo_cap"]["headroom"])
+        # no paper profiles configured + no cap learned → per_profile
+        # map is empty, totals are all None
+        self.assertEqual(payload["demo_cap"]["per_profile"], {})
+        self.assertIsNone(payload["demo_cap"]["total"]["cap"])
+        self.assertIsNone(payload["demo_cap"]["total"]["headroom"])
 
     def test_pnl_block_fail_soft(self):
         import ctl_http
@@ -832,7 +852,9 @@ class TestCtlStatusPayload(ManageHarness):
 
         payload = ctl_http.status_payload(_D())
         self.assertEqual(payload["pnl"], {})
-        self.assertEqual(payload["demo_cap"]["active"], 0)
+        # no paper profiles → per_profile empty, total active is 0
+        self.assertEqual(payload["demo_cap"]["per_profile"], {})
+        self.assertEqual(payload["demo_cap"]["total"]["active"], 0)
 
 
 # ── work item 5: demo-cap nudge gating ─────────────────────────────────

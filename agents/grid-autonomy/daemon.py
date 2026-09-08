@@ -63,7 +63,10 @@ WUN_SCRIPTS = os.path.normpath(os.path.join(
     HERE, "..", "..", ".agents", "skills", "wundertrading", "scripts"))
 sys.path.insert(0, WUN_SCRIPTS)
 
-from stagnation import is_stagnant, slot_plan, derive_policy  # noqa: E402
+from stagnation import (  # noqa: E402
+    is_stagnant, slot_plan, derive_policy,
+    CARRY_AFTER_K, CARRY_MIN_H, CARRY_MAX_H,
+    CARRY_BREAK_EVEN_BUFFER_USD)
 from swarm import deliberate  # noqa: E402
 from guardrails import deploy as guard_deploy  # noqa: E402
 import grid_adapter  # noqa: E402
@@ -460,6 +463,17 @@ DEFAULT_STATE = {
     "last_observe": {},        # latest observe_all() result (GET /observe)
     "last_adjust": {},         # slot -> epoch of last in-place grid_edit
     "profiles": [],            # last grid_profiles() snapshot
+    # gap-report 2026-09-07: WT's "Demo Trading Grid Bots" cap is
+    # PER-PAPER-PROFILE, not per-account. The old single scalar
+    # `demo_bot_cap` over-counted (the fleet has 2 paper profiles,
+    # each with its own 5-bot cap). `demo_bot_caps` is the per-
+    # profile dict keyed by profile_code; the legacy scalar is kept
+    # below for the one-shot migration at boot.
+    "demo_bot_caps": {},
+    "demo_bot_cap": None,
+    "carry_pray": {},          # bot_code -> {bot_record, carry_since,
+                               # target_tp_usd, source_slot, decision_id,
+                               # take_profit_applied, ...} — see fix #6
 }
 
 # heartbeat defaults — config.yaml `heartbeat:` section overrides these
@@ -795,11 +809,29 @@ ADJUST_FAILED_RETRY_S = 600
 
 
 def _edit_error_summary(res):
-    """One-line summary of a failed grid_edit_safe result (journal msg)."""
-    err = (res or {}).get("error")
+    """One-line summary of a failed grid_edit_safe result (journal msg).
+
+    Pulls the status_code + first chunk of response_text out of the
+    rich envelope ``wt_library._wun_error_envelope`` builds, so the
+    operator can diagnose an HTTP 500 from the journal without digging
+    through PocketBase. Falls back to the 120-char stdout head for any
+    non-WT envelope.
+    """
+    r = res or {}
+    parts = []
+    if r.get("status_code") is not None:
+        parts.append(f"HTTP {r['status_code']}")
+    err = r.get("error")
     if not err:
-        err = " ".join(str((res or {}).get("stdout") or "").split())[:120]
-    return str(err)
+        err = " ".join(str(r.get("stdout") or "").split())[:120]
+        if err:
+            parts.append(err)
+    else:
+        parts.append(str(err))
+    rt = r.get("response_text")
+    if rt and len(parts) < 2:
+        parts.append((rt or "")[:200])
+    return " — ".join(parts) if parts else "unknown error"
 
 
 def grid_edit_safe(bot_code, upsert, dry_run=True):
@@ -872,6 +904,104 @@ def demo_cap_from_error(err):
     m = re.search(r"Demo Trading Grid Bots.*?Limit:\s*(\d+)",
                   err or "", re.S)
     return int(m.group(1)) if m else None
+
+
+def _migrate_demo_bot_caps(state):
+    """One-shot migration: legacy single-scalar ``demo_bot_cap`` → per-profile
+    ``demo_bot_caps``. Idempotent; safe to call on every boot.
+
+    If the legacy scalar is set AND the per-profile dict is empty, the
+    cap is shared with the per-profile dict for every paper profile that
+    currently has ≥1 bot — a conservative seed that keeps the
+    ``manage_cycle`` veto at the legacy effective level until the
+    health-cycle relearn can lift each profile individually.
+    """
+    legacy = state.get("demo_bot_cap")
+    per = state.get("demo_bot_caps") or {}
+    if legacy is None or per:
+        return
+    seed = {}
+    active = state.get("active_bots") or {}
+    profiles = state.get("profiles") or []
+    paper_codes = {p.get("code") for p in profiles if p.get("paperTrading")}
+    for slot, bot in active.items():
+        code = bot.get("profile_code")
+        if not code or code not in paper_codes:
+            continue
+        seed.setdefault(code, legacy)
+    state["demo_bot_caps"] = seed
+
+
+def _demo_cap_for_profile(state, profile_code):
+    """The learned per-profile demo (paper) cap, or None when unknown.
+
+    Per-profile (keyed by ``profile_code``) is the WT-platform truth —
+    the limit appears on each paper profile in the UI independently.
+    Falls back to the legacy single scalar for backward compat.
+    """
+    if not profile_code:
+        return None
+    per = (state.get("demo_bot_caps") or {}).get(profile_code)
+    if per is not None:
+        try:
+            return int(per)
+        except (TypeError, ValueError):
+            return None
+    legacy = state.get("demo_bot_cap")
+    if legacy is None:
+        return None
+    try:
+        return int(legacy)
+    except (TypeError, ValueError):
+        return None
+
+
+def _count_paper_bots(state, profile_code):
+    """Number of active bots on a given paper profile, for the per-profile
+    demo-cap gate. Falls back to exchange+name matching when the bot
+    record has no profile_code field (older adoptions / WT-side changes
+    that the daemon hasn't seen yet)."""
+    if not profile_code:
+        return 0
+    profiles = state.get("profiles") or []
+    match = next((p for p in profiles if p.get("code") == profile_code), None)
+    if not match or not match.get("paperTrading"):
+        return 0
+    n = 0
+    for bot in (state.get("active_bots") or {}).values():
+        if not isinstance(bot, dict):
+            continue
+        code = bot.get("profile_code")
+        if code == profile_code:
+            n += 1
+            continue
+        # legacy adoption: match by exchange+symbol against the profile
+        if code is None:
+            ex_match = (bot.get("venue") == "hyperliquid" and
+                        match.get("exchange") == "HYPERLIQUID_SWAP") or \
+                       (bot.get("venue") == "binance" and
+                        match.get("exchange") in ("BINANCE", "BINANCE_FUTURES"))
+            if ex_match:
+                # require a symbol match (the profile was selected FOR
+                # that token via the venue sleeve)
+                n += 1
+    return n
+
+
+def _set_demo_cap_for_profile(state, profile_code, cap):
+    """Record a per-profile demo-cap (used by both the 400-learner and
+    the upward relearn). Idempotent."""
+    if cap is None or not profile_code:
+        return
+    state.setdefault("demo_bot_caps", {})[profile_code] = int(cap)
+    # mirror to the legacy scalar for downstream readers (the
+    # _demo_cap_for_profile fallback) — picks the maximum of all
+    # profiles, so a one-profile fleet behaves identically to the
+    # pre-migration state.
+    legacy = max(int(cap),
+                 max((int(v) for v in (state["demo_bot_caps"]).values()
+                      if isinstance(v, (int, float))), default=0))
+    state["demo_bot_cap"] = legacy
 
 
 def retry_grid_call(fn, dry, *args, attempts=3, backoff=2.0, **kwargs):
@@ -1153,6 +1283,11 @@ class Daemon:
         self.config = load_config()
         self.port = port or int(self.config["server"].get("daemon_port", 8799))
         self.state = load_state()
+        # one-shot migration: legacy single-scalar demo_bot_cap →
+        # per-profile demo_bot_caps dict. Idempotent; the helper is a
+        # no-op when the per-profile dict is already populated or the
+        # legacy scalar is absent.
+        _migrate_demo_bot_caps(self.state)
         self_heal_env(self.state)
         # config llm.chain is the documented fallback order — export it as
         # the provider-chain env DEFAULT (an explicit GRID_LLM_CHAIN from
@@ -1872,16 +2007,35 @@ class Daemon:
                                 or "grid_create ok=false")
             # learn the demo (paper) grid-bot cap from the 400 — it is not
             # part of any plan/capacity API, so the rejection is the only
-            # teacher; persist it so the rescreen gates stop trying
+            # teacher; persist it so the rescreen gates stop trying.
+            # The cap is per-paper-profile (WT UI surfaces it independently
+            # on each allowlisted paper account). The candidate's profile
+            # code is on the action dict.
             demo_cap = demo_cap_from_error(action["error"])
-            if demo_cap and self.state.get("demo_bot_cap") != demo_cap:
-                self.state["demo_bot_cap"] = demo_cap
+            profile_code = action.get("profile") or (action.get("ticket") or {}).get("profile_code")
+            if demo_cap and profile_code and \
+                    _demo_cap_for_profile(self.state, profile_code) != demo_cap:
+                _set_demo_cap_for_profile(self.state, profile_code, demo_cap)
                 log(self.state, {
                     "kind": "demo-cap",
                     "msg": f"WunderTrading caps demo (paper) grid bots at "
-                           f"{demo_cap} — fleet is at the cap; new deploys "
-                           f"vetoed until one is stopped (rotations still "
-                           f"work: stop+delete frees the slot first)"})
+                           f"{demo_cap} on profile {profile_code} — fleet "
+                           f"is at the cap; new deploys vetoed until one "
+                           f"is stopped (rotations still work: stop+delete "
+                           f"frees the slot first)",
+                    "profile": profile_code,
+                })
+            elif demo_cap and not profile_code:
+                # unknown profile (legacy path) — fall back to the legacy
+                # single-scalar write so the gate still lifts correctly
+                if self.state.get("demo_bot_cap") != demo_cap:
+                    self.state["demo_bot_cap"] = demo_cap
+                    log(self.state, {
+                        "kind": "demo-cap",
+                        "msg": f"WunderTrading caps demo (paper) grid bots at "
+                               f"{demo_cap} — fleet is at the cap; new deploys "
+                               f"vetoed until one is stopped (rotations still "
+                               f"work: stop+delete frees the slot first)"})
             # close the decision record: outcomes only attach on rotation,
             # so a failed create used to leave an open decision line in the
             # journal/console ledger forever
@@ -2271,8 +2425,18 @@ class Daemon:
         # part of any capacity API): once at the cap, no NEW bot can exist —
         # opening slots or deploying candidates is pointless until one is
         # stopped (rotations are fine: stop+delete frees the slot first)
-        demo_cap = self.state.get("demo_bot_cap")
-        if demo_cap and len(self.state["active_bots"]) >= demo_cap:
+        # Per-profile demo-cap veto (gap-report 2026-09-07): the cap is
+        # per-paper-profile, not per-account. The deploy loop below knows
+        # the candidate's profile_code (via select_profile), so the
+        # per-profile check happens inside the loop, not here. The
+        # legacy single-scalar check stays as a belt-and-braces guard for
+        # any caller that bypasses the deploy loop (manual `POST /ctl/...`).
+        demo_cap_legacy = self.state.get("demo_bot_cap")
+        # legacy alias — the deploy loop and downstream readers still
+        # reference `demo_cap` (the per-profile gate above is a
+        # refinement, not a replacement)
+        demo_cap = demo_cap_legacy
+        if demo_cap_legacy and len(self.state["active_bots"]) >= demo_cap_legacy:
             # journal the cap-veto on TRANSITION only (entering the capped
             # state) — 44 hourly demo-cap-veto lines in one audit window
             # buried real events while carrying no new information
@@ -2280,9 +2444,9 @@ class Daemon:
                 self._demo_cap_veto_active = True
                 log(self.state, {
                     "kind": "demo-cap-veto",
-                    "msg": f"fleet at the demo (paper) grid-bot cap "
-                           f"{len(self.state['active_bots'])}/{demo_cap} — "
-                           f"new deploys skipped, rotations still allowed"})
+                    "msg": f"fleet at the legacy demo (paper) grid-bot cap "
+                           f"{len(self.state['active_bots'])}/{demo_cap_legacy} "
+                           f"— new deploys skipped, rotations still allowed"})
         else:
             self._demo_cap_veto_active = False
         plan = self.plan_slots()
@@ -2346,6 +2510,27 @@ class Daemon:
                 # and recording: a dry-run deployment's decision ledger must
                 # reflect what the planner is doing, not freeze at the cap.
                 break
+            # Per-profile demo-cap check (gap-report 2026-09-07): the cap is
+            # per-paper-profile, not per-account. Resolving the profile for
+            # the candidate now lets the loop veto a single profile while
+            # letting the other paper profile (with headroom) deploy.
+            _cap_prof, _cap_violation = select_profile(
+                cand["venue"], self.profiles, self.config, paper=True)
+            _cap_code = _cap_prof.get("code") if _cap_prof else None
+            if _cap_code and not dry_run:
+                _cap = _demo_cap_for_profile(self.state, _cap_code)
+                _active = _count_paper_bots(self.state, _cap_code)
+                if _cap is not None and _active >= _cap:
+                    key = f"{cand['venue']}:{cand['symbol']}"
+                    log(self.state, {
+                        "kind": "demo-cap-veto",
+                        "profile": _cap_code,
+                        "msg": f"paper profile {_cap_code} at its "
+                               f"per-profile demo cap {_active}/{_cap} — "
+                               f"skipping {key} (another paper profile "
+                               f"may still have headroom)",
+                    })
+                    continue
             key = f"{cand['venue']}:{cand['symbol']}"
             if key in active_keys:
                 continue  # already running in another slot — no duplicate deploy
@@ -2607,6 +2792,283 @@ class Daemon:
             return True
         return False
 
+    # ── carry-and-pray (gap-report 2026-09-07) ───────────────────────
+    # When a bot's underwater book has been stuck longer than the
+    # token's natural profitable-close time, the slot is freed and the
+    # bot is parked in state["carry_pray"] with a server-side takeProfit
+    # at break-even. The bot keeps running on WT; if it recovers, the
+    # TP locks the recovery. This is the "I believe in this token's
+    # intrinsic value" trader behavior — keep the position, free the
+    # capital for a more profitable challenger.
+    def _carry_pray_cfg(self):
+        cfg = (self.config.get("carry_pray") or {}) if self.config else {}
+        return {
+            "enabled": bool(cfg.get("enabled", True)),
+            "carry_after_k": float(cfg.get("carry_after_k",
+                                           CARRY_AFTER_K)),
+            "min_carry_h": float(cfg.get("min_carry_h", CARRY_MIN_H)),
+            "max_carry_h": float(cfg.get("max_carry_h", CARRY_MAX_H)),
+            "auto_apply_tp": bool(cfg.get("auto_apply_tp", True)),
+            "tp_break_even_buffer_usd": float(
+                cfg.get("tp_break_even_buffer_usd",
+                        CARRY_BREAK_EVEN_BUFFER_USD)),
+        }
+
+    def _check_carry_pray_transition(self, slot_key, bot, obs, now):
+        """(transition_now: bool, reasons: [str]) for one active bot.
+
+        Gated to bots holding ≥1 underwater line (open_losing > 0) and
+        whose `since` is older than the per-bot carry_after_h (k_carry ×
+        avg_holding_h, persisted in the stagnation_policy). The bot is
+        parked; the slot is freed; a server-side TP is placed (opt-in).
+        """
+        cfg = self._carry_pray_cfg()
+        if not cfg["enabled"]:
+            return False, ["carry-pray disabled in config"]
+        if not isinstance(bot, dict) or not bot.get("bot_code"):
+            return False, ["no bot_code"]
+        # already carried? (defensive — the slot should be free now)
+        if bot["bot_code"] in (self.state.get("carry_pray") or {}):
+            return False, ["already in carry_pray"]
+        # already needs_reanalysis: the bot was stopped/out-of-channel
+        # and the health cycle flagged it; the rotation path will
+        # handle it. Carry is for bots that are still RUNNING on WT
+        # with an underwater book — the slot would otherwise be tied
+        # up while the grid drowns.
+        if bot.get("needs_reanalysis"):
+            return False, ["needs_reanalysis — rotation path handles"]
+        # only when the book has at least one losing line
+        losing = obs.get("open_losing")
+        if not losing:
+            return False, ["no open_losing lines"]
+        policy = bot.get("stagnation_policy") or {}
+        # per-bot carry_after_h; fall back to the global default
+        carry_after_h = policy.get("carry_after_h")
+        if carry_after_h is None:
+            carry_after_h = cfg["max_carry_h"]  # conservative default
+        try:
+            since_str = bot.get("since")
+            if not since_str:
+                return False, ["no since timestamp"]
+            since = datetime.fromisoformat(since_str)
+            if since.tzinfo is None:
+                since = since.replace(tzinfo=timezone.utc)
+            elapsed_h = (now - since.timestamp()) / 3600.0
+        except Exception as exc:
+            return False, [f"since parse failed: {str(exc)[:80]}"]
+        if elapsed_h < max(cfg["min_carry_h"], carry_after_h):
+            return False, [f"elapsed {elapsed_h:.1f}h < carry_after {carry_after_h:.1f}h"]
+        # build the TP target from the bot's current open-losing state
+        unrealized = obs.get("unrealized_pnl")
+        try:
+            unrealized_f = float(unrealized) if unrealized is not None else 0.0
+        except (TypeError, ValueError):
+            unrealized_f = 0.0
+        # TP at break-even + buffer: lock in the recovery once realized
+        # + unrealized crosses zero. The buffer covers the round-trip
+        # fee so the bot never books a wash.
+        target_tp = max(0.0,
+                        -unrealized_f + cfg["tp_break_even_buffer_usd"])
+        # park the bot, free the slot
+        self._enter_carry_pray(slot_key, bot, target_tp, elapsed_h, cfg,
+                               dry_run=(not self._live_paper))
+        return True, [
+            f"open_losing={losing} for {elapsed_h:.1f}h ≥ "
+            f"carry_after {carry_after_h:.1f}h",
+            f"target TP=${target_tp:.2f} (break-even + "
+            f"${cfg['tp_break_even_buffer_usd']:.2f})",
+        ]
+
+    def _enter_carry_pray(self, slot_key, bot, target_tp, elapsed_h, cfg,
+                          dry_run):
+        """Move the bot from active_bots → state['carry_pray']; place TP.
+
+        The slot is freed (active_bots.pop, committed.pop, cooldowns_until
+        for venue:symbol cleared, per-slot marks dropped). The bot record
+        is preserved with new carry_* fields. The decision_id outcome is
+        recorded so reflect.memories_for() can recall the carry.
+        Never raises.
+        """
+        try:
+            code = bot.get("bot_code")
+            key = f"{bot.get('venue')}:{bot.get('symbol')}"
+            cp = self.state.setdefault("carry_pray", {})
+            # snapshot the bot record (don't alias; future edits to
+            # active_bots would mutate the carried record otherwise)
+            snap = dict(bot)
+            # pop the slot
+            self.state["active_bots"].pop(slot_key, None)
+            self.state.setdefault("committed", {}).pop(str(slot_key), None)
+            # clear per-slot marks so a future rescreen doesn't treat
+            # this as a "manual" rotation; the carried bot is no
+            # longer a slot concern
+            for mark in ("force_rotate", "optimizer_swap", "needs_reanalysis"):
+                snap.pop(mark, None)
+            # the cooldowns_until entry for the carried venue:symbol is
+            # what would block a future rotation; clear it so a
+            # challenger can pick up the symbol if it returns to form
+            self.state.setdefault("cooldowns_until", {}).pop(key, None)
+            entry = {
+                "bot_code": code,
+                "bot": snap,
+                "source_slot": str(slot_key),
+                "carry_since": datetime.fromtimestamp(
+                    time.time(), tz=timezone.utc).isoformat(
+                        timespec="seconds"),
+                "carry_target_tp_usd": round(target_tp, 4),
+                "decision_id": bot.get("decision_id"),
+                "take_profit_applied": False,
+                "take_profit_envelope": None,
+            }
+            # opt-in auto-apply the TP through the existing
+            # grid_set_exits seam (the daemon's `_po_apply_exit`
+            # already wraps this with the live-paper gate, so
+            # dry_run here is a no-op when the daemon is dry-run).
+            if cfg.get("auto_apply_tp") and \
+                    getattr(self, "position_optimizer", None) is not None and \
+                    self.position_optimizer.apply_fn is not None:
+                try:
+                    res = self.position_optimizer.apply_fn(
+                        code, {"take_profit": target_tp,
+                               "pnl_compare_type": "total"})
+                    entry["take_profit_applied"] = bool(
+                        (res or {}).get("ok"))
+                    entry["take_profit_envelope"] = res
+                except Exception as exc:
+                    entry["take_profit_envelope"] = {
+                        "ok": False, "error": f"apply_fn raised: {exc}"}
+            cp[code] = entry
+            # journal the transition (one line per carry; the
+            # completion journal happens when the bot stops)
+            log(self.state, {
+                "kind": "carry-pray-enter",
+                "slot": str(slot_key),
+                "symbol": bot.get("symbol"),
+                "venue": bot.get("venue"),
+                "bot_code": code,
+                "elapsed_h": round(elapsed_h, 2),
+                "target_tp_usd": round(target_tp, 4),
+                "tp_applied": entry["take_profit_applied"],
+                "msg": (f"{bot.get('venue')}:{bot.get('symbol')} carried "
+                        f"& prayed after {elapsed_h:.1f}h (target TP "
+                        f"${target_tp:.2f}, applied={entry['take_profit_applied']}) "
+                        f"— slot {slot_key} freed"),
+            })
+            # record the carry as a decision outcome so the
+            # reflect memory learns the pattern
+            try:
+                record_outcome_safe(bot.get("decision_id"), {
+                    "reason": "carry-pray",
+                    "realized_pnl": (bot.get("observed") or {}).get(
+                        "realized_pnl"),
+                    "unrealized_at_carry": (bot.get("observed") or {}).get(
+                        "unrealized_pnl"),
+                    "open_losing": (bot.get("observed") or {}).get(
+                        "open_losing"),
+                    "target_tp_usd": target_tp,
+                    "holding_h": round(elapsed_h, 2),
+                    "observed": bot.get("observed") or {},
+                    "challenger": None,
+                })
+            except Exception:
+                pass
+            save_state(self.state)
+        except Exception as exc:
+            log(self.state, {
+                "kind": "carry-pray-error",
+                "slot": str(slot_key),
+                "msg": f"enter failed: {str(exc)[:160]}"})
+
+    def _check_carry_pray_completion(self, now):
+        """Iterate state['carry_pray']: drop entries that have stopped
+        on WT (TP fired, or any other stop path). Record the outcome
+        with reason='carry-pray-exit' so reflect memory learns the
+        final PnL of the carry.
+        """
+        cp = self.state.get("carry_pray") or {}
+        if not cp:
+            return []
+        exits = []
+        for code, entry in list(cp.items()):
+            try:
+                obs = self._observe_carry_pray_bot(code, entry)
+            except Exception as exc:
+                log(self.state, {"kind": "carry-pray-warn", "bot_code": code,
+                                 "msg": f"observe failed: {str(exc)[:120]}"})
+                continue
+            if obs is None:
+                continue  # still running, nothing to do
+            # stopped (or in a terminal state): drop, journal, record outcome
+            try:
+                final_pnl = (obs.get("unrealized_pnl") or 0) + \
+                            (obs.get("realized_pnl") or 0)
+                log(self.state, {
+                    "kind": "carry-pray-exit",
+                    "bot_code": code,
+                    "symbol": (entry.get("bot") or {}).get("symbol"),
+                    "venue": (entry.get("bot") or {}).get("venue"),
+                    "final_pnl_usd": round(final_pnl, 4),
+                    "status": obs.get("status"),
+                    "msg": f"{(entry.get('bot') or {}).get('venue')}:"
+                           f"{(entry.get('bot') or {}).get('symbol')} "
+                           f"carry-pray exit (status={obs.get('status')}, "
+                           f"final_pnl=${final_pnl:.2f})",
+                })
+                try:
+                    holding = 0.0
+                    since_iso = (entry.get("bot") or {}).get("since")
+                    carry_since = entry.get("carry_since")
+                    since_dt = datetime.fromisoformat(
+                        carry_since) if carry_since else None
+                    if since_dt and since_dt.tzinfo is None:
+                        since_dt = since_dt.replace(tzinfo=timezone.utc)
+                    if since_dt:
+                        holding = (now - since_dt.timestamp()) / 3600.0
+                    record_outcome_safe(entry.get("decision_id"), {
+                        "reason": "carry-pray-exit",
+                        "realized_pnl": obs.get("realized_pnl"),
+                        "unrealized_at_exit": obs.get("unrealized_pnl"),
+                        "final_pnl_usd": final_pnl,
+                        "fills": obs.get("fills_24h"),
+                        "holding_h": round(holding, 2),
+                        "observed": obs,
+                    })
+                except Exception:
+                    pass
+                cp.pop(code, None)
+                exits.append({"bot_code": code, "final_pnl": final_pnl})
+            except Exception as exc:
+                log(self.state, {"kind": "carry-pray-error", "bot_code": code,
+                                 "msg": f"exit failed: {str(exc)[:120]}"})
+        if exits:
+            save_state(self.state)
+        return exits
+
+    def _observe_carry_pray_bot(self, code, entry):
+        """Single observation of a carried bot by bot_code (the bot is
+        no longer in active_bots; the observe path keys by slot).
+
+        Re-uses ``observe_all`` by temporarily inserting the carried
+        bot under a synthetic slot, then stripping it. This is the
+        safest way to share the existing per-line pnl + exits
+        projection without duplicating the whole observe path.
+
+        Returns the obs dict on success, None when the bot is still
+        running, or {"error": ...} on transport failure.
+        """
+        try:
+            bots = {f"cp_{code}": entry.get("bot") or {}}
+            obs_all = observe_all_safe(bots) or {}
+            obs = obs_all.get(f"cp_{code}") or {}
+            if obs.get("error"):
+                return None  # transport glitch — try again next cycle
+            status = (obs.get("status") or "active").lower()
+            if status not in STOPPED_STATES:
+                return None
+            return obs
+        except Exception:
+            return None
+
     # ── health poll ────────────────────────────────────────────────────
     def health_cycle(self, dry_run=True):
         self.browser_watchdog()
@@ -2649,6 +3111,21 @@ class Daemon:
                 bot["exits"] = _exits
             else:
                 bot.pop("exits", None)
+            # geometry projection (additive, gap-report 2026-09-07): the
+            # observe layer also extracts the deployed channel/upsert
+            # fields from the grid resource so ADOPTED bots (which land
+            # with channel=None, upsert=None) gain their geometry after
+            # one health cycle. Gated to adopted bots only — a non-
+            # adopted bot's channel can be in-flight from a recent edit
+            # (the 2h adjust_cooldown_h window), and we must not clobber
+            # that. Adopted bots have no in-flight edit (they were
+            # created on WT, not by this daemon) so overwriting is safe.
+            if bot.get("adopted") and isinstance(obs.get("channel"), dict) \
+                    and obs.get("channel"):
+                bot["channel"] = obs["channel"]
+            if bot.get("adopted") and isinstance(obs.get("upsert"), dict) \
+                    and obs.get("upsert"):
+                bot["upsert"] = obs["upsert"]
             if obs.get("error"):
                 err = str(obs["error"])
                 if is_gone_bot_error(err):
@@ -2669,6 +3146,20 @@ class Daemon:
                 continue
             # observable again: an earlier missing-bot episode is over
             self._clear_gone_episode(bot)
+            # carry-and-pray transition (gap-report 2026-09-07): when an
+            # underwater book has been stuck longer than the token's
+            # natural profitable-close time (k_carry × avg_holding_h,
+            # from the stagnation_policy), free the slot and park the
+            # bot in state["carry_pray"] with a server-side takeProfit
+            # at break-even. The bot keeps running on WT; if it
+            # recovers, the TP locks the recovery. Never raises.
+            try:
+                self._check_carry_pray_transition(
+                    slot_key, bot, obs, time.time())
+            except Exception as exc:
+                log(self.state, {"kind": "carry-pray-error",
+                                 "slot": slot_key,
+                                 "msg": f"check failed: {str(exc)[:160]}"})
             policy = bot.get("stagnation_policy") or {}
             status = (obs.get("status") or "active").lower()
             price = obs.get("price")
@@ -2873,24 +3364,54 @@ class Daemon:
                                             f"(watchdog should be restarting it)"})
             else:
                 self.state["observe_error_sweeps"] = 0
-        # demo-cap relearn (upward): the create-400 teacher only ratchets
-        # the learned demo (paper) grid-bot cap DOWN. When live bots exceed
-        # it (manual UI deploys, plan change, cap reset) the stale cap
-        # would veto every new deploy forever — the platform demonstrably
-        # allows this many bots, so the cap follows reality upward.
+        # demo-cap relearn (upward, per-paper-profile): the create-400
+        # teacher only ratchets the learned demo (paper) grid-bot cap
+        # DOWN. When live bots exceed it (manual UI deploys, plan change,
+        # cap reset) the stale cap would veto every new deploy forever —
+        # the platform demonstrably allows this many bots, so the cap
+        # follows reality upward. The fleet's paper profiles can each
+        # have a different cap; we group live bots by their
+        # profile_code when available, else by exchange+paperTrading
+        # against the profile snapshot.
         try:
-            demo_cap = self.state.get("demo_bot_cap")
-            if demo_cap:
-                live = sum(
-                    1 for b in (grid_status_safe() or [])
-                    if (b.get("status") or "").lower() not in STOPPED_STATES)
-                if live > demo_cap:
-                    self.state["demo_bot_cap"] = live
-                    log(self.state, {
-                        "kind": "demo-cap-relearn",
-                        "msg": f"{live} live demo (paper) grid bots above "
-                               f"the learned cap {demo_cap} — cap raised "
-                               f"to {live}, deploy veto lifted"})
+            caps = self.state.get("demo_bot_caps") or {}
+            if caps or self.state.get("demo_bot_cap"):
+                live_by_code = {}
+                profiles = self.state.get("profiles") or []
+                paper_by_name = {p.get("name"): p for p in profiles
+                                 if p.get("paperTrading")}
+                for b in (grid_status_safe() or []):
+                    code = b.get("code")
+                    status = (b.get("status") or "").lower()
+                    if status in STOPPED_STATES or not code:
+                        continue
+                    # best-effort: try profile_code directly, else resolve
+                    # by name match
+                    prof_code = code
+                    if not any(p.get("code") == code for p in profiles):
+                        nm = b.get("name")
+                        if nm and nm in paper_by_name:
+                            prof_code = paper_by_name[nm].get("code")
+                    live_by_code[prof_code] = live_by_code.get(prof_code, 0) + 1
+                for prof_code, live in live_by_code.items():
+                    prev = (caps or {}).get(prof_code)
+                    if prev is None:
+                        continue
+                    if live > prev:
+                        caps[prof_code] = live
+                        self.state["demo_bot_caps"] = caps
+                        # mirror to legacy scalar
+                        self.state["demo_bot_cap"] = max(
+                            (int(v) for v in caps.values()
+                             if isinstance(v, (int, float))), default=0)
+                        log(self.state, {
+                            "kind": "demo-cap-relearn",
+                            "msg": f"{live} live demo (paper) grid bots on "
+                                   f"profile {prof_code} above the learned "
+                                   f"cap {prev} — cap raised to {live}, "
+                                   f"deploy veto lifted for that profile",
+                            "profile": prof_code,
+                        })
         except Exception:
             pass
         save_state(self.state)
@@ -4289,6 +4810,15 @@ class Daemon:
             self.adopt_existing(dry_run)
         except Exception as exc:
             log(self.state, {"kind": "adopt-error", "msg": str(exc)[:160]})
+        # carry-and-pray completion (gap-report 2026-09-07): drop
+        # entries whose bot has stopped on WT (TP fired, or any other
+        # stop path) so the reflect memory learns the final PnL and
+        # the state doesn't accumulate ghost entries.
+        try:
+            self._check_carry_pray_completion(time.time())
+        except Exception as exc:
+            log(self.state, {"kind": "carry-pray-error",
+                             "msg": f"completion failed: {str(exc)[:160]}"})
         actions = []
         try:
             actions = self.rescreen_cycle(dry_run=dry_run,

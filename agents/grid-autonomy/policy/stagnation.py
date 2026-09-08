@@ -38,6 +38,19 @@ REALIZED_RATIO_STAGNANT = 0.4
 SCORE_DROP_ROTATE = 12.0    # regime switch + score drop > 12 → rotate
 HYSTERESIS_SCORE = 5.0      # new token must beat incumbent by ≥ 5
 
+# Carry-and-pray thresholds (gap-report 2026-09-07). When a bot's
+# underwater book has been stuck longer than the token's natural
+# profitable-close time, the daemon transitions it to a side-state:
+# slot freed, bot still running on WT with a server-side takeProfit
+# at break-even + buffer. A short-carry window would abandon too
+# aggressively on dead-tape tokens; a long window would tie up the
+# slot while the bot drowns.
+CARRY_AFTER_K = 1.5          # × avg_holding_h (mirrors cooldown math)
+CARRY_MIN_H = 0.5           # never carry a fresh bot within 30 min
+CARRY_MAX_H = 168.0         # never wait longer than 7 days for recovery
+CARRY_BREAK_EVEN_BUFFER_USD = 0.5  # TP above break-even to bank recovery
+CARRY_TP_BUFFER = 0.0        # alias for backward compat
+
 
 def simulate_grid_fills(closes, step_pct):
     """Naive fill simulation: grid lines at mid×(1±k×step), mid = last close.
@@ -81,15 +94,23 @@ def derive_policy(closes, interval, step_pct, regime):
     holding = avg_holding_h(closes, interval, step_pct)
     k = COOLDOWN_K.get(regime, 2.0)
     cooldown = min(COOLDOWN_MAX_H, max(COOLDOWN_MIN_H, k * holding))
+    # carry-after = max(MIN, K × avg_holding_h) — mirrors the cooldown
+    # math so a token's "natural profitable-close time" gates both
+    # rotation cooling AND the carry-and-pray transition. Same data,
+    # same regime multiplier, same clamping.
+    carry_after = min(CARRY_MAX_H, max(CARRY_MIN_H,
+                                       CARRY_AFTER_K * holding))
     return {
         "regime": regime,
-        "window_bars": bars,
-        "window_h": round(window_h, 1),
+        "window_bars": len(closes),
+        "window_h": float(len(closes)),
         "step_pct": step_pct,
         "expected_fills_per_24h": round(fills_per_24h, 2),
-        "avg_holding_h": round(holding, 1),
+        "avg_holding_h": round(holding, 2),
         "cooldown_h": round(cooldown, 1),
         "cooldown_k": k,
+        "carry_after_h": round(carry_after, 2),
+        "carry_after_k": CARRY_AFTER_K,
         "stagnant_if": {
             "min_fills_24h": round(fills_per_24h * FILL_RATIO_STAGNANT, 2),
             "min_realized_ratio": REALIZED_RATIO_STAGNANT,

@@ -105,6 +105,119 @@ def _exit_fields(res):
     }
 
 
+def _channel_fields(res):
+    """Grid geometry from a grid resource (additive projection, gap-report 2026-09-07).
+
+    Mirrors what ``grid_adapter.compute_upsert`` writes on create/edit so
+    adopted bots (which used to land with ``channel=None, upsert=None``)
+    gain the deployed geometry after one health cycle. The position
+    optimizer's ``revalue_grid()`` then computes real ``delta_drift_pct``
+    / ``delta_step_pct`` / ``delta_grids`` deltas instead of zeros.
+
+    Returns the raw resource shape (snake/camel as WT returns it) so the
+    daemon merge in ``health_cycle`` can map into both ``bot["channel"]``
+    (low/mid/high/step_pct/atr_pct/grids) and ``bot["upsert"]`` (the
+    upsert payload shape). Empty when the resource has no geometry keys
+    (transient observation glitch — caller must keep the existing values).
+    """
+    if not isinstance(res, dict):
+        return {}
+    return {
+        "lowPrice": res.get("lowPrice"),
+        "highPrice": res.get("highPrice"),
+        "midPrice": res.get("midPrice"),
+        "gridPercentStep": res.get("gridPercentStep"),
+        "gridLevels": res.get("gridLevels"),
+        "amountPerTrade": res.get("amountPerTrade"),
+        "gridType": res.get("gridType"),
+        "gridTradingType": res.get("gridTradingType"),
+        "pairCode": ((res.get("pair") or {}).get("code")),
+        "exchange": ((res.get("exchange") or {}).get("code")),
+    }
+
+
+def _channel_field_map(raw):
+    """Map raw ``_channel_fields`` into the daemon's ``bot["channel"]`` shape
+    (the convention ``grid_adapter.compute_upsert`` writes on create).
+
+    Pure function. None-safe: returns {} when ``raw`` is None/empty.
+    """
+    if not isinstance(raw, dict):
+        return {}
+    step_pct = raw.get("gridPercentStep")
+    try:
+        step_pct_x100 = float(step_pct) * 100.0 if step_pct is not None else None
+    except (TypeError, ValueError):
+        step_pct_x100 = None
+    out = {}
+    if raw.get("lowPrice") is not None:
+        try:
+            out["low"] = float(raw["lowPrice"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("highPrice") is not None:
+        try:
+            out["high"] = float(raw["highPrice"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("midPrice") is not None:
+        try:
+            out["mid"] = float(raw["midPrice"])
+        except (TypeError, ValueError):
+            pass
+    if step_pct_x100 is not None:
+        out["step_pct"] = round(step_pct_x100, 4)
+    if raw.get("gridLevels") is not None:
+        try:
+            out["grids"] = int(float(raw["gridLevels"]))
+        except (TypeError, ValueError):
+            pass
+    if raw.get("amountPerTrade") is not None:
+        try:
+            out["amount_per_trade"] = float(raw["amountPerTrade"])
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def _upsert_field_map(raw):
+    """Map raw ``_channel_fields`` into the daemon's ``bot["upsert"]`` shape
+    (the WT upsert payload convention).
+
+    Pure function. None-safe. Used by the health-cycle merge so an adopted
+    bot's upsert field mirrors what the create payload WOULD have been."""
+    if not isinstance(raw, dict):
+        return {}
+    out = {}
+    for k_in, k_out in (("lowPrice", "lowPrice"),
+                        ("highPrice", "highPrice"),
+                        ("midPrice", "midPrice"),
+                        ("gridPercentStep", "gridPercentStep"),
+                        ("gridLevels", "gridLevels"),
+                        ("amountPerTrade", "amountPerTrade"),
+                        ("gridType", "gridType"),
+                        ("gridTradingType", "gridTradingType"),
+                        ("pairCode", "pairCode"),
+                        ("exchange", "exchange")):
+        v = raw.get(k_in)
+        if v is not None:
+            out[k_out] = v
+    return out
+
+
+def _has_geometry(raw):
+    """True when ``raw`` carries enough fields to populate channel/upsert.
+
+    Used to gate the adopted-bot backfill: a transient observation with
+    only ``code`` + ``status`` must not clobber the existing geometry
+    (a geometry edit could be in flight from a previous cycle)."""
+    if not isinstance(raw, dict):
+        return False
+    return any(raw.get(k) is not None for k in
+               ("lowPrice", "highPrice", "midPrice",
+                "gridPercentStep", "gridLevels", "amountPerTrade"))
+
+
 def grid_status():
     """List of active bots: code/status/paperTrading/exchange/pair/pairCode
     + the enriched exit fields (_exit_fields — takeProfit / stopLoss /
@@ -521,6 +634,17 @@ def _observe_one(bot, by_code, list_ok=True):
         # optimizer's exit awareness and projected onto the bot record
         # by the daemon's health cycle
         obs["exits"] = _exit_fields(res)
+        # current grid geometry (additive) — same health-cycle merge;
+        # populates bot["channel"] / bot["upsert"] for ADOPTED bots
+        # (the gap-report: adopted bots had channel=None, upsert=None
+        # forever, so revalue_grid ran blind). Only attach when the
+        # resource actually carries geometry — a transient observation
+        # glitch (status list loaded but no fields) must NOT clobber a
+        # non-adopted bot's existing geometry.
+        raw = _channel_fields(res)
+        if _has_geometry(raw):
+            obs["channel"] = _channel_field_map(raw)
+            obs["upsert"] = _upsert_field_map(raw)
     else:
         obs["error"] = ("grid status list unavailable (browser/session down)"
                         if not list_ok

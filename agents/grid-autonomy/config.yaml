@@ -141,11 +141,13 @@ grid_defaults:                 # passed through to grid_config.py
   take_profit_pct: 0.04
 
 llm:
-  chain: [cf, mistral, nvidia, openrouter]   # GRID_LLM_CHAIN env/sidecar
+  chain: [cf, mistral, openrouter]   # GRID_LLM_CHAIN env/sidecar
                                 # overrides; the daemon now exports this as
-                                # the env DEFAULT at boot (was dead config)
+                                # the env DEFAULT at boot (was dead config).
+                                # NVIDIA dropped 2026-09-07 (the free model
+                                # returns HTTP 410); CF strips itself when
+                                # creds are missing in provider._has_creds.
   cf_model: "@cf/zai-org/glm-5.3"
-  nvidia_model: "meta/llama-3.3-70b-instruct"
   openrouter_model: "arcee-ai/trinity-large-preview:free"
   mistral_model: "mistral-large-latest"
   brief_interval_min: 30       # always-on intelligence lane: one LLM market
@@ -301,6 +303,12 @@ position_optimizer:           # slow-loop position revaluation (position_optimiz
                                # keeps EVERYTHING advisory — journal +
                                # PB records only, zero WT mutation.
   max_apply_per_day: 4        # daemon-side auto-edits per calendar day
+  error_verbosity: full        # WT-error journal verbosity: 'full' carries
+                               # status_code + first 200 chars of response
+                               # text from wt_library._wun_error_envelope.
+                               # 'compact' falls back to the old 120-char
+                               # stdout head. 'full' is the default — the
+                               # 2026-09-07 WT 500 was unreadable otherwise.
   stop_loss_enabled: false     # grids are mean-reversion: off by default
   take_profit_pct: 0.04        # × slot balance = USD profit-exit target
                                # (mirrors grid_defaults.take_profit_pct)
@@ -310,3 +318,26 @@ position_optimizer:           # slow-loop position revaluation (position_optimiz
   band_atr: 3.0                # ATR multiples each side of price
   drift_steps: 2.0             # recenter after N × step_pct drift
   atr_change_pct: 15.0         # widen/narrow after N% channel-width change
+
+carry_pray:                   # gap-report 2026-09-07: trader behavior
+                               # "I believe in this token's intrinsic
+                               # value or trend — keep the position,
+                               # free the capital for something
+                               # harvesting right now." When a bot's
+                               # underwater book has been stuck longer
+                               # than the token's natural profitable-
+                               # close time (k × avg_holding_h from the
+                               # stagnation_policy), the slot is freed
+                               # and the bot is parked in
+                               # state["carry_pray"] with a server-
+                               # side takeProfit at break-even + buffer.
+                               # On every health cycle the carry-pray
+                               # bot is observed; when WT reports it
+                               # stopped, the entry is dropped and the
+                               # decision_id outcome is recorded.
+  enabled: true
+  carry_after_k: 1.5           # × avg_holding_h (mirrors cooldown math)
+  min_carry_h: 0.5             # never carry a fresh bot within 30 min
+  max_carry_h: 168.0           # never wait longer than 7 days for recovery
+  auto_apply_tp: true          # place a server-side takeProfit on entry
+  tp_break_even_buffer_usd: 0.5  # TP above break-even (covers fees)

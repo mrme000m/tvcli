@@ -157,6 +157,56 @@ class TestDemoBotCap(ManageHarness):
         self.assertTrue(ok)
         self.assertIn("create", [op[0] for op in self.ops])
 
+    def test_migrate_demo_bot_caps_seeds_per_profile(self):
+        """Gap-report 2026-09-07: legacy single-scalar cap migrates to
+        per-profile dict on the first boot after upgrade."""
+        d = self.make_daemon()
+        d.state["demo_bot_cap"] = 5
+        d.state["demo_bot_caps"] = {}
+        d.state["profiles"] = [
+            {"code": "PHL", "name": "demo-hype", "exchange": "HYPERLIQUID_SWAP",
+             "paperTrading": True},
+            {"code": "PBN", "name": "demo-bn", "exchange": "BINANCE_FUTURES",
+             "paperTrading": True},
+        ]
+        d.state["active_bots"] = {
+            "1": _active_bot("HYPE", "hyperliquid", "B1"),
+            "2": _active_bot("SOL", "hyperliquid", "B2"),
+            "3": _active_bot("BTC", "binance", "B3"),
+        }
+        d.state["active_bots"]["1"]["profile_code"] = "PHL"
+        d.state["active_bots"]["2"]["profile_code"] = "PHL"
+        d.state["active_bots"]["3"]["profile_code"] = "PBN"
+        daemon._migrate_demo_bot_caps(d.state)
+        # both paper profiles get the legacy cap seeded
+        self.assertEqual(d.state["demo_bot_caps"], {"PHL": 5, "PBN": 5})
+        # idempotent: running twice is a no-op
+        daemon._migrate_demo_bot_caps(d.state)
+        self.assertEqual(d.state["demo_bot_caps"], {"PHL": 5, "PBN": 5})
+
+    def test_demo_cap_helpers_per_profile(self):
+        """Pure: _demo_cap_for_profile + _count_paper_bots + _set_demo_cap_for_profile."""
+        state = {"demo_bot_caps": {"PHL": 5, "PBN": 5},
+                 "active_bots": {
+                     "1": {"profile_code": "PHL"},
+                     "2": {"profile_code": "PHL"},
+                     "3": {"profile_code": "PBN"},
+                 },
+                 "profiles": [
+                     {"code": "PHL", "name": "demo-hype",
+                      "exchange": "HYPERLIQUID_SWAP", "paperTrading": True},
+                     {"code": "PBN", "name": "demo-bn",
+                      "exchange": "BINANCE_FUTURES", "paperTrading": True},
+                 ]}
+        self.assertEqual(daemon._demo_cap_for_profile(state, "PHL"), 5)
+        self.assertEqual(daemon._count_paper_bots(state, "PHL"), 2)
+        self.assertEqual(daemon._count_paper_bots(state, "PBN"), 1)
+        # raise PBN's cap
+        daemon._set_demo_cap_for_profile(state, "PBN", 8)
+        self.assertEqual(daemon._demo_cap_for_profile(state, "PBN"), 8)
+        # legacy mirror reflects the max
+        self.assertEqual(state["demo_bot_cap"], 8)
+
 
 class TestDynamicSlotOpen(ManageHarness):
     """Dynamic slot mode (default for hyperliquid): slots open while a

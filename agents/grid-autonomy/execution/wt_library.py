@@ -40,7 +40,38 @@ from wtclient import (  # noqa: E402
     unwrap as _debug_unwrap,
 )
 from wtclient.discovery import EndpointCatalog  # noqa: E402
-from wtclient.errors import WunError  # noqa: E402
+from wtclient.errors import WunError, WunApiError  # noqa: E402
+
+
+def _wun_error_envelope(exc, transport):
+    """Build a WunError catch envelope with full diagnostic context.
+
+    The previous shape only carried ``str(exc)`` — which on WunApiError
+    was just the message and dropped the status_code / url / response_text
+    that the exception already carries. The gap-report saw the daemon
+    journal `position-optimizer-error` with only `HTTP 500` and the
+    operator had no way to see the WT response body to diagnose.
+
+    Adds (when present on the exception):
+      * ``status_code`` (int)
+      * ``url`` (str)
+      * ``response_text`` (truncated to 1000 chars to keep the envelope
+        JSON-safe; the body is the most useful diagnostic for an
+        Internal Server Error)
+      * ``exception_type`` (the class name, useful when the message
+        is generic like "Internal Server Error")
+    """
+    out = {"ok": False, "transport": transport,
+           "error": str(exc),
+           "exception_type": type(exc).__name__}
+    if isinstance(exc, WunApiError):
+        if exc.status_code is not None:
+            out["status_code"] = exc.status_code
+        if exc.url:
+            out["url"] = exc.url
+        if exc.response_text:
+            out["response_text"] = (exc.response_text or "")[:1000]
+    return out
 
 # -- process-local singleton --------------------------------------------------
 
@@ -176,9 +207,8 @@ def create_paper_profile(
                 "transport": "wtclient.ExchangesClient.create_paper_profile",
                 "result": result}
     except WunError as exc:
-        return {"ok": False,
-                "transport": "wtclient.ExchangesClient.create_paper_profile",
-                "error": str(exc)}
+        return _wun_error_envelope(
+            exc, "wtclient.ExchangesClient.create_paper_profile")
 
 
 def ensure_paper_profiles(
@@ -206,9 +236,8 @@ def ensure_paper_profiles(
                 "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
                 "result": result}
     except WunError as exc:
-        return {"ok": False,
-                "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
-                "error": str(exc)}
+        return _wun_error_envelope(
+            exc, "wtclient.ExchangesClient.ensure_paper_profiles")
     except Exception as exc:  # belt-and-braces: the ensure path never raises
         return {"ok": False,
                 "transport": "wtclient.ExchangesClient.ensure_paper_profiles",
@@ -233,7 +262,7 @@ def grid_create(upsert_payload: dict[str, Any], *, dry_run: bool = True) -> dict
         result = wun.grid.create(upsert_payload, grid_market=market)
         return {"ok": True, "transport": "wtclient.GridClient.create", "result": result}
     except WunError as exc:
-        return {"ok": False, "transport": "wtclient.GridClient.create", "error": str(exc)}
+        return _wun_error_envelope(exc, "wtclient.GridClient.create")
 
 
 def grid_stop(
@@ -252,7 +281,7 @@ def grid_stop(
         result = wun.grid.stop(code, condition)
         return {"ok": True, "transport": "wtclient.GridClient.stop", "result": result}
     except WunError as exc:
-        return {"ok": False, "transport": "wtclient.GridClient.stop", "error": str(exc)}
+        return _wun_error_envelope(exc, "wtclient.GridClient.stop")
 
 
 def grid_delete(code: str, *, dry_run: bool = True) -> dict[str, Any]:
@@ -268,7 +297,7 @@ def grid_delete(code: str, *, dry_run: bool = True) -> dict[str, Any]:
         result = wun.grid.delete(code)
         return {"ok": True, "transport": "wtclient.GridClient.delete", "result": result}
     except WunError as exc:
-        return {"ok": False, "transport": "wtclient.GridClient.delete", "error": str(exc)}
+        return _wun_error_envelope(exc, "wtclient.GridClient.delete")
 
 
 def grid_edit(
@@ -294,7 +323,7 @@ def grid_edit(
         result = wun.grid.edit(code, body, grid_market=market)
         return {"ok": True, "transport": "wtclient.GridClient.edit", "result": result}
     except WunError as exc:
-        return {"ok": False, "transport": "wtclient.GridClient.edit", "error": str(exc)}
+        return _wun_error_envelope(exc, "wtclient.GridClient.edit")
 
 
 def grid_set_exits(
@@ -361,8 +390,7 @@ def grid_set_exits(
         return {"ok": True, "transport": "wtclient.GridClient.set_exits",
                 "result": result}
     except WunError as exc:
-        return {"ok": False, "transport": "wtclient.GridClient.set_exits",
-                "error": str(exc)}
+        return _wun_error_envelope(exc, "wtclient.GridClient.set_exits")
     except Exception as exc:  # belt-and-braces: never raise (grid_edit shape)
         return {"ok": False, "transport": "wtclient.GridClient.set_exits",
                 "error": f"{type(exc).__name__}: {exc}"}

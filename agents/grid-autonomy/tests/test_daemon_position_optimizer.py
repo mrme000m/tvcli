@@ -156,31 +156,49 @@ class TestDemoCapRelearn(PositionOptimizerHarness):
     # (d) the create-400 cap relearns UPWARD in health_cycle
     def test_cap_raises_to_live_count(self):
         d = self.make_daemon()
-        d.state["demo_bot_cap"] = 3
+        d.state["demo_bot_caps"] = {"PHL": 3}
+        d.state["profiles"] = [
+            {"code": "PHL", "name": "demo-hype",
+             "exchange": "HYPERLIQUID_SWAP", "paperTrading": True},
+        ]
         d.state["active_bots"]["1"] = {"symbol": "DOGE",
                                        "venue": "hyperliquid",
-                                       "bot_code": "B1"}
-        # live WT shows 5 paper grid bots — above the learned cap of 3
-        self.grid_status_ret = [{"code": f"B{i}", "status": "active"}
+                                       "bot_code": "B1",
+                                       "profile_code": "PHL"}
+        # live WT shows 5 paper grid bots on profile PHL — above
+        # the learned cap of 3. The grid_status entries carry the
+        # profile code (matched by name in the relearn path) so the
+        # relearn groups them correctly.
+        self.grid_status_ret = [{"code": f"B{i}", "status": "active",
+                                 "name": "demo-hype"}
                                 for i in range(5)]
         with mock.patch("daemon.observe_all_safe",
                         lambda bots: {"1": {"error": "offline test"}}):
             d.health_cycle(dry_run=True)
+        self.assertEqual(d.state["demo_bot_caps"]["PHL"], 5)
         self.assertEqual(d.state["demo_bot_cap"], 5)
         kinds = [e.get("kind") for e in d.state["journal"]]
         self.assertIn("demo-cap-relearn", kinds)
 
     def test_cap_not_lowered_and_no_relearn_at_or_below(self):
         d = self.make_daemon()
-        d.state["demo_bot_cap"] = 5
+        d.state["demo_bot_caps"] = {"PHL": 5}
+        d.state["demo_bot_cap"] = 5  # legacy mirror
+        d.state["profiles"] = [
+            {"code": "PHL", "name": "demo-hype",
+             "exchange": "HYPERLIQUID_SWAP", "paperTrading": True},
+        ]
         d.state["active_bots"]["1"] = {"symbol": "DOGE",
                                        "venue": "hyperliquid",
-                                       "bot_code": "B1"}
-        self.grid_status_ret = [{"code": f"B{i}", "status": "active"}
+                                       "bot_code": "B1",
+                                       "profile_code": "PHL"}
+        self.grid_status_ret = [{"code": f"B{i}", "status": "active",
+                                 "name": "demo-hype"}
                                 for i in range(3)]
         with mock.patch("daemon.observe_all_safe",
                         lambda bots: {"1": {"error": "offline test"}}):
             d.health_cycle(dry_run=True)
+        self.assertEqual(d.state["demo_bot_caps"]["PHL"], 5)
         self.assertEqual(d.state["demo_bot_cap"], 5)
         kinds = [e.get("kind") for e in d.state["journal"]]
         self.assertNotIn("demo-cap-relearn", kinds)

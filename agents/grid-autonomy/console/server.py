@@ -1708,7 +1708,10 @@ def overview_payload() -> dict:
     # next /optimizer poll. Always fail-soft (None when the loop hasn't run).
     opt = st.get("optimizer") or {}
     last_report = opt.get("last_report") or {}
-    last_arbiter = last_report.get("arbiter") if isinstance(last_report, dict) else None
+    last_arbiter_verdict = (last_report.get("arbiter")
+                            if isinstance(last_report, dict) else None)
+    last_arbiter_at = (last_report.get("at")
+                       if isinstance(last_report, dict) else None)
     return {
         "at": utcnow(),
         "daemon": daemon,
@@ -1722,8 +1725,16 @@ def overview_payload() -> dict:
         "screen": screen_payload(),
         "pocketbase": {"up": pb_ok},
         "readiness": _readiness(ctl_status),
-        "screen_cache_age_s": ((time.time() - float(opt.get("screen_cache_age_s", 0))) if isinstance(opt.get("screen_cache_age_s"), (int, float)) else None),
-        "last_arbiter": last_arbiter,
+        # the screen cache age comes from state["screen_cache"]["at"]
+        # (epoch float written by rescreen_cycle at daemon.py:2327-2330),
+        # NOT from state["optimizer"] which the original line read — the
+        # old key was never written, so this always returned None.
+        "screen_cache_age_s": (round(time.time() - float(
+            st.get("screen_cache", {}).get("at", 0)), 1)
+            if isinstance((st.get("screen_cache") or {}).get("at"),
+                          (int, float)) else None),
+        "last_arbiter_verdict": last_arbiter_verdict,
+        "last_arbiter_at": last_arbiter_at,
         "config_digest": {
             "total_usd": (portfolio.get("total_usd")),
             "slots_default": portfolio.get("slots_default"),

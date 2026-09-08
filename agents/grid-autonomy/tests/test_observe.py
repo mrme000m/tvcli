@@ -108,6 +108,68 @@ class TestObserveAll(unittest.TestCase):
         self.assertEqual(obs["open_losing"], 2)
         self.assertNotIn("error", obs)
 
+    def test_observe_one_projects_channel_and_upsert(self):
+        """Adopted bots need the deployed geometry backfilled so the
+        position optimizer's revalue_grid has real deltas to compare.
+        The resource fixture carries the full geometry; obs must project
+        both bot["channel"] (low/mid/high/step_pct/...) and the WT
+        upsert-payload shape."""
+        with mock.patch.object(observe, "_api_json", side_effect=_router), \
+             mock.patch.object(observe.time, "time", return_value=NOW):
+            out = observe.observe_all({"0": BOT})
+        obs = out["0"]
+        # channel block (daemon convention)
+        self.assertIn("channel", obs)
+        ch = obs["channel"]
+        self.assertAlmostEqual(ch["low"], GRID_RESOURCE["lowPrice"])
+        self.assertAlmostEqual(ch["high"], GRID_RESOURCE["highPrice"])
+        # step_pct is the resource's gridPercentStep * 100
+        self.assertAlmostEqual(ch["step_pct"],
+                               GRID_RESOURCE["gridPercentStep"] * 100.0,
+                               places=4)
+        self.assertEqual(ch["grids"], GRID_RESOURCE["gridLevels"])
+        # upsert block (WT resource shape — back as-is)
+        self.assertIn("upsert", obs)
+        up = obs["upsert"]
+        self.assertEqual(up["lowPrice"], GRID_RESOURCE["lowPrice"])
+        self.assertEqual(up["gridPercentStep"], GRID_RESOURCE["gridPercentStep"])
+        self.assertEqual(up["gridLevels"], GRID_RESOURCE["gridLevels"])
+
+    def test_observe_one_omits_channel_when_resource_has_no_geometry(self):
+        """A transient observation (resource carries only code/status) must
+        NOT clobber the existing geometry — a non-adopted bot's channel
+        can be in flight from a recent edit (the 2h adjust_cooldown_h)."""
+        bare = {"code": "c629f5ba3a643a82fc53dd4e", "status": "active",
+                "pair": {"code": "1"}, "exchange": {"code": "HYPERLIQUID_SWAP"}}
+        with mock.patch.object(observe, "_api_json",
+                               return_value={"_embedded": {"items":
+                                                            [{"resource":
+                                                              bare}]}}), \
+             mock.patch.object(observe.time, "time", return_value=NOW):
+            out = observe.observe_all({"0": BOT})
+        obs = out["0"]
+        self.assertNotIn("channel", obs)
+        self.assertNotIn("upsert", obs)
+        # exits still project (exits are ALWAYS safe to project — they
+        # never ride geometry)
+        self.assertIn("exits", obs)
+
+    def test_channel_field_map_handles_none_and_bad_input(self):
+        """_channel_field_map is the daemon's per-bot merge target; it
+        must be None-safe and tolerate bad input (NaN strings etc.)."""
+        from observe import _channel_field_map
+        self.assertEqual(_channel_field_map(None), {})
+        self.assertEqual(_channel_field_map({}), {})
+        out = _channel_field_map({"lowPrice": 1.0, "highPrice": 2.0,
+                                  "gridPercentStep": 0.01,
+                                  "gridLevels": 10,
+                                  "amountPerTrade": 12.5})
+        self.assertEqual(out["low"], 1.0)
+        self.assertEqual(out["high"], 2.0)
+        self.assertAlmostEqual(out["step_pct"], 1.0)
+        self.assertEqual(out["grids"], 10)
+        self.assertEqual(out["amount_per_trade"], 12.5)
+
     def test_no_bot_code(self):
         out = observe.observe_all({"1": {"venue": "binance"}})
         self.assertEqual(out["1"]["status"], "unknown")

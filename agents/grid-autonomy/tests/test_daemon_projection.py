@@ -222,5 +222,68 @@ class TestPoHuntStructure(ManageHarness):
                              {"at": 1.0, "squeeze": {}, "choppiness": {}})
 
 
+class TestAdoptedBotGeometryBackfill(unittest.TestCase):
+    """Pure: the health-cycle merge only touches ``adopted: true`` bots.
+
+    A non-adopted bot's ``channel`` can be in flight from a recent edit
+    (the 2h ``adjust_cooldown_h`` window) — overwriting it from the
+    observation would clobber a planned geometry change. Adopted bots
+    were created on WT, not by this daemon, so backfilling is always
+    safe.
+    """
+
+    def _bot(self, adopted, channel=None, upsert=None):
+        return {"adopted": adopted, "bot_code": "B1",
+                "observed": {"status": "active", "price": 1.0,
+                             "fills_24h": 0, "realized_pnl": 0.0,
+                             "unrealized_pnl": 0.0, "open_losing": 0,
+                             "open_lines": 0},
+                "channel": channel, "upsert": upsert}
+
+    def test_adopted_bot_gets_geometry(self):
+        b = self._bot(adopted=True)
+        obs = {"exits": {}, "channel": {"low": 1.0, "high": 2.0,
+                                       "mid": 1.5, "step_pct": 0.5,
+                                       "grids": 10},
+               "upsert": {"lowPrice": 1.0, "highPrice": 2.0,
+                          "midPrice": 1.5, "gridPercentStep": 0.005,
+                          "gridLevels": 10}}
+        # emulate the merge block in health_cycle
+        if isinstance(obs.get("exits"), dict):
+            b["exits"] = obs["exits"]
+        if b.get("adopted") and isinstance(obs.get("channel"), dict) \
+                and obs.get("channel"):
+            b["channel"] = obs["channel"]
+        if b.get("adopted") and isinstance(obs.get("upsert"), dict) \
+                and obs.get("upsert"):
+            b["upsert"] = obs["upsert"]
+        self.assertEqual(b["channel"]["low"], 1.0)
+        self.assertEqual(b["channel"]["grids"], 10)
+        self.assertEqual(b["upsert"]["gridLevels"], 10)
+
+    def test_non_adopted_bot_keeps_existing_geometry(self):
+        b = self._bot(adopted=False,
+                      channel={"low": 0.5, "high": 1.5, "mid": 1.0,
+                               "step_pct": 0.5, "grids": 8},
+                      upsert={"gridLevels": 8})
+        obs = {"exits": {},
+               "channel": {"low": 99.0, "high": 100.0, "mid": 99.5,
+                           "step_pct": 0.1, "grids": 99},
+               "upsert": {"gridLevels": 99}}
+        # emulate the merge block — note the `b.get("adopted")` gates
+        if isinstance(obs.get("exits"), dict):
+            b["exits"] = obs["exits"]
+        if b.get("adopted") and isinstance(obs.get("channel"), dict) \
+                and obs.get("channel"):
+            b["channel"] = obs["channel"]
+        if b.get("adopted") and isinstance(obs.get("upsert"), dict) \
+                and obs.get("upsert"):
+            b["upsert"] = obs["upsert"]
+        # the existing geometry survives (was 0.5 / 8 lines, not 99)
+        self.assertEqual(b["channel"]["grids"], 8)
+        self.assertEqual(b["channel"]["low"], 0.5)
+        self.assertEqual(b["upsert"]["gridLevels"], 8)
+
+
 if __name__ == "__main__":
     unittest.main()

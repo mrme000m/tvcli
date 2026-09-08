@@ -523,6 +523,30 @@ class TestHTTP(ConsoleTestCase):
         self.assertEqual(len(body["journal_tail"]), 1)
         self.assertFalse(body["pocketbase"]["up"])
 
+    def test_overview_screen_cache_age_from_screen_cache(self):
+        """The overview screen_cache_age_s must read state["screen_cache"]["at"],
+        not state["optimizer"]["screen_cache_age_s"] (the original read
+        returned None forever because the old key was never written)."""
+        now = time.time()
+        self.write_state({"slots": [], "active_bots": {}, "journal": [],
+                          "screen_cache": {"at": now - 120.0,
+                                           "candidates": []},
+                          "optimizer": {"last_report": {
+                              "at": "2026-09-07T22:48:00+00:00",
+                              "arbiter": {"approve": True, "challenger": "ETH",
+                                          "rationale": "x", "confidence": 0.8,
+                                          "provider": "mistral"}}}})
+        code, body = self.call("/api/overview")
+        self.assertEqual(code, 200)
+        self.assertIsNotNone(body["screen_cache_age_s"])
+        # 120s was the seed, allow 5s for runtime drift
+        self.assertGreater(body["screen_cache_age_s"], 115)
+        self.assertLess(body["screen_cache_age_s"], 130)
+        # the new field mirrors the verdict; `last_arbiter_at` is the
+        # timestamp of the cycle that ran the arbiter (not null anymore)
+        self.assertEqual(body["last_arbiter_at"], "2026-09-07T22:48:00+00:00")
+        self.assertEqual(body["last_arbiter_verdict"]["challenger"], "ETH")
+
     def test_kill_requires_confirm_and_writes_file(self):
         code, body = self.call("/api/ctl/kill", "POST", {})
         self.assertEqual(code, 400)

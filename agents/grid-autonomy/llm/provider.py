@@ -83,6 +83,29 @@ def _openai_compat_chat(base_url, key, model, messages, max_tokens=1024, extra_h
         raise RuntimeError(f"{base_url}: unexpected response: {str(out)[:200]}")
 
 
+def _has_creds(name):
+    """True when the named provider has the API key(s) it needs to call.
+
+    A cred-less provider is filtered OUT of the chain at boot, not at call
+    time — the original `_providers()` kept them and burned an HTTP attempt
+    on every call (CF's `missing CLOUDFLARE_ACCOUNT_ID/API_KEY` error, NV's
+    retired-model 410). Fail-soft: if a key lookup throws, treat it as
+    missing so the chain stays correct."""
+    if name == "cf":
+        return bool(os.environ.get("CLOUDFLARE_ACCOUNT_ID") and
+                    (os.environ.get("CLOUDFLARE_API_KEY") or
+                     os.environ.get("CLOUDFLARE_AI_TOKEN")))
+    env = {"nvidia": "NVIDIA_API_KEY",
+           "openrouter": "OPENROUTER_API_KEY",
+           "mistral": "MISTRAL_API_KEY"}.get(name)
+    if env is None:
+        return False
+    try:
+        return bool(os.environ.get(env))
+    except Exception:
+        return False
+
+
 def _providers():
     """[(name, fn)] in chain order — only providers with creds present."""
     chain = [p.strip() for p in os.environ.get(
@@ -104,7 +127,7 @@ def _providers():
             os.environ.get("MISTRAL_API_KEY"),
             os.environ.get("MISTRAL_MODEL", MISTRAL_MODEL_DEFAULT), msgs, mt),
     }
-    return [(p, fns[p]) for p in chain if p in fns]
+    return [(p, fns[p]) for p in chain if p in fns and _has_creds(p)]
 
 
 def role_chain(role):

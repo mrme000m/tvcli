@@ -52,6 +52,36 @@ class TestPolicy(unittest.TestCase):
         self.assertGreaterEqual(p["cooldown_h"], 12.0)
         self.assertLessEqual(p["cooldown_h"], 72.0)
         self.assertEqual(p["cooldown_k"], 1.5)
+        # carry_after_h is the parallel `k_carry=1.5 × avg_holding_h`,
+        # also clamped to [0.5, 168] hours so fast tokens don't get
+        # abandoned at 10 min and slow tokens don't tie up the slot
+        # for a week
+        self.assertGreaterEqual(p["carry_after_h"], 0.5)
+        self.assertLessEqual(p["carry_after_h"], 168.0)
+        self.assertEqual(p["carry_after_k"], 1.5)
+        # carries uses the SAME holding math as cooldown → both share
+        # the regime multiplier, so a trend token's carry is
+        # proportionally longer than a chop token's. Round to 1dp to
+        # tolerate derive_policy's internal rounding.
+        self.assertAlmostEqual(
+            p["carry_after_h"],
+            min(168.0, max(0.5, 1.5 * p["avg_holding_h"])),
+            delta=0.01)
+
+    def test_derive_carry_clamped_low_holding(self):
+        """Fast-oscillation tokens (avg_holding_h close to 0) hit the
+        CARRY_MIN_H=0.5 floor — never carry a fresh bot within 30 min."""
+        fast = sine_closes(n=720, periods=240)  # ~3h holding
+        p = derive_policy(fast, "1h", 0.5, "chop_high_volatility")
+        self.assertGreaterEqual(p["carry_after_h"], 0.5)
+
+    def test_derive_carry_clamped_high_holding(self):
+        """Trend tokens with very long holding times hit the CARRY_MAX_H
+        cap so the slot isn't tied up for a week while a bot drowns."""
+        flat = flat_closes(n=720)
+        p = derive_policy(flat, "1h", 0.5, "trend_up")
+        # flat input → fallback holding blows past the cap
+        self.assertLessEqual(p["carry_after_h"], 168.0)
 
     def test_derive_squeeze_cooldown_longer(self):
         # fast oscillation (holding ~8h) keeps both regimes off the 72h clamp
