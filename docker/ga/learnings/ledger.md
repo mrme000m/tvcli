@@ -4,6 +4,14 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — GHCR propagation race: buildx push succeeds but the immediate host pull 404s the digest
+
+ga-deploy (az00) failed at 'Pull the image on the host' with NotFound: content digest ... — build+push had succeeded seconds earlier. Root cause: GHCR eventual consistency; the manifest is not immediately pullable right after the push step completes (~3s gap here). The running container is untouched when the pull fails (deploy is pull-then-replace), so a failure here is SAFE — no partial state. Remedy: 'gh run rerun <id> --failed' once propagation has caught up (succeeded on first retry ~5 min later; buildx cache makes the rebuild cheap). If it recurs every deploy, consider adding a small retry loop or a sleep after push in the workflow.
+
+Changes:
+- .github/workflows/ga-deploy.yml
+
+
 ## 2026-09-08 — Heartbeat freshness bounds must absorb rescreen blocking; delegation gates must be pure shell
 
 Two findings from the 2026-09-08 fresh-deploy audit: (1) The manage loop is sequential, so a rescreen cycle (~every 15 min, 6-9 min long) blocks the optimizer and pnl-snapshot lanes; heartbeat freshness bounds of 3x optimizer interval (540s) and 2x pnl interval (600s) sat right at the worst-case age and flapped amber on every post-rescreen heartbeat (542s vs 540s, 680s vs 600s), each flap firing a pointless self-nudge. Widened to 4x (optimizer) and 3x (pnl) — a dead lane is still caught within 12-15 min. Lesson: heartbeat bounds must be interval + worst-case-blocking, not small multiples. (2) prime-agent delegation autonomousGates strings are executed as shell commands verbatim — appending success-criterion prose like '(skips allowed)' after the command makes /bin/sh fail with a syntax error before anything runs, so the gate can never pass no matter the work quality (worker 0547f2a1 diagnosed this). Gate strings must be pure shell; put criteria in the task prose instead.
@@ -11,7 +19,6 @@ Two findings from the 2026-09-08 fresh-deploy audit: (1) The manage loop is sequ
 Changes:
 - agents/grid-autonomy/daemon.py
 - agents/grid-autonomy/tests/test_daemon_heartbeat.py
-
 
 ## 2026-09-08 — LLM fallback legs rot: verify with /api/llm/validate, not key presence
 
