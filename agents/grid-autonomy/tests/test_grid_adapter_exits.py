@@ -218,5 +218,87 @@ class TestBuildTicketPayloadsThreading(unittest.TestCase):
             self.assertNotIn(k, p["upsert"])
 
 
+class TestTierWorstCaseSizing(unittest.TestCase):
+    """Regression (live bug 2026-09-08): the tier budget is a TARGET
+    WORST-CASE fraction of the slot and must be divided over the SIDE
+    lines only (the lines that can fill adversely). The old alloc/grids_n
+    divisor spread the one-sided budget over ALL lines, so every HL bot
+    committed only $60-70 worst-case at full tier ($180 slot) instead of
+    the designed $90 (50% cap) — the reliability ladder was symbolically
+    thin and idle capital never went into fatter positions.
+    """
+
+    # a 12-line channel: ±6% band (3 ATR × atr 2.0) at a 1.05% step →
+    # 12 lines, 6 side lines — the live neutral-grid shape
+    TICKET = {"symbol": "CHIP", "venue": "hyperliquid",
+              "grid_type": "neutral", "regime": "chop_high_volatility",
+              "step_mult": 1.05, "max_alloc_mult": 1.0}
+    BRIEF = {"metrics": {"price": 100.0, "atr_pct": 2.0, "adx14": 20.0,
+                         "rsi14": 50.0, "bb_width_pctile": 50.0},
+             "evidence": {}, "spread_pct": 0.01}
+
+    def _build(self, slot=180.0, max_alloc=0.5, alloc_mult=1.0,
+               min_cost=10.0, step_mult=1.05, **kw):
+        return build_ticket_payloads(
+            dict(self.TICKET, max_alloc_mult=alloc_mult,
+                 step_mult=step_mult), self.BRIEF,
+            slot, max_alloc, "prof", "5", min_cost=min_cost, **kw)
+
+    def test_full_tier_hits_designed_50pct_worst_case(self):
+        # full tier (0.5) × neutral risk (mult 1.0) on a $180 slot:
+        # tier budget $90 over 6 side lines → $15/line, worst = $90
+        p = self._build()
+        g, s = p["grid_bot"], p["grid_bot"]["sizing"]
+        self.assertEqual(g["grids"], 12)            # 11-12-line channel
+        self.assertEqual(s["side_lines"], 6)
+        self.assertAlmostEqual(s["usd_per_grid"], 15.0, places=2)
+        self.assertAlmostEqual(s["total_commitment_estimate"], 90.0,
+                               delta=0.05)          # the designed 50% cap
+        self.assertGreater(s["total_commitment_estimate"], 80.0)  # not
+        # the old min_cost-floored ~$70 half-target
+        # distributed notional covers BOTH sides (all lines)
+        self.assertAlmostEqual(s["distributed_notional"], 15.0 * 12,
+                               delta=0.5)
+        # guard bound is the honest worst fraction, never below the tier
+        self.assertGreaterEqual(p["guard_ctx"]["max_alloc"], 0.5 - 1e-9)
+        self.assertLessEqual(p["guard_ctx"]["max_alloc"], 0.5 + 1e-3)
+
+    def test_full_tier_with_risk_mult_07(self):
+        # risk-team mult 0.7: target worst-case 0.5 × 0.7 × 180 = $63
+        p = self._build(alloc_mult=0.7)
+        s = p["grid_bot"]["sizing"]
+        self.assertAlmostEqual(s["usd_per_grid"], 63.0 / 6, places=2)
+        self.assertAlmostEqual(s["total_commitment_estimate"], 63.0,
+                               delta=0.05)
+
+    def test_base_tier_floor_bound(self):
+        # base tier 0.25 × mult 0.7 → $31.5 over 6 side lines = $5.25/line
+        # < the $10 exchange floor → per-line floored, worst = floor-bound
+        p = self._build(max_alloc=0.25, alloc_mult=0.7)
+        s = p["grid_bot"]["sizing"]
+        self.assertEqual(s["usd_per_grid"], 10.0)  # min_cost floor
+        self.assertAlmostEqual(s["total_commitment_estimate"],
+                               10.0 * s["side_lines"], delta=0.05)
+        # guard bound covers the honest floor-driven worst fraction
+        self.assertGreaterEqual(p["guard_ctx"]["max_alloc"],
+                                s["total_commitment_estimate"] / 180.0
+                                - 1e-9)
+
+    def test_dense_channel_floor_breaks_cap_honestly(self):
+        # dense channel (step_mult 0.7 → 18 lines, side_lines 9 × $10
+        # = $90 worst-case > the 50% cap on a $100 slot) — the daemon's
+        # size-fit/guard-veto path must see the honest worst case and the
+        # guard bound at the real fraction (0.9), never the fictitious
+        # tier×risk number
+        p = self._build(slot=100.0, step_mult=0.7)
+        s = p["grid_bot"]["sizing"]
+        self.assertGreaterEqual(p["grid_bot"]["grids"], 16)
+        self.assertEqual(s["usd_per_grid"], 10.0)   # floor-bound
+        self.assertGreater(s["total_commitment_estimate"], 50.0)  # > cap
+        self.assertAlmostEqual(p["guard_ctx"]["max_alloc"],
+                               s["total_commitment_estimate"] / 100.0,
+                               places=3)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -128,6 +128,7 @@
     function done() {
       alive = false;
       if (resizeTimer) clearTimeout(resizeTimer);
+      window.ModalFocus?.close();   // P2-8: unlock scroll + restore focus first
       root.innerHTML = "";
       document.removeEventListener("keydown", onKey);
       window.removeEventListener("resize", onResize);
@@ -143,6 +144,7 @@
     box.append(modal);
     box.addEventListener("mousedown", (e) => { if (e.target === box) done(); });
     root.append(box);
+    window.ModalFocus?.open(modal);   // P2-8: trap Tab + lock page scroll while open
     modal.querySelector(".modal-actions .btn").focus();
 
     // First paint from the cache; if cold, request a fetch + show a spinner.

@@ -24,3 +24,119 @@
 .view.stale-dim > *:not(.stale-banner) {
   opacity: 0.75;
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Fix wave 2 (UI_AUDIT P2 items) — see the "Fix wave 2" section at the
+   bottom of UI_AUDIT.md. styles.css stays untouched; every wave-2 rule
+   lives here (components.css loads last, so plain selector order wins).
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* P2-1 — the TP/SL/trail strip sat flush against the card edge while its
+   styled siblings .slot-tvcli / .slot-po / .slot-opt all carry padding. */
+.slot-exits { padding: 6px 14px 0; }
+
+/* P2-13 — nine live journal kinds rendered in default ink. Palette
+   semantics per the existing families: teal = positive action,
+   amber = capacity/attention, violet = advisory lane, ink-soft =
+   plain telemetry. */
+.k--pnl-snapshot, .k--heartbeat, .k--market-brief, .k--screen,
+.k--re-analysis { color: var(--ink-soft); }
+.k--recenter { color: var(--teal-deep); }
+.k--demo-cap-veto, .k--optimizer-idle { color: var(--amber); }
+.k--position-optimizer-sweep { color: var(--violet); }
+
+/* P2-12 — first-tap tooltip chip (components/touch-tips.js). Fixed so it
+   survives any scroll container; above modals (z 100) and toasts (120). */
+.touch-tip {
+  display: none;
+  position: fixed;
+  z-index: 130;
+  max-width: min(300px, calc(100vw - 24px));
+  padding: 8px 12px;
+  background: #14201B;
+  color: #D3E2D8;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(18, 36, 32, 0.28);
+  pointer-events: none;
+}
+.touch-tip--on { display: block; }
+
+/* B2 — capital utilization rail (components/capital-rail.js). */
+
+.cr-card { font-size: 12.5px; }
+
+.cr-body { padding: 8px 14px 12px; display: flex; flex-direction: column; gap: 8px; }
+
+.cr-at { font-size: 10.5px; color: var(--ink-faint); }
+
+.cr-portfolio {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-soft);
+}
+.cr-portfolio b { color: var(--ink); font-weight: 600; }
+
+.cr-slots { display: flex; flex-direction: column; gap: 3px; }
+
+.cr-slot {
+  display: grid;
+  grid-template-columns: auto minmax(72px, 1fr) auto auto auto minmax(64px, 96px);
+  align-items: center; gap: 4px 10px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft);
+  padding: 3px 0;
+  border-bottom: 1px solid var(--rule-faint);
+}
+.cr-slot:last-child { border-bottom: none; }
+
+.cr-slot-id { font-weight: 600; color: var(--ink); }
+.cr-slot-venue { color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cr-slot-venue .badge { padding: 0 4px; font-size: 9px; margin-left: 2px; }
+.cr-slot-cell b { color: var(--ink); font-weight: 600; }
+
+/* share-of-sleeve bar — thin, inline, no interaction */
+.cr-bar {
+  position: relative; display: block; height: 6px;
+  background: var(--panel-deep); border-radius: 3px; overflow: hidden;
+}
+.cr-bar-fill { display: block; height: 100%; background: var(--teal); opacity: 0.75; }
+.cr-bar--na { background: repeating-linear-gradient(45deg, var(--panel-deep), var(--panel-deep) 3px, var(--rule-faint) 3px, var(--rule-faint) 4px); }
+
+.cr-capline { font-family: var(--font-mono); font-size: 11px; color: var(--ink-soft); }
+.cr-capline b { color: var(--ink); }
+.cr-capline--full { color: var(--amber); }
+.cr-capline--full b { color: var(--amber); }
+.cr-profline { margin-left: 8px; color: var(--ink-faint); }
+.cr-prof { margin-right: 6px; }
+
+.cr-why {
+  font-size: 11.5px; line-height: 1.55; color: var(--ink-faint);
+  border-top: 1px solid var(--rule-faint); padding-top: 8px;
+}
+.cr-why b { color: var(--ink-soft); font-weight: 600; }
+
+/* capital rail on phones: the row grid wraps into a readable 2-line
+   layout (id+venue / numbers+bar) below 430px; single column is the
+   default (the rail is a stacked aside at <=1120px already) */
+@media (max-width: 760px) {
+  .cr-slot {
+    grid-template-columns: auto minmax(64px, 1fr) auto auto auto minmax(48px, 80px);
+    gap: 4px 8px;
+  }
+}
+@media (max-width: 430px) {
+  .cr-slot {
+    grid-template-columns: auto minmax(56px, 1fr) minmax(48px, 76px);
+    grid-template-areas:
+      "id venue bar"
+      "bal max bar"
+      "in in bar";
+    row-gap: 2px;
+  }
+  .cr-slot-id { grid-area: id; }
+  .cr-slot-venue { grid-area: venue; }
+  .cr-slot-bal { grid-area: bal; }
+  .cr-slot-max { grid-area: max; }
+  .cr-slot-in { grid-area: in; }
+  .cr-bar { grid-area: bar; align-self: stretch; }
+}

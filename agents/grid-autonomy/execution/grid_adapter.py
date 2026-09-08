@@ -232,11 +232,21 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
     # grid (or sell-side of a short) can fill against us; the other side is
     # take-profit flow closing what the entry side opened. WunderTrading
     # itself sizes accounts this way (verified: a 13-line × 20 HYPE bot ≈
-    # $22.6k distributed runs on a $10k paper account). So:
-    #   per-line  ≥ exchange min_cost (order-level constraint)
-    #   worst_case = per_line × side_lines  ≤ slot × max_alloc (risk cap)
-    # Grid DENSITY (line count) is the profit driver (fills/day); we size
-    # funds to the strategy, never degrade the geometry to fit a budget.
+    # $22.6k distributed runs on a $10k paper account). The tier fraction
+    # (max_alloc × alloc_mult) is a TARGET WORST-CASE fraction of the
+    # slot (see the CONFIG DERIVATION block in config.yaml), so the tier
+    # budget is divided over the SIDE lines only:
+    #   per_line   = max(exchange min_cost, alloc_usd / side_lines)
+    #   worst_case = per_line × side_lines
+    #              = max(min_cost × side_lines, alloc_usd) ≤ slot × cap
+    # When the tier dominates, worst-case lands exactly on the tier
+    # target (full tier: 50% × mult 1.0 on a $180 slot, 12-line channel
+    # → $15/line × 6 side lines = $90 = the designed cap). When the
+    # exchange floor dominates (base/probe tiers, dense channels)
+    # worst-case is min_cost-bound and the daemon's size-floor / size-fit
+    # paths keep it inside the cap. Grid DENSITY (line count) is the profit
+    # driver (fills/day); we size funds to the strategy, never degrade
+    # the geometry to fit a budget.
     alloc_usd = (slot_balance or 0.0) * (max_alloc * alloc_mult)
     if alloc_usd > 0 and price:
         band = args.band_atr * atr / 100.0
@@ -253,7 +263,11 @@ def build_ticket_payloads(ticket, brief, slot_balance, max_alloc,
         # buy-side lines for long/neutral (entered near channel mid),
         # sell-side for short — the lines that can fill against us
         side_lines = max(1, (grids_n + 1) // 2)
-        per_line = alloc_usd / grids_n
+        # tier budget over the SIDE lines only — the tier is the
+        # worst-case TARGET: dividing by grids_n (all lines) spread the
+        # one-sided budget over both sides and committed only ~half the
+        # tier target once the exchange floor stopped dominating.
+        per_line = alloc_usd / side_lines
         if min_cost and per_line < min_cost:
             per_line = float(min_cost)  # fund density up to the exchange minimum
         precision = int(amount_precision or 2)

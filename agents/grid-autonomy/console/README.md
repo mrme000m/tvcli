@@ -121,6 +121,7 @@ Everything the UI does is a plain JSON endpoint (safe to curl):
 | `server.py` | HTTP backend: static serving, read-only state APIs, ctl proxy, config editor, daemon lifecycle ops. |
 | `yaml_edit.py` | Path-aware, comment-preserving YAML leaf editor (block + one flow level). |
 | `static/index.html` · `static/app.js` · `static/styles.css` | The frontend — vanilla, no dependencies, no build step. |
+| `static/mobile.js` · `static/components/*` | Mobile layer + self-contained frontend components (modal focus trap, tab arrow-nav, touch tooltips, capital rail, LLM health, market chart, expand state, stale guard) — new UI goes in NEW component files, not into app.js. |
 | `../tests/test_console.py` | Offline unit + HTTP tests (part of the daemon suite). |
 
 ## Tests

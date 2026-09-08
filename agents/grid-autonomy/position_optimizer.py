@@ -102,6 +102,16 @@ EXIT_FIELDS = ("takeProfit", "stopLoss", "stopLossPnlCompareType",
                "strategyStopLossFixedPercentRatio", "pumpProtection",
                "pumpProtectionOrderType")
 EXIT_APPLY_RECS = ("add-take-profit", "add-trailing", "add-stop-loss")
+
+# compute_upsert's server-enforced exit keys (EXIT_FIELDS minus the pump
+# guards) — STRIPPED when overlaying fresh geometry onto a stored deploy
+# upsert: exit keys reach an edit payload ONLY through the `exits`
+# argument, never silently inherited from the deploy config (the daemon's
+# apply path strips PO_EXIT_PAYLOAD_KEYS on top of this — belt + braces).
+UPSERT_EXIT_KEYS = ("takeProfit", "stopLoss", "stopLossPnlCompareType",
+                    "trailingStopActivation", "trailingStopExecute",
+                    "trailingStopPnlCompareType", "strategyProfitCondition",
+                    "strategyStopLossFixedPercentRatio")
 EXIT_MATCH_TOL = 0.10   # "already set" = within 10% of the target value
 TP_TRIGGER_RATIO = 0.6      # TP when realized >= 60% of target
 TRAIL_REALIZED_RATIO = 0.3  # trail needs realized_ratio >= 0.3
@@ -598,11 +608,17 @@ def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
                  f"~${profit_per_fill:.4f}/fill; current fills_24h "
                  f"{_f(obs_fills):.0f}.")
 
+    payload = _edit_payload(bot, revalue, exits)
     action = {
         "type": "edit",
-        "payload": _edit_payload(bot, revalue, exits),
+        "payload": payload,
         "apply": bool(cfg.get("apply", False)),
     }
+    if payload.pop("payload_partial", False):
+        # adopted bot with no stored deploy upsert — the minimal
+        # geometry-only payload may still be rejected by WT (WT-500);
+        # the rec says so instead of silently pretending it is full
+        action["payload_partial"] = True
     if recommendation in EXIT_APPLY_RECS:
         # ready-to-run set_exits kwargs for the opt-in apply path (and for
         # a human/console applying the advisory rec by hand)
@@ -637,17 +653,55 @@ def make_recommendation(bot, revalue, metrics, obs, exits, cfg,
 
 
 def _edit_payload(bot, revalue, exits):
-    """Advisory WT grid edit payload (apply=False — the daemon decides)."""
-    upsert = (bot.get("upsert") or {}) if isinstance(bot, dict) else {}
-    payload = {
-        "pairCode": upsert.get("pairCode"),
+    """WT grid-edit payload (advisory by default; the daemon decides).
+
+    WT's grid-bot upsert/edit endpoint requires the FULL bot contract —
+    the 7-field partial form this used to emit was rejected with HTTP 500
+    (live 2026-09-08: position-optimizer recenter/narrow applies failed
+    while the daemon's own full-compute_upsert adjust path succeeded on
+    the same bots). So the fresh geometry is overlaid onto a COPY of the
+    bot's stored deploy upsert (the same full contract compute_upsert
+    emits): exchangeCode (grid_edit routes gridMarket on it — BINANCE
+    paper bots need derivative, not the spot default), profilesCodes,
+    gridType, initPrice, stopOnOutOfGrid, ... all ride along.
+
+    The stored deploy's own exit block is stripped first (UPSERT_EXIT_KEYS):
+    exit keys appear ONLY when the `exits` argument sets them, so a
+    geometry edit never silently re-applies or clears server-enforced
+    exits. Sizing (amountPerTrade) is echoed in the payload per the WT
+    API contract but, like all sizing changes on an active bot, is NOT
+    applied live (would need stop→edit→restart; never done here).
+
+    Adopted bots with an EMPTY stored upsert fall back to the minimal
+    geometry-only payload, marked payload_partial (make_recommendation
+    lifts the marker onto the rec's action).
+    """
+    stored = (bot.get("upsert") or {}) if isinstance(bot, dict) else {}
+    payload = {k: v for k, v in stored.items()
+               if k not in UPSERT_EXIT_KEYS}
+    mid = revalue.get("mid")
+    payload.update({
+        "pairCode": stored.get("pairCode"),
         "lowPrice": revalue.get("low"),
-        "midPrice": revalue.get("mid"),
+        "midPrice": mid,
         "highPrice": revalue.get("high"),
         "gridPercentStep": _f(revalue.get("step_pct")) / 100.0,
         "gridLevels": revalue.get("grids"),
         "amountPerTrade": revalue.get("amount_per_trade"),
-    }
+    })
+    if stored:
+        payload["initPrice"] = mid
+        # closest grid lines around the new mid — the same neighbor rule
+        # compute_upsert applies (max line ≤ mid, min line > mid); fall
+        # back to the stored values when grid_lines is absent/empty
+        lines = revalue.get("grid_lines") or []
+        below = [ln for ln in lines if ln <= mid]
+        above = [ln for ln in lines if ln > mid]
+        if below and above:
+            payload["closestLowLevelPrice"] = round(max(below), 6)
+            payload["closestHighLevelPrice"] = round(min(above), 6)
+    else:
+        payload["payload_partial"] = True
     if exits.get("take_profit_usd") is not None:
         payload["takeProfitUsd"] = exits["take_profit_usd"]
     if exits.get("stop_loss_usd") is not None:

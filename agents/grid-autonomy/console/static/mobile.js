@@ -123,6 +123,9 @@
     });
     if (!document.body) return;
     document.body.appendChild(nav);
+    /* P2-9: marks the body so responsive.css can hide the now-duplicated
+       top tab strip at <=760px (bnav is the mobile navigation) */
+    document.body.classList.add("has-bnav");
     bnav = nav;
     bnavSyncActive();
   }

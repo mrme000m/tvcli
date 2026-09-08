@@ -11,8 +11,18 @@
 # (daemon-side reconcile_slots prunes cap-blocked EMPTY slots at restart;
 # occupied slot ids never change).
 #
-# Sizing math (worst-case = one channel side ≈ half the lines at the
-# exchange $10/line floor; cap = min(autonomy tier, max_alloc_per_slot)):
+# Sizing math (CORRECTED semantics — tiers are TARGET worst-case
+# fractions of the slot): per_line = max(exchange $10/line floor, tier
+# budget / side_lines), worst_case = per_line × side_lines ≈ one channel
+# side; cap = min(autonomy tier, max_alloc_per_slot). The tier budget is
+# divided over the SIDE lines only — the lines that can fill adversely:
+#   • full tier, neutral risk-team mult 1.0: a $180 HL slot on an
+#     11–12-line channel now reaches the DESIGNED $90 worst-case (50%
+#     cap; ~$15/line over 6 side lines) — idle capital goes into fatter
+#     positions instead of a half-empty ladder. Mult 0.7 → $63.
+#   • base/probe stay floor-bound on 11–12-line channels (0.25/0.40 ×
+#     $180 spread over 6 side lines < $10 → per-line floored at $10,
+#     worst ≈ $60 ≤ $90).
 #   • The guard-veto "cannot fund ≥5 lines at $10 within 50% worst-case
 #     cap" fired 21× on CASHCAT-class tokens (24–31%/24h net harvest):
 #     full-density grids there need 16–18 lines → side_lines 8–9 × $10

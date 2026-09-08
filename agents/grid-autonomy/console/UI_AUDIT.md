@@ -402,3 +402,97 @@ All five known findings handed in were verified and are detailed below
   `market_brief`, `screen.{top,score_history,run_card_stem}`,
   `swap-log.{trackers,swaps,last_arbiter}` all verified against real
   JSON).
+
+
+---
+
+## Fix wave 2 (2026-09-08)
+
+Scope: the remaining P2 items + four NEW frontend components as separate
+files (modal focus trap, tab arrow-nav, touch tooltips, capital
+utilization rail). styles.css untouched; all new CSS lives in
+`components/components.css` (one rule added to `responsive.css`). app.js
+grew only by the P2-7 digest-skip inside `renderFleet` (+~66 lines incl.
+comments) and 6 one-line hooks — every new component is its own file,
+self-contained, idempotent and fail-soft. Verified with `node --check`,
+a DOM-stub harness driving `renderFleet`/`confirmDialog`/`ModalFocus`/
+`TouchTips`/`TabNav` against the live `/api/overview` + `/api/status`
+payloads, and the full offline suite (857 tests OK after the concurrent
+sizing/apply regressions landed, 8 skipped).
+
+Closed in this wave:
+
+- **P2-1** — `.slot-exits { padding: 6px 14px 0; }` added to
+  `components/components.css` (TP/SL/trail strip no longer flush against
+  the card edge).
+- **P2-5** — `renderMarkdown` now emits
+  `<div class="table-wrap"><table class="ledger">…` — run-card tables
+  get the scroll container, the ledger styling, and mobile card mode
+  (mobile.js picks up `table.ledger` automatically).
+- **P2-7** — `renderFleet` digest-skip: a digest of the merged bots +
+  slots + daemon state (plus a 1-minute time bucket so "held 2d 3h"
+  footers and the stale-cycle banner still refresh) skips the whole
+  board rebuild when nothing changed. On rebuild: the focused card
+  control gets focus handed back, and each `.ladder .cursor` restarts at
+  its previous top then hops to the new one on the next frame — the
+  0.9 s transition (styles.css) finally plays. ExpandState (P1-5)
+  unaffected: slot cards carry no expandable rows; the skip path is what
+  preserves in-flight interactions.
+- **P2-8** — NEW `components/modal-focus.js`: Tab/Shift+Tab wrap inside
+  the open modal, page scroll locked while open, focus restored to the
+  pre-modal element on close. One hook line each in `confirmDialog`
+  (app.js) and `openModal` (components/market-chart.js).
+- **P2-9** — NEW `components/tab-nav.js`: roving tabindex (selected tab
+  0, others −1) + Left/Right/Home/End select-and-focus, driven through
+  each tab's own click handler. AND the top tab strip is now hidden at
+  ≤760 px (`body.has-bnav .tabs` in responsive.css — mobile.js marks
+  the body once the bnav is actually built, so a JS failure degrades
+  back to the top strip). bnav buttons remain plain Tab-reachable
+  buttons, so keyboard users lose nothing.
+- **P2-12** — NEW `components/touch-tips.js`: on coarse-pointer phones
+  (≤760 px), the first tap on an element with a non-empty `title`
+  shows that title in a small floating chip (`.touch-tip` in
+  components.css) and suppresses the click; the next tap activates.
+  Opt-out via `data-notip` on the element or an ancestor; any other
+  tap clears the armed state; capture-phase so delegated handlers are
+  covered; keyboard/mouse paths untouched.
+- **P2-13** — the nine unstyled journal kinds got palette-semantic
+  colors (components.css): `pnl-snapshot`/`heartbeat`/`market-brief`/
+  `screen`/`re-analysis` neutral ink-soft (telemetry), `recenter`
+  teal (positive action), `demo-cap-veto`/`optimizer-idle` amber
+  (capacity/attention), `position-optimizer-sweep` violet (advisory
+  lane, like adjust/cycle).
+- **P2-15** — the invalid-grep toast now names the pattern and the
+  regex error (`invalid grep pattern: … — …`) instead of a bare label.
+- **B2 (from P2-17)** — NEW `components/capital-rail.js`: fleet
+  capital-utilization rail rendered as the first card of the Fleet view
+  rail — (a) portfolio line committed/ceiling · idle (+%) · proj/24h ·
+  ~ret/yr, (b) per-slot rows slot · venue · balance · max commitment ·
+  committed · share-of-venue-sleeve bar (+ "dyn" badge for dynamic
+  slots), (c) paper-bot cap with per-profile headroom + venue plan
+  caps, (d) the honest static why-idle note (tier/risk-multiplier
+  discounts + 15% cash buffer + plan caps). Owns its DOM + CSS, keeps
+  its own digest (repaints on change only), one hook line in
+  `loadOverview`. Responsive: wraps at ≤760, two-line slot rows ≤430.
+
+Verified already closed by the previous wave (no change needed here):
+P2-4 (free_slots length guard), P2-6 (loadReports resets the run-card
+detail state), P2-10 (textContent double-escape), P2-11 (`.kv-row .k`
+min-width in the ≤430 tier), P2-14 (deep-link cohort fetch),
+P2-19 (`.logbox` 65dvh in responsive.css). P2-2's dead badge branch is
+documented in code as awaiting a server field contract.
+
+Intentionally skipped:
+
+- **P2-16** — self-hosting the two Google Font families. The console is
+  otherwise fully offline-capable and the CDN link already degrades to
+  system fonts; acceptable skip, revisit if an air-gapped deployment
+  becomes real.
+- **P2-2 / P2-3** — dead data paths (`observed.exit_queued`,
+  `bot.take_profit_pct`) need daemon/server field changes owned by the
+  other worker; the dead branches are now commented as such in code.
+- **P2-18** — the landscape-phone statusbar/tab-strip collapse shipped
+  with the wave-1 landscape tier (`max-height: 480px` rules in
+  responsive.css); the remaining suggestion (collapsing the statusbar
+  to 1–2 summary chips at all short heights) left as-is — the current
+  chip wrap is acceptable at 740×360.

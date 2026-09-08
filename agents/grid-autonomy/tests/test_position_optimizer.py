@@ -1067,5 +1067,131 @@ class TestSweepJournal(unittest.TestCase):
         self.assertEqual(self._sweeps(journal), [])
 
 
+# ── edit payload: full WT contract (WT-500 regression) ────────────────
+
+# a full deploy upsert exactly as execution/grid_adapter.compute_upsert
+# emits it (live-verified shape) — including a deploy-time exit block
+FULL_UPSERT = {
+    "exchangeCode": "HYPERLIQUID_SWAP", "pairCode": "HYPEUSD",
+    "profilesCodes": ["demo-hype"], "gridType": "interval",
+    "gridMethod": "classic", "gridTradingType": "neutral",
+    "gridPercentStep": 0.005, "gridTickStep": None, "gridLevels": 13,
+    "midPrice": 100.0, "initPrice": 100.0,
+    "closestHighLevelPrice": 100.442, "closestLowLevelPrice": 99.943,
+    "amountPerTrade": 5.0, "amountPerTradeType": "base",
+    "stopOnOutOfGrid": False, "startCondition": "immediate",
+    "signalCode": None, "maxRequiredAmount": None, "leverage": 1,
+    "highPrice": 103.0, "lowPrice": 97.0,
+    "stopCondition": "stop_and_close_all", "profitCurrencyType": "base",
+    "pumpProtection": True, "pumpProtectionOrderType": "market",
+    # deploy-time exit block — must NOT ride into a geometry edit
+    "takeProfit": 50.0, "stopLossPnlCompareType": "total",
+    "strategyStopLossFixedPercentRatio": 0.05,
+}
+
+NO_EXITS = {"take_profit_usd": None, "stop_loss_usd": None,
+            "trailing_activation_pct": None, "trailing_execute_pct": None,
+            "positions_trailing": False, "reasons": []}
+
+
+class TestEditPayloadFullContract(unittest.TestCase):
+    """Live regression (2026-09-08): WT's grid-bot upsert/edit endpoint
+    rejected the 7-field partial payload with HTTP 500 while the
+    daemon's own full-compute_upsert adjust path succeeded on the same
+    bots. _edit_payload must overlay the fresh geometry onto a copy of
+    the stored deploy upsert so the FULL contract rides along.
+    """
+
+    def test_full_contract_overlay_from_stored_upsert(self):
+        bot = flat_bot(upsert=dict(FULL_UPSERT))
+        rv = fresh_revalue()
+        payload = po._edit_payload(bot, rv, NO_EXITS)
+        # full-contract keys present and inherited from the deploy
+        self.assertEqual(payload["exchangeCode"], "HYPERLIQUID_SWAP")
+        self.assertEqual(payload["profilesCodes"], ["demo-hype"])
+        self.assertEqual(payload["gridType"], "interval")
+        self.assertEqual(payload["gridMethod"], "classic")
+        self.assertFalse(payload["stopOnOutOfGrid"])
+        self.assertEqual(payload["startCondition"], "immediate")
+        self.assertEqual(payload["stopCondition"], "stop_and_close_all")
+        self.assertTrue(payload["pumpProtection"])
+        # geometry updated from the revalue
+        self.assertEqual(payload["lowPrice"], rv["low"])
+        self.assertEqual(payload["midPrice"], rv["mid"])
+        self.assertEqual(payload["highPrice"], rv["high"])
+        self.assertEqual(payload["gridPercentStep"],
+                         rv["step_pct"] / 100.0)
+        self.assertEqual(payload["gridLevels"], rv["grids"])
+        self.assertEqual(payload["amountPerTrade"],
+                         rv["amount_per_trade"])
+        # initPrice tracks the new mid; closest lines are the grid
+        # lines nearest around it (max ≤ mid, min > mid)
+        self.assertEqual(payload["initPrice"], rv["mid"])
+        below = [x for x in rv["grid_lines"] if x <= rv["mid"]]
+        above = [x for x in rv["grid_lines"] if x > rv["mid"]]
+        self.assertEqual(payload["closestLowLevelPrice"],
+                         round(max(below), 6))
+        self.assertEqual(payload["closestHighLevelPrice"],
+                         round(min(above), 6))
+        # deploy-time exit keys are stripped (never silently inherited)
+        for k in po.UPSERT_EXIT_KEYS:
+            self.assertNotIn(k, payload)
+        # the stored upsert itself is untouched (overlay is a copy)
+        self.assertEqual(bot["upsert"], FULL_UPSERT)
+
+    def test_closest_lines_fall_back_when_grid_lines_empty(self):
+        bot = flat_bot(upsert=dict(FULL_UPSERT))
+        rv = fresh_revalue(grid_lines=[])
+        payload = po._edit_payload(bot, rv, NO_EXITS)
+        self.assertEqual(payload["initPrice"], rv["mid"])
+        self.assertEqual(payload["closestLowLevelPrice"],
+                         FULL_UPSERT["closestLowLevelPrice"])
+        self.assertEqual(payload["closestHighLevelPrice"],
+                         FULL_UPSERT["closestHighLevelPrice"])
+
+    def test_exit_keys_only_when_exits_set(self):
+        bot = flat_bot(upsert=dict(FULL_UPSERT))
+        rv = fresh_revalue()
+        payload = po._edit_payload(
+            bot, rv, dict(NO_EXITS, take_profit_usd=10.0))
+        self.assertEqual(payload["takeProfitUsd"], 10.0)
+        self.assertNotIn("stopLossUsd", payload)
+        # stored deploy exit keys still never inherited
+        self.assertNotIn("takeProfit", payload)
+
+    def test_empty_stored_upsert_falls_back_to_minimal_partial(self):
+        bot = flat_bot(upsert={})
+        rv = fresh_revalue()
+        payload = po._edit_payload(bot, rv, NO_EXITS)
+        # the minimal geometry-only form, annotated as partial
+        self.assertEqual(set(payload), {
+            "pairCode", "lowPrice", "midPrice", "highPrice",
+            "gridPercentStep", "gridLevels", "amountPerTrade",
+            "payload_partial"})
+        self.assertTrue(payload["payload_partial"])
+        self.assertIsNone(payload["pairCode"])
+        self.assertEqual(payload["gridLevels"], rv["grids"])
+
+    def test_make_recommendation_lifts_partial_marker(self):
+        # via make_recommendation: the marker rides on the rec's ACTION
+        # (not inside the payload the daemon posts to WT)
+        for upsert in ({}, dict(FULL_UPSERT)):
+            bot = flat_bot(upsert=dict(upsert))
+            rec = make_recommendation(
+                bot, fresh_revalue(), {"price": 100.0, "atr_pct": 1.0},
+                bot["observed"], NO_EXITS, CFG)
+            payload = rec["action"]["payload"]
+            # the marker never rides inside the posted payload —
+            # make_recommendation lifts it onto the action
+            self.assertNotIn("payload_partial", payload)
+            if upsert:
+                self.assertNotIn("payload_partial", rec["action"])
+            else:
+                self.assertTrue(rec["action"]["payload_partial"])
+            if upsert:
+                self.assertEqual(payload["exchangeCode"],
+                                 "HYPERLIQUID_SWAP")
+
+
 if __name__ == "__main__":
     unittest.main()

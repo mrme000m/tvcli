@@ -132,6 +132,14 @@ main.main,
   }
   .tab { padding: 10px 12px 11px; box-sizing: border-box; }
 
+  /* -- P2-9: the bottom nav IS the mobile navigation — the top strip is
+       a duplicate surface eating ~40px of viewport. Hidden only once
+       mobile.js has actually built the bnav (it marks <body> with
+       .has-bnav), so a JS failure degrades back to the top strip. The
+       tab nodes stay in the DOM (mobile.js clones them, keyboard users
+       reach the bnav buttons via Tab), only the strip is hidden. -- */
+  body.has-bnav .tabs { display: none; }
+
   /* -- main: tighter padding + room for the bottom nav -- */
   .main {
     padding: 14px 12px;

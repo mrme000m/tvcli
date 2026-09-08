@@ -171,6 +171,7 @@ function confirmDialog({ title, body, label = "Confirm", danger = false, checkbo
         el("button", { class: "btn", onclick: () => done(false) }, "Cancel"),
         el("button", { class: `btn ${danger ? "btn--danger" : "btn--primary"}`, onclick: () => done(true) }, label)));
     function done(ok) {
+      window.ModalFocus?.close();   // P2-8: unlock scroll + restore focus first
       root.innerHTML = "";
       document.removeEventListener("keydown", onKey);
       resolve({ ok, checked: checkRef.input ? checkRef.input.checked : false,
@@ -181,6 +182,7 @@ function confirmDialog({ title, body, label = "Confirm", danger = false, checkbo
     box.append(modal);
     box.addEventListener("mousedown", (e) => { if (e.target === box) done(false); });
     root.append(box);
+    window.ModalFocus?.open(modal);   // P2-8: trap Tab + lock page scroll while open
     modal.querySelector(".modal-actions .btn:last-child").focus();
   });
 }
@@ -236,6 +238,7 @@ async function loadOverview() {
   if (activeView === "fleet") {
     renderReadiness(ov);
     renderFleet(ov, st);
+    window.CapitalRail?.render(ov, st);   // B2: capital-utilization rail (own digest)
     renderFleetHeader(ov, st);
     renderVetoStrip(ov, st);
     renderHeartbeatCard(st);
@@ -838,7 +841,6 @@ function renderReadiness(ov) {
 
 function renderFleet(ov, st) {
   const board = $("#slot-board");
-  board.innerHTML = "";
   // prefer the live ctl /status observations over state.json's last snapshot
   const liveObs = (st && st.active_bots) || {};
   const livePnl = (st && st.pnl && typeof st.pnl.bots === "object" && st.pnl.bots) || {};
@@ -862,6 +864,40 @@ function renderFleet(ov, st) {
   const slots = (ov.slots || []).length
     ? ov.slots
     : [...bySlot.keys()].map((s) => ({ slot: s, venue: (bySlot.get(s) || {}).venue || "" }));
+
+  // P2-7: digest-skip — the 5s poll used to rebuild the whole slot board
+  // (board.innerHTML = "") even when nothing changed, replacing cards
+  // mid-tap, dropping focus, and recreating the .ladder .cursor node so
+  // its 0.9s transition (styles.css) could never play. Digest the render
+  // inputs plus a 1-minute time bucket (so time-derived footers like
+  // "held 2d 3h" and the stale-cycle banner still refresh) and skip the
+  // whole body when unchanged. ExpandState (P1-5) is unaffected — slot
+  // cards carry no expandable rows, and the skip path is exactly what
+  // preserves any in-flight interaction.
+  const fleetDigest = JSON.stringify([bots, slots, ov.daemon || {}, Math.floor(Date.now() / 60000)]);
+  if (renderFleet._digest === fleetDigest && board.children.length) return;
+  renderFleet._digest = fleetDigest;
+
+  // remember each cursor's position and the focused card control so the
+  // rebuild can restart cursors at their old spot (transition plays) and
+  // hand focus back to the control the operator was interacting with.
+  const prevCursor = {};
+  for (const c of board.querySelectorAll(".slot-card")) {
+    const cur = c.querySelector(".ladder .cursor");
+    if (cur && c.dataset.slot != null) prevCursor[String(c.dataset.slot)] = cur.style.top || null;
+  }
+  let refocus = null;
+  const ae = document.activeElement;
+  if (ae && board.contains(ae) && typeof ae.closest === "function") {
+    const fc = ae.closest(".slot-card");
+    if (fc) refocus = {
+      slot: fc.getAttribute("data-slot"),
+      sig: ae.tagName + ((typeof ae.className === "string" && ae.className.trim())
+        ? "." + ae.className.trim().split(/\s+/).join(".") : ""),
+    };
+  }
+
+  board.innerHTML = "";
   for (const s of slots) {
     const bot = bySlot.get(String(s.slot));
     board.append(bot ? slotCard(bot) : emptySlotCard(s));
@@ -869,6 +905,31 @@ function renderFleet(ov, st) {
   for (const [slotKey, bot] of bySlot) {
     if (!slots.some((s) => String(s.slot) === slotKey)) board.append(slotCard(bot));
   }
+
+  // P2-7: focus hand-back — best-effort, never worth a throw.
+  if (refocus && refocus.slot != null) {
+    try {
+      const fc = board.querySelector(`.slot-card[data-slot="${CSS.escape(String(refocus.slot))}"]`);
+      const n = (fc && refocus.sig) ? fc.querySelector(refocus.sig) : null;
+      if (n && typeof n.focus === "function") n.focus({ preventScroll: true });
+    } catch (e) { /* best-effort only */ }
+  }
+  // P2-7: restart each cursor at its previous position, then hop to the
+  // current one on the next frame — the 0.9s transition finally plays on
+  // price moves. Stale rAF callbacks may touch detached nodes (a newer
+  // render already wiped the board) — harmless no-ops.
+  requestAnimationFrame(() => {
+    for (const c of board.querySelectorAll(".slot-card")) {
+      const prev = prevCursor[String(c.dataset.slot)];
+      if (prev == null || !c.isConnected) continue;
+      const cur = c.querySelector(".ladder .cursor");
+      if (!cur) continue;
+      const target = cur.style.top;
+      if (target === prev) continue;
+      cur.style.top = prev;
+      requestAnimationFrame(() => { cur.style.top = target; });
+    }
+  });
 
   // Populate the controls-panel "force rotate one slot" select whenever
   // the fleet is non-empty. Hidden otherwise — pointless to expose
@@ -1940,8 +2001,13 @@ function renderMarkdown(md) {
     if (!table.length) return;
     const [head, , ...body] = table;
     const cells = (r) => r.split("|").slice(1, -1).map((c) => c.trim());
-    out.push(`<table><thead><tr>${cells(head).map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead>
-      <tbody>${body.map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
+    // P2-5: a bare <table> got none of the table machinery — no ledger
+    // class, no .table-wrap scroll container, so wide run-card tables
+    // squeezed to unreadable columns on mobile. Emit both like every
+    // other console table (mobile.js card mode picks ledger tables up
+    // automatically at <=760px).
+    out.push(`<div class="table-wrap"><table class="ledger"><thead><tr>${cells(head).map((c) => `<th>${inline(c)}</th>`).join("")}</tr></thead>
+      <tbody>${body.map((r) => `<tr>${cells(r).map((c) => `<td>${inline(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
     table = [];
   };
   const inline = (s) => esc(s)
@@ -2920,7 +2986,7 @@ async function loadLogs(force = false) {
   // the catch below stays silent for transient fetch errors.
   if (grep) {
     try { new RegExp(grep, "i"); }
-    catch (e) { toast("invalid grep pattern", true); return; }
+    catch (e) { toast(`invalid grep pattern: ${grep} — ${e.message}`, true); return; }
   }
   const lines = $("#log-lines").value;
   const params = new URLSearchParams({
