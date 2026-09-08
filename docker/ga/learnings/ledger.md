@@ -4,6 +4,29 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — Orchestration: subprocess-backed prime-agent delegations cannot be steered mid-flight
+
+delegate without daemonBacked creates a subprocess-backed session: prime_agent send/send_message/prompt all fail with 'Unknown active session' because there is no daemon active session id to address. To add scope to a running subprocess delegation you must stop it and re-delegate a fully self-contained continuation brief (git diff carries the in-flight work; reference it in the new brief instead of describing the code again). Also observed twice this session: workers hitting their autonomousMaxTokens ceiling still finish their work and emit a complete final report while exiting code 1 ('Autonomous quality gate still failing after attempt 1/3: exited 1; autonomous limit reached: maxTokens reached') — the orchestrator must treat the exit code as 'verify me', run the verification bar itself, and not re-dispatch on the exit code alone. And: the delegate 'continue' flag can fail with 'Session is already active' if the most recent saved session is still held — a fresh delegation with a self-contained brief is the reliable path.
+
+
+## 2026-09-08 — Console /api/llm/health: async pending pattern turns a 70s blocking ping into 13ms
+
+The console's /api/llm/health ran llm/provider.py --ping synchronously inside the request handler: the four-provider chain (mistral 0.4s, cf 2s, nvidia 31s, openrouter 37s — measured live) blocked cold-cache responses ~70s under a 180s subprocess timeout, leaving the 'LLM brains' card on its placeholder after boot and piling up browser retries. Fix (verified locally: cold 13ms, warm 1ms): serve the fresh 60s cache synchronously; on cold/expired answer immediately with pending:true + last-known-good results (a module-level _LLM_HEALTH_LAST that is never evicted on read, only replaced by a successful refresh) while ONE background daemon thread runs the probe (guarded by a lock + refreshing flag so concurrent cold requests spawn exactly one thread); a failed refresh with prior data serves stale:true + the error note. Frontend half: a singleton in-flight promise dedupes the 5s poll ticks, an AbortController bounds the client wait, and a monotonic guard drops responses older than the last rendered one. Generalizable: any console endpoint that shells out to a slow subprocess should follow this pending/stale contract instead of blocking the handler.
+
+Changes:
+- agents/grid-autonomy/console/server.py
+- agents/grid-autonomy/console/static/components/llm-health.js
+
+## 2026-09-08 — Console UI/mobile wave: top-level let is not a window property; mock the PB ladder's real seams
+
+Verified on the fresh az00 deployment (2026-09-08). (1) A top-level `let` in a classic <script> is a global LEXICAL binding, not a window property — mobile.js's resize handler read window.lastPnlPoints (always undefined) and redrew the PnL canvas with [], wiping real data to a false 'no history' state on every phone rotation. Classic scripts share the global lexical environment, so the bare reference works; always typeof-guard cross-file global reads. (2) console/test_upgrade.py's recommendations test mocked server._http_json but recommendations_payload's PocketBase ladder never reaches it: _pb_client() constructs pbclient.PB lazily (a live client even with a dead PB_URL) and _pb_get() is its own raw-urllib path. Tests must patch server._pb_client AND server._pb_get, and reset the module-level _PB_CLIENT cache in setUp/tearDown or clients leak between tests (order dependence). (3) tests/test_console.py and console/test_upgrade.py encoded OPPOSITE contracts for a dead ctl (raw 'urlopen error' in body.error vs normalized 'ctl unreachable'); the reconciled contract is error='ctl unreachable' + the raw transport string in body.detail.transport — _http_json transport failures must not stuff the exception into body['error'] or _ctl_err() masks a dead daemon as a daemon-answered error.
+
+Changes:
+- agents/grid-autonomy/console/static/mobile.js
+- agents/grid-autonomy/console/server.py
+- agents/grid-autonomy/console/test_upgrade.py
+- agents/grid-autonomy/tests/test_console.py
+
 ## 2026-09-08 — Keep recs are not applies: cap accounting and a live-network test leak
 
 Two fixes from the recommendations-queue audit (2026-09-08): (1) position_optimizer._persist counted post-deploy entry KEEPS toward max_apply_per_day — four deploys in a day silently filled the 4/day PB-persist cap before any actionable rec could persist (masked only by the twice-restarted daemon resetting the in-memory counter). Keeps are baseline audit records, not applies: they now persist without consuming the cap, the console's persisted_today skips them, they carry no blocked_by verdict (they used to show 'rate limit'), and the UI's Pending table filters them out. (2) tests/test_daemon_manage.test_adopt_records_decision_and_archetype mocked daemon.reclassify_regime, but adopt_existing's regime comes from an INLINE market_regime import over LIVE 1h candles — the test was secretly network-dependent and flipped with the real market (ZEC classified trend_up at 13:30 UTC, chop by 18:30). Fix: mock market_regime.fetch_candles with the flat harness fixture (classifies deterministically as trend_up, matching the existing assertion). Lesson twice over: a mock of function X only proves anything if the code path actually calls X — verify which module attribute the production path imports at runtime.
@@ -15,7 +38,6 @@ Changes:
 - agents/grid-autonomy/tests/test_daemon_manage.py
 - agents/grid-autonomy/tests/test_position_optimizer.py
 - agents/grid-autonomy/tests/test_console.py
-
 
 ## 2026-09-08 — GHCR propagation race: buildx push succeeds but the immediate host pull 404s the digest
 
