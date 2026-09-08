@@ -2628,21 +2628,33 @@ class Daemon:
             })
             self.commit_deploy(action, ticket, payloads, brief, cand, slot, dry_run)
             actions.append(action)
-            if not dry_run and str(slot["slot"]) in self.state["active_bots"]:
-                # keep the tier-cap snapshot honest for the NEXT candidate
-                # in this same cycle (the snapshot predates this deploy)
-                self._capacity_note_deploy(capacity, cand, payloads)
-            deployments.append({
-                "slot": slot["slot"], "symbol": cand["symbol"],
-                "venue": cand["venue"], "grid_type": ticket.get("grid_type"),
-                "step_pct": payloads["grid_bot"]["profit_per_grid_pct"],
-                "amount": payloads["upsert"].get("amountPerTrade"),
-                "multiplier": action.get("size_multiplier"),
-                "paper": dry_run,
-            })
-            if slot in free:
-                free.remove(slot)
-            deployed += 1
+            # a LIVE create that failed (commit_deploy journals deploy-failed
+            # and never adds the slot to active_bots) must NOT consume the
+            # slot: keep it in `free` so the NEXT same-venue candidate in
+            # this cycle deploys into the SAME slot instead of tripping
+            # open_slot (az00 2026-09-08: a 400 on binance slot 4 re-split
+            # the fixed $120 sleeve to 2×$60 and starved every later
+            # candidate; a 400 on freshly-opened slot 7 then met
+            # slots_hard_max on the next HL candidate). Dry-run never
+            # mutates active_bots, so dry-run plans always count as
+            # successful.
+            deploy_ok = dry_run or str(slot["slot"]) in self.state["active_bots"]
+            if deploy_ok:
+                if not dry_run:
+                    # keep the tier-cap snapshot honest for the NEXT candidate
+                    # in this same cycle (the snapshot predates this deploy)
+                    self._capacity_note_deploy(capacity, cand, payloads)
+                deployments.append({
+                    "slot": slot["slot"], "symbol": cand["symbol"],
+                    "venue": cand["venue"], "grid_type": ticket.get("grid_type"),
+                    "step_pct": payloads["grid_bot"]["profit_per_grid_pct"],
+                    "amount": payloads["upsert"].get("amountPerTrade"),
+                    "multiplier": action.get("size_multiplier"),
+                    "paper": dry_run,
+                })
+                if slot in free:
+                    free.remove(slot)
+                deployed += 1
             active_keys.add(key)  # a later duplicate candidate must not re-deploy
 
         # ── rotation pass: stagnant incumbents vs better challengers ──

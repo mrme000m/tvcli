@@ -345,6 +345,127 @@ def pair_meta(venue: str, symbol: str, market: str | None = None) -> dict:
     return {}
 
 
+# ── Binance paper (demo) pair support ─────────────────────────────────
+#
+# WT-SIDE CONSTRAINT (az00 evidence, 2026-09-08 UTC): WunderTrading's
+# Binance paper sleeve is BINANCE_FUTURES-only (docs/binance-paper-profile.md)
+# and its demo engine can only run pairs that exist on the Binance FUTURES
+# TESTNET — the venue the "Binance Demo" flow signs up against. A pair that
+# is live on Binance spot AND on mainnet USDT-M futures (so :2087
+# all-markets — and therefore resolve_pair — succeeds) but absent from the
+# testnet gets create HTTP 400 "Please check the highlighted fields for
+# errors and try again." with NO field detail, deterministically, on every
+# retry (observed: binance:RAY 400 at 02:57 while binance:ZRO 200 at 03:23,
+# same demo-bn profile, same compute_upsert path). Roughly 1/6 of the
+# top-60 Binance spot universe is affected at any time (RAYUSDT, ICPUSDT,
+# PEPEUSDT, BONKUSDT, XAUTUSDT, ... on 2026-09-08).
+#
+# The check below is the cheapest safe screen-side guard: filter candidates
+# BEFORE deliberation/deploy on the public, unauthenticated, not-geo-gated
+# testnet exchangeInfo. Fail-open by design — an unreachable testnet must
+# never veto a deploy (returns None = "unknown, let WT decide").
+
+BINANCE_FUTURES_TESTNET_INFO = (
+    "https://testnet.binancefuture.com/fapi/v1/exchangeInfo")
+PAPER_SYMBOLS_TTL_H = 24.0  # recheck daily; testnet listings move slowly
+
+
+def _paper_cache_path() -> str:
+    return os.path.join(STATE_DIR, "paper_futures_symbols.json")
+
+
+def _fetch_testnet_symbols() -> set:
+    """TRADING symbols on the Binance futures testnet ({}, never raises).
+
+    Plain urllib: the testnet is public and NOT Cloudflare-gated (unlike
+    wundertrading.com:2087), so no browser transport is needed."""
+    import ssl
+    import urllib.request
+    try:
+        ctx = ssl.create_default_context()
+    except Exception:  # noqa: BLE001 — public data, fail-soft
+        ctx = ssl._create_unverified_context()
+    try:
+        req = urllib.request.Request(
+            BINANCE_FUTURES_TESTNET_INFO,
+            headers={"User-Agent": "tvcli-grid-autonomy/1.0"})
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+            raw = json.loads(resp.read())
+        return {s.get("symbol") for s in raw.get("symbols") or []
+                if s.get("symbol") and s.get("status") == "TRADING"}
+    except Exception:  # noqa: BLE001 — guard must never raise
+        return set()
+
+
+def binance_paper_futures_symbols(ttl_h: float = PAPER_SYMBOLS_TTL_H) -> set:
+    """Testnet futures symbols, cached `ttl_h` hours in the state dir.
+
+    Fresh fetch first (cache refresh on success); on any failure fall back
+    to the cached set even when stale (an empty set means "unknown", the
+    caller fails open)."""
+    cache = {}
+    try:
+        with open(_paper_cache_path(), "r", encoding="utf-8") as fh:
+            cache = json.load(fh)
+    except Exception:
+        cache = {}
+    symbols = cache.get("symbols")
+    fetched_at = float(cache.get("fetched_at") or 0)
+    if isinstance(symbols, list) and symbols and \
+            (time.time() - fetched_at) < float(ttl_h) * 3600:
+        return set(symbols)
+    fresh = _fetch_testnet_symbols()
+    if fresh:
+        try:
+            tmp = _paper_cache_path() + ".tmp"
+            os.makedirs(STATE_DIR, exist_ok=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                json.dump({"fetched_at": time.time(),
+                           "symbols": sorted(fresh)}, fh)
+            os.replace(tmp, _paper_cache_path())
+        except Exception:
+            pass
+        return fresh
+    if isinstance(symbols, list):  # stale but better than nothing
+        return set(symbols)
+    return set()
+
+
+def paper_pair_supported(venue: str, symbol: str,
+                         market: str | None = None) -> bool | None:
+    """Can a PAPER (demo) grid bot exist for this pair on this venue?
+
+    True  — supported (or no testnet-style constraint applies).
+    False — the pair is provably NOT runnable on the paper sleeve; screen
+            it out before deliberation/deploy (saves the doomed create and
+            its 3 retries every cycle).
+    None  — unknown (testnet unreachable, no cache): FAIL OPEN, let WT's
+            own validation decide.
+
+    Only the Binance paper sleeve is constrained today: WunderTrading runs
+    its own engine for HYPERLIQUID_SWAP paper (no testnet dependency), and
+    Binance spot has no paper mode at all."""
+    venue = (venue or "").lower()
+    symbol = (symbol or "").strip().upper().replace("/", "")
+    if not symbol:
+        return None
+    spec = VENUE_MARKET.get(venue)
+    if not spec:
+        return None  # unknown venue — not this guard's call
+    market = (market or spec[0]).lower()
+    if market not in ("derivative", "spot"):
+        market = spec[0]
+    if venue not in ("binance", "binance_spot", "bn") or market != "derivative":
+        return True  # no testnet-style constraint applies
+    pair = symbol
+    if not symbol.endswith(_BN_QUOTES):
+        pair = f"{symbol}USDT"
+    symbols = binance_paper_futures_symbols()
+    if not symbols:
+        return None  # unknown — fail open
+    return pair in symbols
+
+
 def _cli(argv=None) -> int:
     ap = argparse.ArgumentParser(
         description="Resolve venue+symbol to a WunderTrading pairCode")
@@ -352,7 +473,15 @@ def _cli(argv=None) -> int:
     ap.add_argument("--symbol", help="base symbol or native pair string")
     ap.add_argument("--market", help="dump market map: derivative|spot")
     ap.add_argument("--ttl", type=float, default=24.0)
+    ap.add_argument("--paper-check", action="store_true",
+                    help="check the pair against the Binance futures "
+                         "testnet (paper-sleeve support)")
     args = ap.parse_args(argv)
+    if args.paper_check and args.venue and args.symbol:
+        out = {"paper_pair_supported": paper_pair_supported(
+            args.venue, args.symbol, market=args.market)}
+        print(json.dumps(out, indent=2, sort_keys=True))
+        return 0 if out["paper_pair_supported"] is not False else 1
     if args.venue and args.symbol:
         out = resolve_pair(args.venue, args.symbol)
         print(json.dumps(out, indent=2, sort_keys=True))

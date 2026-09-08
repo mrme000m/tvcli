@@ -4,6 +4,19 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — Fresh-deploy audit: deploy-loop slot-consumption bug, WT paper-sleeve testnet constraint, workbench env fixes
+
+az00 2026-09-08 audit of the fresh grid-autonomy deployment found: (1) daemon.py rescreen deploy loop consumed the slot on a FAILED live create (deployments.append/free.remove/deployed+=1 ran unconditionally after commit_deploy) — the RAY WT-400 at 02:57 wrongly triggered open_slot, re-splitting the binance sleeve 1x$120 -> 2x$60 ($30 caps) which guard-vetoed every later binance candidate (12+ vetos, 3 rescreens); MON's demo-cap 400 on slot 7 then met slots_hard_max on the next HL candidate. Fix: gate the three consumption points on deploy_ok = dry_run or slot in active_bots (mirrors the existing capacity-note pattern); next same-venue candidate now falls through into the SAME slot in the same cycle. (2) The RAY 400 root cause is a WT-side constraint: RAYUSDT is ABSENT from the Binance futures TESTNET (the venue WT's Binance paper engine executes against) while ZROUSDT trades there — the pair resolves on mainnet futures so guardrails pass and only the create fails; ~10 of the top-60 spot universe affected. Fix: fail-open paper_pair_supported() guard in execution/resolve.py (24h-cached public testnet exchangeInfo) wired into screen_binance BEFORE candle fetches. (3) The grid-ga workbench container is missing pydantic (wtclient import) — 14 phantom test errors; fix: pip3 install --break-system-packages pydantic. (4) tests/test_repair_ledger depends on uncommitted local wt_audit fixtures (root .gitignore *.json rule) and errored in every fresh clone — added a fixture-presence skipUnless (8 expected skips). (5) prime-agent daemon must be started in this container (prime-agent --mode daemon) before daemonBacked:true delegations; delegation event logs may stay empty — poll the session JSONL at /data/dsh/prime-agent/sessions/ instead. (6) resolve.STATE_DIR is a module global that multiple test modules re-point at import time (last import wins) — cache tests must patch it per-test, not at import. Verification bar after all changes: 839 tests OK (skipped=8), order-robust, new regression tests fail on pre-fix code.
+
+Changes:
+- agents/grid-autonomy/daemon.py
+- agents/grid-autonomy/execution/resolve.py
+- agents/grid-autonomy/screen/merge.py
+- agents/grid-autonomy/tests/test_deploy_failure_fallthrough.py
+- agents/grid-autonomy/tests/test_paper_pair_guard.py
+- agents/grid-autonomy/tests/test_merge_screen.py
+- agents/grid-autonomy/tests/test_repair_ledger.py
+
 
 ## 2026-09-08 — dsh web --host 0.0.0.0 is hard-rejected in the published npm tarball
 
@@ -20,7 +33,6 @@ loosening the match — re-derive the patch against the new source.
 Changes:
 - docker/ga/dsh_ponytail_patch.py
 
-
 ## 2026-09-08 — pnpm 10 vs 11: git-dep build-script gating uses two different config shapes
 
 pnpm gates build scripts of git-hosted dependencies with
@@ -35,7 +47,6 @@ Changes:
 - docker/ga/pnpm_allowbuilds.py
 - docker/ga/Dockerfile
 
-
 ## 2026-09-08 — az00 root disk is tight — purge install caches in the SAME layer
 
 The az00 VPS has a ~29G root disk with only ~5G free. The
@@ -48,7 +59,6 @@ device". The npm `_cacache` is the same class of problem. Caches must be
 Changes:
 - docker/ga/Dockerfile
 
-
 ## 2026-09-08 — grid-ga dsh web publishes on 127.0.0.1:3082 — caddy owns az00's :3081
 
 az00's host caddy already binds 127.0.0.1:3081, so the grid-ga
@@ -60,7 +70,6 @@ touches the host port.
 
 Changes:
 - docker/ga/ga-run.sh
-
 
 ## 2026-09-08 — dsh scrubbedParentEnv() drops GH_TOKEN from agent shells — persist gh auth instead
 
@@ -76,7 +85,6 @@ env-free in every shell.
 Changes:
 - docker/ga/entrypoint.sh
 
-
 ## 2026-09-08 — Track the baked settings TEMPLATE's sha, not the rendered file's
 
 dsh rewrites its own `settings.yaml` at runtime. The original
@@ -90,7 +98,6 @@ template itself is unchanged.
 Changes:
 - docker/ga/entrypoint.sh
 
-
 ## 2026-09-08 — CF Workers AI context windows come from ai/models/search `context_window`
 
 Cloudflare Workers AI model context windows are NOT guessable from
@@ -102,4 +109,3 @@ these for the GA agent's prime-agent workers).
 
 Changes:
 - docker/ga/prime_agent_config.py
-

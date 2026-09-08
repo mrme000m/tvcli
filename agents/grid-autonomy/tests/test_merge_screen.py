@@ -737,5 +737,62 @@ class TestReportHuntStats(unittest.TestCase):
         self.assertEqual(by_sym["S1"]["score_final"], 59.0)
 
 
+class TestPaperSleeveGuard(unittest.TestCase):
+    """screen_binance drops pairs the WT Binance paper sleeve cannot run.
+
+    WT's demo engine executes BINANCE_FUTURES paper against the Binance
+    futures TESTNET; a spot pair absent there (RAYUSDT, az00 2026-09-08)
+    resolves on mainnet futures (guardrails pass) but the create 400s
+    deterministically. The guard is fail-open everywhere."""
+
+    def setUp(self):
+        sys.path.insert(0, os.path.join(HERE, "..", "execution"))
+        import resolve as _resolve
+        self.resolve = _resolve
+
+    def test_helper_filters_dead_pairs_only(self):
+        with mock.patch.object(
+                self.resolve, "paper_pair_supported",
+                side_effect=lambda v, s, market=None:
+                False if s.upper() == "RAY" else None):
+            dead = merge._binance_paper_unsupported(
+                [("RAYUSDT", 9e6), ("ZROUSDT", 8e6)])
+        self.assertEqual(dead, {"RAYUSDT"})
+
+    def test_helper_fail_open_on_guard_exception(self):
+        def boom(venue, symbol, market=None):
+            raise RuntimeError("testnet unreachable")
+        with mock.patch.object(self.resolve, "paper_pair_supported", boom):
+            dead = merge._binance_paper_unsupported(
+                [("RAYUSDT", 9e6), ("ZROUSDT", 8e6)])
+        self.assertEqual(dead, set())  # unknown → keep everything
+
+    def test_screen_binance_never_fetches_dead_pairs(self):
+        fetched = []
+
+        def fake_fetch(venue, symbol, interval, limit, market):
+            fetched.append(symbol)
+            # 60+ bars so the length check passes; shape is irrelevant —
+            # the assertion is about WHICH symbols got fetched at all
+            return [{"t": i, "o": 1.0, "h": 1.01, "l": 0.99, "c": 1.0,
+                     "v": 100.0} for i in range(80)]
+
+        with mock.patch.object(merge, "binance_spot_universe",
+                               return_value=[("RAYUSDT", 9e6),
+                                            ("ZROUSDT", 8e6)]), \
+                mock.patch.object(merge, "fetch_candles",
+                                  side_effect=fake_fetch), \
+                mock.patch.object(merge, "HAS_BINANCE_SPREADS", False), \
+                mock.patch.object(
+                    self.resolve, "paper_pair_supported",
+                    side_effect=lambda v, s, market=None:
+                    False if s.upper() == "RAY" else None):
+            merge.screen_binance("t", {"weights": {}}, interval="1h",
+                                 limit=300, min_volume_usd=2_000_000,
+                                 max_symbols=60)
+        self.assertNotIn("RAYUSDT", fetched)  # dropped pre-fetch
+        self.assertIn("ZROUSDT", fetched)
+
+
 if __name__ == "__main__":
     unittest.main()

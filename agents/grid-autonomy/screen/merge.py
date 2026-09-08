@@ -250,6 +250,33 @@ def binance_spot_universe(min_quote_vol_usd=5_000_000, max_symbols=60):
     return rows[:max_symbols]
 
 
+def _binance_paper_unsupported(universe):
+    """Pairs from `universe` provably NOT runnable on the Binance paper
+    sleeve: WunderTrading's demo engine executes BINANCE_FUTURES paper
+    against the Binance futures TESTNET, and a pair absent there (RAYUSDT,
+    az00 2026-09-08: create 400 "Please check the highlighted fields" on
+    every retry, all day, while ZROUSDT created fine 26 min later) can
+    never host a demo grid bot — the pair resolves on mainnet futures, so
+    the guardrails pass and only the create fails. Fail-open at every
+    layer: import failure, testnet unreachable, unknown → empty set (the
+    screen behaves exactly as before and WT's own validation decides)."""
+    try:
+        sys.path.insert(0, os.path.normpath(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "execution")))
+        from resolve import paper_pair_supported
+    except Exception:
+        return set()
+    dead = set()
+    for pair, _qv in universe:
+        base = pair[:-4] if pair.endswith("USDT") else pair
+        try:
+            if paper_pair_supported("binance", base, "derivative") is False:
+                dead.add(pair)
+        except Exception:
+            continue
+    return dead
+
+
 def screen_binance(preset_name, preset, interval="1h", limit=300,
                    min_volume_usd=DEFAULT_MIN_VOLUME_USD,
                    max_symbols=DEFAULT_MAX_SYMBOLS, cache=None):
@@ -259,6 +286,15 @@ def screen_binance(preset_name, preset, interval="1h", limit=300,
     presets so the same 1h candles are fetched once per symbol, not once per
     preset — the widened universe (100 symbols × 2 presets) stays bounded."""
     universe = binance_spot_universe(min_volume_usd, max_symbols)
+    # paper-sleeve guard (fail-open): drop pairs the WT demo engine can
+    # never run BEFORE the candle fetches — see
+    # _binance_paper_unsupported for the evidence chain.
+    dead = _binance_paper_unsupported(universe)
+    if dead:
+        print(f"paper-guard: dropped {len(dead)} binance pair(s) absent "
+              f"from the futures testnet: {', '.join(sorted(dead))[:200]}",
+              file=sys.stderr)
+        universe = [(s, qv) for s, qv in universe if s not in dead]
     symbols = [s for s, _ in universe]
     spreads = binance_spreads(symbols) if HAS_BINANCE_SPREADS else {}
     out = []

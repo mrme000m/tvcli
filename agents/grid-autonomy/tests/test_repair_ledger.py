@@ -25,6 +25,17 @@ ARB_HL = rl.AUDIT_CODES[("ARB", "hyperliquid")]
 ARB_BN = rl.AUDIT_CODES[("ARB", "binance")]
 FART = rl.AUDIT_CODES[("FARTCOIN", "hyperliquid")]
 XVG = rl.AUDIT_CODES[("XVG", "binance")]
+# The wt_audit fixtures are raw WunderTrading account dumps and stay OUT of
+# the public repo (the root .gitignore's *.json rule blocks them; the local
+# re-include in agents/grid-autonomy/.gitignore only covers the fixtures
+# TOP level). They exist only on the dev host, so a fresh clone — CI, the
+# deployed container, any workbench — must SKIP this suite cleanly instead
+# of erroring in seed_state's dumps[code] lookup (KeyError on the missing
+# bot code).
+FIXTURES_PRESENT = bool(
+    os.path.isdir(FIX) and [n for n in os.listdir(FIX)
+                            if n.startswith("hist_")
+                            and n.endswith(".json")])
 
 
 def decision(rid, symbol, venue, closed_at, realized, reason, regime=None):
@@ -134,6 +145,8 @@ def seed_state(state_dir, decisions=None):
         json.dump(ledger, fh)
 
 
+@unittest.skipUnless(FIXTURES_PRESENT,
+                     "wt_audit hist_*.json fixtures not present in this clone")
 class RepairLedgerTest(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.mkdtemp(prefix="grid-repair-test-")
