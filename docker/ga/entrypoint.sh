@@ -129,22 +129,34 @@ if [ "$BAKED_REV" != "$SEEDED_REV" ]; then
   cp -a "$SEED_HOME/.agent-presets/ga" "$DSH_HOME/.last-seed/ga"
 fi
 
-# settings.yaml — derived from the baked template each boot. Skip (warn)
-# when the current file differs from the last render (hand-edited).
+# settings.yaml — derived from the baked template each boot. Two sources of
+# truth: (a) the baked TEMPLATE (image-owned) and (b) operator edits to the
+# rendered file. When the template's sha changes (image updated the model
+# catalog etc.), the template WINS and is re-rendered; when the template is
+# unchanged but the rendered file diverges from the last render, it was
+# hand-edited and is preserved.
 if [ -n "$CF_ACCOUNT_ID" ]; then
   render=1
-  if [ -f "$DSH_HOME/settings.yaml" ] && ! grep -q '@CF_ACCOUNT_ID@' "$DSH_HOME/settings.yaml"; then
-    CUR_SHA="$(sha256sum "$DSH_HOME/settings.yaml" | cut -d' ' -f1)"
-    OLD_SHA="$(cat "$DSH_HOME/.settings.sha256" 2>/dev/null || true)"
-    if [ -n "$OLD_SHA" ] && [ "$CUR_SHA" != "$OLD_SHA" ]; then
-      render=0
-      warn "dsh home: $DSH_HOME/settings.yaml was edited locally — preserved (not re-rendered)"
+  TPL_SHA="$(sha256sum "$SEED_HOME/settings.yaml" | cut -d' ' -f1)"
+  OLD_TPL_SHA="$(cat "$DSH_HOME/.settings-template.sha256" 2>/dev/null || true)"
+  if [ -f "$DSH_HOME/settings.yaml" ]; then
+    if [ "$TPL_SHA" != "$OLD_TPL_SHA" ]; then
+      render=1   # image template changed — re-render (image is authoritative)
+    else
+      # template unchanged — honor operator edits to the rendered file
+      CUR_SHA="$(sha256sum "$DSH_HOME/settings.yaml" | cut -d' ' -f1)"
+      REN_SHA="$(cat "$DSH_HOME/.settings.sha256" 2>/dev/null || true)"
+      if [ -n "$REN_SHA" ] && [ "$CUR_SHA" != "$REN_SHA" ]; then
+        render=0
+        warn "dsh home: $DSH_HOME/settings.yaml was edited locally — preserved (not re-rendered)"
+      fi
     fi
   fi
   if [ "$render" = "1" ]; then
     sed "s|@CF_ACCOUNT_ID@|$CF_ACCOUNT_ID|g" "$SEED_HOME/settings.yaml" > "$DSH_HOME/settings.yaml"
     chmod 600 "$DSH_HOME/settings.yaml"
     sha256sum "$DSH_HOME/settings.yaml" | cut -d' ' -f1 > "$DSH_HOME/.settings.sha256"
+    printf '%s\n' "$TPL_SHA" > "$DSH_HOME/.settings-template.sha256"
     log "dsh home: settings.yaml rendered for the runtime CF account (default preset: ga)"
   fi
 else
