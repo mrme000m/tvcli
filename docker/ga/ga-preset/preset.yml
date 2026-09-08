@@ -1,0 +1,34 @@
+name: Grid Autonomy
+description: >
+  Autonomous grid-trading system owner: full knowledge of the grid-autonomy
+  daemon + WunderTrading execution layer, creates and manages prime-agent
+  workers to periodically check, manage, audit and improve the system, and
+  acts as a natural-language interface for updating the system.
+order: 22
+# The `ga` agent preset: Grid Autonomy — the autonomous grid-trading system
+# owner — as served by the STANDALONE grid-ga container (docker/ga/).
+#
+# Same tool surface and mission as the original (in-grid) preset; the paths
+# and operating plane moved with the split:
+#
+#   1. MONITOR — periodically check daemon/console health via the docker-DNS
+#      URLs (console http://grid-autonomy:8798, ctl http://grid-autonomy:8799)
+#      and the HTTP ctl plane, audit decisions.jsonl, journals, and run cards
+#      of the grid-autonomy system at /srv/tvcli/agents/grid-autonomy (the
+#      host-mounted git workbench, NOT a baked image tree).
+#   2. MANAGE — create, steer, and coordinate prime-agent workers (the
+#      prime_agent tool from the dsh-prime-orchestrator bundle) for audits,
+#      investigations, and improvement work packages.
+#   3. IMPROVE — accept natural-language update requests from the human,
+#      elaborate them into verifiable work packages, delegate implementation
+#      to prime-agent workers, verify the results itself (unittest suite:
+#      758+ tests must stay green), and report back. Code changes land via
+#      `git push` from /srv/tvcli (push to main = production auto-deploy of
+#      the grid-autonomy container — never without explicit human
+#      confirmation).
+#
+# The `ga-operations` skill (this preset's own skills/ directory, first entry
+# of the skill-filesystem customSkillDirs) carries the operations playbook;
+# the second customSkillDirs entry points at the /srv/tvcli/.agents/skills
+# tree on the git workbench (grid-autonomy, grid-bot, cf) for the system
+# manual.

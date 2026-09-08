@@ -1,0 +1,165 @@
+# The `ga` agent preset: Grid Autonomy — the autonomous grid-trading system
+# owner — as served by the STANDALONE grid-ga container (docker/ga/).
+#
+# Modelled on the `wt-investigator` specialist preset (same tool surface;
+# services stay off-container). The differences from the original in-grid
+# preset are the paths and the operating plane, per the GA/grid split:
+#   - the grid-autonomy system lives in the SEPARATE grid-autonomy container
+#     on the same docker network — the agent reads its source from the
+#     /srv/tvcli git workbench and talks to the RUNNING system over docker
+#     DNS (console http://grid-autonomy:8798, ctl http://grid-autonomy:8799,
+#     PocketBase http://grid-autonomy:8090);
+#   - the agent cannot restart the grid daemon (no `./dev` inside this
+#     container) — it operates via the ctl API and the console, and code
+#     updates land via `git push` from /srv/tvcli which auto-deploys.
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: >-
+      You are GA, the Grid Autonomy system owner — a coding agent powered by the {{model}} model running on the DeepSeek Harness. Your working directory is {{cwd}} — the /srv/tvcli git workbench (a persistent clone of github.com/mrme000m/tvcli; host-mounted into this container). You own the autonomous grid-trading system in /srv/tvcli/agents/grid-autonomy (daemon, slot optimizer, position optimizer, console, WunderTrading execution layer); it RUNS in the separate grid-autonomy container on this docker network — reach its console at http://grid-autonomy:8798, its ctl API at http://grid-autonomy:8799, and its PocketBase at http://grid-autonomy:8090 (docker DNS). You cannot restart the grid daemon from inside this container — operate the system via the ctl API (http://grid-autonomy:8799) and the console (http://grid-autonomy:8798); code updates land via git push from /srv/tvcli which auto-deploys the grid-autonomy container. You (1) MONITOR — periodically check daemon/console health via the ctl API and console, audit decisions.jsonl, journals, and run cards; (2) MANAGE — create, steer, and coordinate prime-agent workers via the prime_agent tool for audits, investigations, and improvement work packages; (3) IMPROVE — accept natural-language update requests from the human, elaborate them into verifiable work packages, delegate implementation to prime-agent workers, verify results yourself (unittest suite: python3 -m unittest discover -s tests -t . from /srv/tvcli/agents/grid-autonomy — 758+ tests must stay green), and report back. NEVER push to main without explicit human confirmation in the web UI — a push to main is a production auto-deploy of the grid-autonomy container. Load the grid-autonomy skill before operating the system and the prime-agent skill before orchestrating workers. Never edit the WunderTrading account state (bot apply paths stay advisory-only) without explicit human confirmation. Never print secrets.
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ─────────────────────────────────────────────────────────
+
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# The `ga-operations` skill ships in this preset's skills/ directory (first
+# customSkillDirs entry); the second entry exposes the /srv/tvcli/.agents/skills
+# tree on the git workbench (grid-autonomy, grid-bot, cf) that documents the
+# system end-to-end.
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+      - /srv/tvcli/.agents/skills
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# ── goals ───────────────────────────────────────────────────────────────────
+
+# Improvement work packages run as long-lived goals across rounds (monitor →
+# delegate → verify → report); keep the goal tool.
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# `compaction-basic` reads `toolResultPrune` through `ctx.get`, so the pruner must
+# share this realm rather than sit outside it.
+#
+# `tokenMeter` is deliberately NOT in this realm: the meter stays on the HOST
+# plane, and the rows here resolve that one instance. It takes no configuration,
+# keys every fold by Session, and owns the context-meter projection units the
+# browser reads for every session — behind a realm those units would come and go
+# with whichever presets happen to be mounted. What a preset chooses is whether
+# its agent compacts at all, which is `compaction-basic` below.
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000
+
+# ── Cloudflare Workers AI ───────────────────────────────────────────────────
+
+# The model-facing `cf_ai_run`/`cf_ai_models` tools from the installed
+# dsh-prime-orchestrator bundle's `./cf-tools` subpath export. Like
+# `tool-bash`, the row only registers into the HOST `tools` registry (plus
+# resolving the host `credentials` seam for the bearer token) and provides
+# nothing, so it needs no isolate realm; `dsh-prime-orchestrator/cf-tools`
+# resolves from the installed bundle. Useful for the grid-autonomy LLM
+# chain's primary provider (Cloudflare Workers AI).
+- id: cf-tools
+  name: 'dsh-prime-orchestrator/cf-tools'
+
+# ── bitwarden vault ─────────────────────────────────────────────────────────
+
+# Read-only Bitwarden vault access: bw_status, bw_list, bw_get resolving the
+# account's session key from the credential seam (config carries references,
+# never values), so `dsh` resolves them (env, $DSH_HOME/.credentials.yaml,
+# or user .env) at call time. The vault holds the grid-autonomy runtime
+# credentials (WunderTrading login/session, LLM provider keys, Cloudflare
+# tokens); the GA agent reads them but never prints them.
+- id: bw-tools
+  name: 'dsh-prime-orchestrator/bw-tools'
+  config:
+    accounts:
+      main:
+        sessionEnv: BW_SESSION
+    defaultAccount: main
+
+# ── prime-agent orchestration ───────────────────────────────────────────────
+
+# The Prime Agent orchestration engine lives on the HOST plane (the
+# `prime-orchestration` row the bundle's patch mounts): it owns the delegation
+# table, the `/prime` API, and the `prime` settings namespace. This row
+# contributes only the model-facing side — the `prime_agent` tool, the
+# orchestration-workflow prompt section, and the `prime-agent` skill — and
+# resolves the host `prime` service, so it needs no isolate realm.
+# The agent-plane half ships inside the same dsh-prime-orchestrator package
+# as a subpath export; the row name resolves it from the installed bundle.
+# GA uses this to spawn the audit/investigation/improvement workers that
+# monitor and evolve the grid-autonomy system.
+- id: prime-agent-tool
+  name: 'dsh-prime-orchestrator/agent-tool'

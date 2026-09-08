@@ -1,0 +1,324 @@
+name: grid-ga deploy (az00)
+
+# Deploys the STANDALONE GA-agent container (grid-ga) to the az00 VPS.
+#
+# GA/grid split: the GA agent (dsh web + prime-agent, the `ga` preset) runs
+# in its own `grid-ga` container, split OUT of the grid-autonomy trading
+# container — agent work (code edits in the /srv/tvcli workbench, git pushes,
+# prime-agent workers) never restarts the trading stack, and trading-stack
+# redeploys never kill the agent's web sessions. Git is the hand-off: pushes
+# the GA agent makes to main auto-deploy the grid-autonomy container; only
+# changes under docker/ga/** (+ this workflow file) rebuild grid-ga. The two
+# workflows are fully independent — no shared state except the SSH host and
+# the grid-dsh volume (grid-ga mounts it read-write too: it holds the seeded
+# GA home and the agent's session state; the revision-refresh logic in the
+# grid-ga entrypoint handles the seeding/hand-off on its boots).
+#
+# Same build/transports as grid-autonomy-deploy.yml: the image is built ONCE
+# per commit with docker/build-push-action and pushed to ghcr.io (linux/amd64)
+# tagged with the commit SHA plus a moving `main` tag, with a registry-backed
+# layer cache (cache-from/to type=registry mode=max) so unchanged layers —
+# apt/Node 22, gh CLI, bw CLI, dsh + prime-agent — are cache hits on every
+# subsequent build. Then either:
+#
+#   transport=ghcr (default): the host does a layer-diffed `docker pull`
+#     (tens of MB for a source-only change; the image never lands as a
+#     tarball on the small root disk). Requires repo secret GHCR_PULL_TOKEN
+#     (PAT with read:packages).
+#
+#   transport=ssh-stream (optional, also the automatic fallback when
+#     GHCR_PULL_TOKEN is absent): docker save | gzip over SSH | docker load
+#     on the host — no host-side registry auth needed, but the full ~1GB
+#     compressed image crosses the wire every deploy.
+#
+# GHCR auth:
+#   - push: the workflow's built-in GITHUB_TOKEN (packages:write).
+#   - pull from az00 (ghcr transport only): repo secret GHCR_PULL_TOKEN =
+#     a GitHub PAT with read:packages, docker-logged-in on the host via
+#     stdin each deploy.
+#
+# SSH host config comes from repo secrets (SAME host as the grid deployment):
+#   SSH_HOST         az00 hostname/IP
+#   SSH_USER         ssh user (passwordless sudo + docker)
+#   SSH_PORT         ssh port (22)
+#   SSH_PRIVATE_KEY  OpenSSH private key for that user
+#
+# The grid-ga env file (repo secrets — SAME BW_* vault machine credentials
+# as the grid-autonomy deployment; the GA container loads ONLY the
+# Cloudflare items, BW_VAULT_ONLY=cf):
+#   BW_URL           Vaultwarden server URL
+#   BW_USERNAME      display-only vault account label
+#   BW_PASSWORD      vault master password
+#   BW_CLIENTID      machine-auth API key client id
+#   BW_CLIENTSECRET  machine-auth API key client secret
+#   GH_PUSH_TOKEN    PAT with repo/contents:write on mrme000m/tvcli —
+#                    bridged into the container as GH_TOKEN so the GA agent
+#                    can `git push` code updates from the /srv/tvcli
+#                    workbench (its persona's guardrail: never push to main
+#                    without explicit human confirmation — push = production
+#                    auto-deploy of the grid-autonomy container).
+#
+# Cloudflare (OPTIONAL — the "Ensure CF tunnel ingress for dsh" step below;
+# absent → ::warning:: + skip, the deploy never fails on it):
+#   CF_API_TOKEN     API token with Cloudflare Tunnel edit + DNS edit rights
+#   CF_ACCOUNT_ID    the Cloudflare account id owning the tunnel
+#   CF_TUNNEL_ID     the id of the remotely-managed 'grid-autonomy' tunnel
+#                    (shared with the grid deployment)
+# The step repoints the tunnel rule for dsh.00m.indevs.in from
+# http://grid-autonomy:3081 to http://grid-ga:3081 (the GA agent's dsh web
+# UI moved with the split) and ensures the DNS CNAME
+# dsh.00m.indevs.in → <tunnel-id>.cfargotunnel.com exists. Every other
+# ingress rule on the tunnel (grid/grid-ctl/grid-pb/grid-api + the
+# catch-all) is preserved verbatim — only the dsh rule is replaced.
+#
+# GA has NO trading mode — no dispatch input for one. A grid-ga redeploy
+# can never change the trading fleet's posture; the containers share only
+# the grid-dsh volume (seeded GA home) and the docker network.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docker/ga/**'
+      - '.github/workflows/ga-deploy.yml'
+  workflow_dispatch:
+    inputs:
+      transport:
+        description: 'How the image reaches the host'
+        type: choice
+        default: 'ghcr'
+        options:
+          - ghcr
+          - ssh-stream
+
+concurrency:
+  group: grid-ga-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}/grid-ga
+  NAME: grid-ga
+  REMOTE_DIR: /opt/grid-ga
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      # The default `docker` driver cannot export registry caches
+      # ("Cache export is not supported for the docker driver") —
+      # setup-buildx creates the docker-container-driver builder that
+      # cache-from/cache-to type=registry requires.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/ga/Dockerfile
+          platforms: linux/amd64
+          push: true
+          # Immutable per-commit tag is what the host pulls; `main` is the
+          # human-friendly moving tag (and the cache ref anchor).
+          tags: |
+            ${{ env.IMAGE }}:${{ github.sha }}
+            ${{ env.IMAGE }}:main
+          # Registry-backed cache: unchanged layers (apt, Node, gh, bw,
+          # dsh + prime-agent) are pulled as cache instead of rebuilt.
+          cache-from: type=registry,ref=${{ env.IMAGE }}:buildcache
+          cache-to: type=registry,mode=max,ref=${{ env.IMAGE }}:buildcache
+          # The commit SHA stamps /opt/dsh-home/.baked-rev in the image: the
+          # grid-ga entrypoint uses it to detect image revisions and refresh
+          # the seeded GA preset / web profile in the grid-dsh volume
+          # (operator-edited preset files are preserved, not clobbered) —
+          # including the home seeded by the PREVIOUS (in-grid) deployment.
+          build-args: |
+            GA_PRESET_REV=${{ github.sha }}
+
+      - name: Resolve transport
+        run: |
+          TRANSPORT="${{ inputs.transport || 'ghcr' }}"
+          if [ "$TRANSPORT" = "ghcr" ] && [ -z "${{ secrets.GHCR_PULL_TOKEN }}" ]; then
+            echo "::warning::GHCR_PULL_TOKEN not set — falling back to SSH streaming"
+            TRANSPORT=ssh-stream
+          fi
+          echo "TRANSPORT=$TRANSPORT" >> "$GITHUB_ENV"
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          install -m 600 /dev/null ~/.ssh/deploy_key
+          printf '%s\n' "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
+          ssh-keyscan -p "${{ secrets.SSH_PORT }}" "${{ secrets.SSH_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+          echo "SSH_CMD=ssh -i ~/.ssh/deploy_key -p ${{ secrets.SSH_PORT }} -o BatchMode=yes ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}" >> "$GITHUB_ENV"
+
+      - name: Log the host into GHCR (idempotent)
+        if: env.TRANSPORT == 'ghcr'
+        run: |
+          # Refresh the cached docker login each deploy — the PAT may be
+          # rotated or expired since the last one. No-ops if unchanged.
+          printf '%s' '${{ secrets.GHCR_PULL_TOKEN }}' \
+            | $SSH_CMD 'sudo docker login ghcr.io -u ${{ github.actor }} --password-stdin >/dev/null'
+
+      - name: Pull the image on the host
+        if: env.TRANSPORT == 'ghcr'
+        run: |
+          # Layer-diffed pull: unchanged layers are already present from the
+          # previous deploy; only new layers cross the wire. NOTE: ssh
+          # appends extra argv to the remote command STRING (they are not
+          # positional parameters), so the image ref must be interpolated
+          # into the quoted command — not passed as a trailing argument.
+          IMAGE_REF="${{ env.IMAGE }}:${{ github.sha }}"
+          $SSH_CMD "sudo docker pull '$IMAGE_REF'"
+
+      - name: Stream the image to the host and load it (SSH fallback)
+        if: env.TRANSPORT == 'ssh-stream'
+        run: |
+          # The buildkit build never touched the runner daemon — fetch
+          # the just-pushed image locally, then stream it (nothing is
+          # written to the host disk except the loaded image itself).
+          docker pull "${{ env.IMAGE }}:${{ github.sha }}"
+          docker save "${{ env.IMAGE }}:${{ github.sha }}" \
+            | gzip -1 | $SSH_CMD 'gzip -d | sudo docker load'
+
+      - name: Write the GA env file on the host
+        run: |
+          $SSH_CMD "sudo mkdir -p $REMOTE_DIR && sudo chown ${{ secrets.SSH_USER }} $REMOTE_DIR && chmod 700 $REMOTE_DIR"
+          # BW_* machine-auth for vault_loader (Cloudflare items only,
+          # BW_VAULT_ONLY=cf inside the container) + GH_PUSH_TOKEN bridged
+          # into the container as GH_TOKEN (the /srv/tvcli workbench push
+          # credential). Same BW_* repo secrets as the grid-autonomy
+          # deployment; the file stays on the host for container restarts.
+          $SSH_CMD "umask 177 && cat > $REMOTE_DIR/.env" <<'ENVEOF'
+          BW_URL=${{ secrets.BW_URL }}
+          BW_USERNAME=${{ secrets.BW_USERNAME }}
+          BW_PASSWORD=${{ secrets.BW_PASSWORD }}
+          BW_CLIENTID=${{ secrets.BW_CLIENTID }}
+          BW_CLIENTSECRET=${{ secrets.BW_CLIENTSECRET }}
+          GH_PUSH_TOKEN=${{ secrets.GH_PUSH_TOKEN }}
+          ENVEOF
+          $SSH_CMD "chmod 600 $REMOTE_DIR/.env && grep -c '^[A-Z]' $REMOTE_DIR/.env"
+
+      - name: Ship the runner script
+        run: |
+          scp -i ~/.ssh/deploy_key -P ${{ secrets.SSH_PORT }} \
+            docker/ga/ga-run.sh \
+            "${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST }}:$REMOTE_DIR/ga-run.sh"
+          $SSH_CMD "chmod +x $REMOTE_DIR/ga-run.sh"
+          # GA has no trading mode — no mode to preserve or set; ga-run.sh
+          # is fully idempotent (volumes, the /opt/tvcli workbench, the
+          # grid-net network, the graceful SIGTERM replace).
+          $SSH_CMD "IMAGE='${{ env.IMAGE }}:${{ github.sha }}' NAME='$NAME' bash $REMOTE_DIR/ga-run.sh"
+
+      # ── dsh.00m.indevs.in tunnel ingress (GA agent web UI) ──────────────
+      # Idempotent Cloudflare-API reconciliation, NEVER fatal: gated on the
+      # CF_* repo secrets (absent → ::warning:: + skip), and every API error
+      # degrades to a ::warning:: too — the deploy above already succeeded.
+      - name: Ensure CF tunnel ingress for dsh (GA agent web UI)
+        run: |
+          set -euo pipefail
+          if [ -z "${{ secrets.CF_API_TOKEN }}" ] || [ -z "${{ secrets.CF_ACCOUNT_ID }}" ] || [ -z "${{ secrets.CF_TUNNEL_ID }}" ]; then
+            echo "::warning::CF_API_TOKEN / CF_ACCOUNT_ID / CF_TUNNEL_ID repo secrets not all set — skipping the dsh tunnel ingress step"
+            exit 0
+          fi
+          CF_API="https://api.cloudflare.com/client/v4"
+          AUTH="Authorization: Bearer ${{ secrets.CF_API_TOKEN }}"
+          ACCT="${{ secrets.CF_ACCOUNT_ID }}"
+          TUNNEL="${{ secrets.CF_TUNNEL_ID }}"
+          HOST="dsh.00m.indevs.in"
+          SERVICE="http://grid-ga:3081"
+
+          # soft-fail helper: warn + exit 0 (the deploy continues)
+          cf_skip() {
+            echo "::warning::CF API step failed: $1 — dsh tunnel ingress skipped (deploy continues)"
+            exit 0
+          }
+
+          # 1. current tunnel configuration (GET)
+          CFG_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/accounts/$ACCT/cfd_tunnel/$TUNNEL/configurations" || true)"
+          [ -n "$CFG_JSON" ] || cf_skip "GET configurations returned nothing"
+          echo "$CFG_JSON" | jq -e '.success' >/dev/null 2>&1 \
+            || cf_skip "GET configurations unsuccessful: $(echo "$CFG_JSON" | jq -c '.errors' 2>/dev/null || echo '?')"
+          INGRESS="$(echo "$CFG_JSON" | jq -c '.result.config.ingress')"
+          [ "$INGRESS" != "null" ] || cf_skip "tunnel has no ingress configuration"
+
+          # 2. rebuild the list: drop any existing rule for $HOST, insert ours
+          #    before the first hostname-less catch-all rule (jq tested
+          #    against the live tunnel shape incl. the idempotent re-run).
+          NEW_INGRESS="$(jq -c --arg h "$HOST" --arg s "$SERVICE" '
+            map(select(.hostname != $h)) as $kept
+            | ($kept | to_entries | map(select(.value.hostname == null)) | first | .key // ($kept | length)) as $idx
+            | $kept[:$idx] + [{hostname: $h, service: $s}] + $kept[$idx:]' <<<"$INGRESS")"
+
+          # 3. PUT it back only when it changed
+          if [ "$NEW_INGRESS" != "$(jq -c . <<<"$INGRESS")" ]; then
+            BODY="$(jq -nc --argjson ingress "$NEW_INGRESS" '{config: {ingress: $ingress}}')"
+            PUT_JSON="$(curl -fsS -m 30 -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+              -d "$BODY" "$CF_API/accounts/$ACCT/cfd_tunnel/$TUNNEL/configurations" || true)"
+            echo "$PUT_JSON" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "PUT configurations unsuccessful: $(echo "$PUT_JSON" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "tunnel ingress updated: $HOST → $SERVICE"
+          else
+            echo "tunnel ingress already correct: $HOST → $SERVICE"
+          fi
+
+          # 4. DNS CNAME $HOST → <tunnel>.cfargotunnel.com (proxied)
+          ZONE_NAME="${HOST#*.}"
+          ZONE_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/zones?name=$ZONE_NAME" || true)"
+          ZONE_ID="$(echo "$ZONE_JSON" | jq -r '.result[0].id // empty' 2>/dev/null || true)"
+          [ -n "$ZONE_ID" ] || cf_skip "zone lookup for $ZONE_NAME"
+          TARGET="$TUNNEL.cfargotunnel.com"
+          REC_JSON="$(curl -fsS -m 30 -H "$AUTH" "$CF_API/zones/$ZONE_ID/dns_records?name=$HOST" || true)"
+          REC="$(echo "$REC_JSON" | jq -c '.result[0] // empty' 2>/dev/null || true)"
+          if [ -z "$REC" ]; then
+            CREATE="$(curl -fsS -m 30 -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"type\":\"CNAME\",\"name\":\"$HOST\",\"content\":\"$TARGET\",\"proxied\":true}" \
+              "$CF_API/zones/$ZONE_ID/dns_records" || true)"
+            echo "$CREATE" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "POST dns_records unsuccessful: $(echo "$CREATE" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "DNS CNAME created: $HOST → $TARGET (proxied)"
+          elif [ "$(echo "$REC" | jq -r '.type')" = "CNAME" ] && [ "$(echo "$REC" | jq -r '.content')" = "$TARGET" ]; then
+            echo "DNS CNAME already correct: $HOST → $TARGET (proxied)"
+          else
+            REC_ID="$(echo "$REC" | jq -r '.id')"
+            UPDATE="$(curl -fsS -m 30 -X PUT -H "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"type\":\"CNAME\",\"name\":\"$HOST\",\"content\":\"$TARGET\",\"proxied\":true}" \
+              "$CF_API/zones/$ZONE_ID/dns_records/$REC_ID" || true)"
+            echo "$UPDATE" | jq -e '.success' >/dev/null 2>&1 \
+              || cf_skip "PUT dns_records unsuccessful: $(echo "$UPDATE" | jq -c '.errors' 2>/dev/null || echo '?')"
+            echo "DNS record updated: $HOST → $TARGET (proxied)"
+          fi
+
+      - name: Health gate (vault load + dsh home seed + workbench pull)
+        run: |
+          # dsh web serves 127.0.0.1:3082 on the host (the publish maps to
+          # the in-container :3081). First boot may clone the workbench —
+          # still well under a minute; give it the retry loop anyway.
+          for i in $(seq 1 24); do
+            if $SSH_CMD 'curl -fs -m 5 http://127.0.0.1:3082/' >/dev/null 2>&1; then
+              echo "healthy after ~$((i * 15))s"
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "::error::grid-ga never became healthy"
+          $SSH_CMD 'sudo docker logs --tail 60 '"$NAME"' || true'
+          exit 1
+
+      - name: Deployment report
+        if: always()
+        run: |
+          $SSH_CMD 'sudo docker ps --filter name='"$NAME"' --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"; echo; sudo docker images --format "{{.Repository}}:{{.Tag}} {{.Size}}" | head -5; echo; sudo docker logs --tail 40 '"$NAME"' 2>&1 | grep -iE "dsh|ga-|preset|vault|workbench|prime|seed" || true'
