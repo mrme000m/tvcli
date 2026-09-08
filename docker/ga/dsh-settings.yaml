@@ -35,11 +35,11 @@ llm-pi-ai:
           maxTokens: 16384
         - id: "@cf/deepseek-ai/deepseek-v4-flash-0731"
           name: "CF Workers AI / DeepSeek V4 Flash 0731"
-          contextWindow: 131072
+          contextWindow: 1310720
           maxTokens: 16384
         - id: "@cf/deepseek-ai/deepseek-v4-pro-0813"
           name: "CF Workers AI / DeepSeek V4 Pro 0813"
-          contextWindow: 131072
+          contextWindow: 1048576
           maxTokens: 16384
         - id: "@cf/qwen/qwen3.8-27b"
           name: "CF Workers AI / Qwen3.8 27B"
@@ -54,13 +54,13 @@ llm-pi-ai:
           contextWindow: 262144
           maxTokens: 16384
         - id: "@cf/zai-org/glm-5.3"
-          name: "glm53"
-          contextWindow: 1048576
-          maxTokens: 256000
+          name: "CF Workers AI / GLM-5.3"
+          contextWindow: 1310720
+          maxTokens: 16384
         - id: "@cf/zai-org/glm-5.3-flash"
-          name: "glm53flash"
-          contextWindow: 1048576
-          maxTokens: 128000
+          name: "CF Workers AI / GLM-5.3 Flash"
+          contextWindow: 1310720
+          maxTokens: 16384
     nvidia:
       displayName: nvidia
       apiKeyEnv: NVIDIA_API_KEY
