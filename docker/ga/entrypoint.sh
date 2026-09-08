@@ -197,7 +197,8 @@ fi
 # (/root is not a volume) — idempotent.
 if [ -n "${GH_TOKEN:-}" ]; then
   if gh auth setup-git >/dev/null 2>&1 \
-     && printf '%s' "$GH_TOKEN" | gh auth login --with-token --hostname github.com >/dev/null 2>&1; then
+     && printf '%s' "$GH_TOKEN" | env -u GH_TOKEN -u GITHUB_TOKEN \
+          gh auth login --with-token --hostname github.com >/dev/null 2>&1; then
     log "workbench: gh auth persisted (GH_TOKEN → gh config; git push + gh CLI work env-free)"
   else
     warn "workbench: gh auth setup-git / login failed — git pushes may lack credentials"
