@@ -96,10 +96,14 @@ function estimateCloseBy(bot) {
   if (rate == null || rate <= 0) return "—";
   const budget = isNum(bot.committed) ? Number(bot.committed) : null;
   if (budget == null || budget <= 0) return "—";
+  // P2-3: the overview sends take_profit_usd (an absolute $ target), never
+  // the per-bot take_profit_pct this used to read — prefer the absolute
+  // target when present, keep the config-pct × budget fallback.
+  const tpUsd = isNum(bot.take_profit_usd) ? Number(bot.take_profit_usd) : null;
   const tp = isNum(bot.take_profit_pct) ? Number(bot.take_profit_pct)
     : isNum((lastOverview || {}).config_digest && (lastOverview || {}).config_digest.take_profit_pct)
       ? Number((lastOverview || {}).config_digest.take_profit_pct) : 0.10;
-  const target = tp * budget;
+  const target = tpUsd != null ? tpUsd : tp * budget;
   const missing = target - net;
   if (missing <= 0) return "now";
   const hrs = missing / rate;
@@ -217,6 +221,7 @@ async function loadOverview() {
     ov = await api("/api/overview");
   } catch (e) {
     renderStatusbar(null);
+    window.StaleGuard?.fail("fleet");   // P1-7: persistent stale marker
     return;
   }
   lastOverview = ov;
@@ -227,6 +232,7 @@ async function loadOverview() {
   if (!st || st.error) st = null;
   lastStatus = st;
   renderStatusbar(ov);
+  window.StaleGuard?.ok("fleet");   // P1-7: overview data is fresh again
   if (activeView === "fleet") {
     renderReadiness(ov);
     renderFleet(ov, st);
@@ -299,8 +305,9 @@ function renderStatusbar(ov) {
   bar.innerHTML = chips.join("");
   // keep the header subtitle in sync with the actual daemon mode
   const modeLabel = (ov && ov.daemon && ov.daemon.mode) || "—";
+  // P2-10: textContent already escapes — esc() here double-escaped "&" labels
   $("#wt-account").textContent =
-    `mission console · ${esc(modeLabel)} · WT: ${esc(wtAccountLabel)}`;
+    `mission console · ${modeLabel} · WT: ${wtAccountLabel}`;
 }
 
 /* the signature: an ATR-channel strip with geometric grid rungs and a
@@ -481,7 +488,9 @@ function slotCard(bot) {
   if (bot.needs_reanalysis) flags.push(`<span class="badge badge--warn">re-analysis</span>`);
   if (bot.force_rotate) flags.push(`<span class="badge badge--violet">rotate queued</span>`);
   if (obs.loss_veto) flags.push(`<span class="badge badge--bad">loss veto</span>`);
-  if (obs.exit_queued) flags.push(`<span class="badge badge--violet">exit queued</span>`);
+  // P2-2: dead branch — the server never sends observed.exit_queued, so
+  // this badge could never render. Re-add only if that field contract changes.
+  // if (obs.exit_queued) flags.push(`<span class="badge badge--violet">exit queued</span>`);
   if (outsideBand) flags.push(`<span class="badge badge--bad" title="drawdown ${fmtNum(dd, 2)}× the ATR band — price is outside the channel the grid was built for">outside band</span>`);
   if (dead) flags.push(`<span class="badge badge--bad">${esc(status)}</span>`);
 
@@ -600,13 +609,29 @@ async function openDecisionFromSlot(did) {
     return;
   }
   row.scrollIntoView({ block: "center", behavior: "smooth" });
+  // P2-14: fetch the full record first so the evidence carries the cohort
+  // block, exactly like the click path below — the slot-card deep link used
+  // to expand the in-memory row and silently skip "Cohort (same …)".
+  // Falls back to the in-memory row when the fetch fails.
+  const rec = decisions.find((d) => d.id === did);
+  if (rec && rec.cohort === undefined) {
+    try {
+      const detail = await api(`/api/decisions/${encodeURIComponent(did)}`);
+      if (detail && detail.decision) {
+        rec.cohort = { cohort_size: detail.cohort_size,
+                       cohort_realized: detail.cohort_realized };
+      }
+    } catch (e) { /* transient fetch error — the in-memory row still expands */ }
+  }
   // expand if not already
   const next = row.nextElementSibling;
   if (!(next && next.classList.contains("dec-detail"))) {
     const det = document.createElement("tr");
     det.className = "dec-detail";
-    det.innerHTML = `<td colspan="12">${decEvidenceHTML(decisions.find((d) => d.id === did))}</td>`;
+    det.innerHTML = `<td colspan="12">${decEvidenceHTML(rec)}</td>`;
     row.after(det);
+    row.setAttribute("aria-expanded", "true");        // P1-6
+    window.ExpandState?.toggle(did);   // P1-5: keep it open across 20s polls
   }
 }
 
@@ -721,129 +746,17 @@ function renderSlotSparklines() {
   }
 }
 
-/* the big chart modal: 96×1h closes as a line + light area fill, dashed
-   channel high/mid/low with right-edge labels, lo/hi/last captions and
-   the bar window. Reuses #modal-root; Escape/backdrop/Close all clean
-   the key listener up (confirmDialog's onKey pattern).
-
-   Cold-cache: a slot card with a not-yet-fetched sparkline still has a
-   clickable .slot-spark. The old version rendered the modal with
-   "no chart data cached … yet" while the fetch was in flight in the
-   background, then left the operator staring at it. We now show a
-   spinner, wait for the in-flight fetch (with a 12s timeout — tvcli is
-   normally <3s for a cached Binance candle window), and re-render once
-   data lands. */
+/* the big chart modal (96×1h closes + channel refs + captions) lives in
+   components/market-chart.js as window.MarketChart.open — see P1-2. This
+   shim keeps the call sites unchanged and fails soft if the component
+   is missing. */
 function openMarketModal(key, slot) {
-  const parts = String(key).split(":");
-  const venue = parts[0] || "?", symbol = parts.slice(1).join(":") || "?";
-  const root = $("#modal-root");
-  const box = el("div", { class: "modal-backdrop" });
-
-  const W = Math.max(320, Math.min(window.innerWidth * 0.9, 900)), H = 360;
-  const RX = 62;   // right gutter for channel labels
-
-  const modal = el("div", { class: "modal modal--chart", role: "dialog", "aria-modal": "true" },
-    el("h3", {}, `MARKET — ${esc(venue)}:${esc(symbol)}`),
-    el("div", { class: "modal-body" },
-      el("div", { class: "mk-chart" })),
-    el("div", { class: "modal-actions" },
-      el("button", { class: "btn", onclick: () => done() }, "Close")));
-  const chartHost = modal.querySelector(".mk-chart");
-
-  function paint(bars) {
-    const bots = (lastOverview && lastOverview.bots) || [];
-    const bot = bots.find((b) => String(b.slot) === String(slot)) || null;
-    const ch = (bot && bot.channel) || null;
-    let chartHTML = `<div class="mk-empty">no chart data cached for ${esc(venue)}:${esc(symbol)} yet</div>`;
-    let captions = "";
-    if (bars.length >= 2) {
-      const closes = [];
-      for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
-      if (closes.length >= 2) {
-        let lo = Math.min(...closes), hi = Math.max(...closes);
-        if (isNum(ch && ch.low)) lo = Math.min(lo, Number(ch.low));
-        if (isNum(ch && ch.high)) hi = Math.max(hi, Number(ch.high));
-        if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
-        const padY = (hi - lo) * 0.08;
-        lo -= padY; hi += padY;
-        const T = 10, B = 10;
-        const X = (i) => 8 + (i / (bars.length - 1)) * (W - RX - 14);
-        const Y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
-        let pts = "", area = `M ${X(0).toFixed(1)},${(H - B).toFixed(1)}`;
-        bars.forEach((b, i) => {
-          const c = Number(b && b.c);
-          if (!isFinite(c)) return;
-          pts += `${X(i).toFixed(1)},${Y(c).toFixed(1)} `;
-          area += ` L ${X(i).toFixed(1)},${Y(c).toFixed(1)}`;
-        });
-        area += ` L ${X(bars.length - 1).toFixed(1)},${(H - B).toFixed(1)} Z`;
-        const first = closes[0], last = closes[closes.length - 1];
-        const up = last >= first;
-        let refs = "";
-        const chLine = (v, label) => {
-          if (!isNum(v)) return "";
-          const y = Y(Number(v)).toFixed(1);
-          const lbl = label ? `${esc(label)} ${fmtPrice(v)}` : fmtPrice(v);
-          return `<line x1="8" y1="${y}" x2="${W - RX}" y2="${y}" class="mk-ch"/>`
-            + `<text x="${W - RX + 6}" y="${Number(y) + 3}" class="mk-label">${lbl}</text>`;
-        };
-        if (ch) refs = chLine(ch.high, "hi") + chLine(ch.mid, "mid") + chLine(ch.low, "lo");
-        chartHTML = `
-          <svg class="mk-svg" viewBox="0 0 ${W.toFixed(0)} ${H}" role="img"
-               aria-label="1h closes for ${esc(venue)}:${esc(symbol)}">
-            <path class="mk-area${up ? "" : " mk-area--down"}" d="${area}"/>
-            ${refs}
-            <polyline class="mk-line${up ? "" : " mk-line--down"}" points="${pts.trim()}"/>
-          </svg>`;
-        const t0 = Number(bars[0] && bars[0].t), tN = Number(bars[bars.length - 1] && bars[bars.length - 1].t);
-        captions = `
-          <div class="mk-captions mono">
-            <span>lo <b>${fmtPrice(Math.min(...closes))}</b></span>
-            <span>hi <b>${fmtPrice(Math.max(...closes))}</b></span>
-            <span>last <b>${fmtPrice(last)}</b></span>
-            <span class="mk-delta ${up ? "mk-delta--up" : "mk-delta--down"}">
-              \u0394 ${up ? "+" : "\u2212"}${Math.abs(first ? ((last - first) / first) * 100 : 0).toFixed(2)}%</span>
-            <span class="mk-window">${bars.length} \u00d7 1h bars \u00b7 ${relTimeEpoch(t0)} \u2192 ${relTimeEpoch(tN)}</span>
-          </div>`;
-      }
-    }
-    chartHost.innerHTML = chartHTML + captions;
-  }
-
-  // First paint from the cache; if cold, request a fetch + show a spinner.
-  const cached = chartCache[`${key}:1h`];
-  const cachedBars = (cached && cached.data && cached.data.bars) || [];
-  if (cachedBars.length >= 2) {
-    paint(cachedBars);
-  } else {
-    chartHost.innerHTML = `<div class="mk-empty"><span class="spinner"></span> fetching ${esc(venue)}:${esc(symbol)} 1h bars…</div>`;
-    // Fire (or wait on an in-flight) fetch with a bounded timeout — never
-    // strand the operator on a spinner if tvcli is down.
-    let timer;
-    const timeout = new Promise((_, rej) => { timer = setTimeout(() => rej(new Error("timeout")), 12000); });
-    const work = fetchChart(venue, symbol, "1h", 96)
-      .then((d) => (d && d.bars) || [])
-      .catch(() => null);
-    Promise.race([work, timeout]).then((bars) => {
-      clearTimeout(timer);
-      // If the user closed the modal in the meantime, chartHost is no
-      // longer in the DOM — skip the second paint.
-      if (!chartHost.isConnected) return;
-      paint(bars && bars.length >= 2 ? bars : []);
-    });
-  }
-
-  function done() {
-    root.innerHTML = "";
-    document.removeEventListener("keydown", onKey);
-  }
-  function onKey(e) { if (e.key === "Escape") done(); }
-  document.addEventListener("keydown", onKey);
-  box.append(modal);
-  box.addEventListener("mousedown", (e) => { if (e.target === box) done(); });
-  root.append(box);
-  modal.querySelector(".modal-actions .btn").focus();
+  // P1-2: the modal chart moved to components/market-chart.js — container-
+  // measured width + repaint on resize/orientationchange while open. The
+  // typeof guard keeps the console fail-soft if the component fails to load.
+  if (typeof window.MarketChart?.open === "function") window.MarketChart.open(key, slot);
 }
+
 
 /* the readiness strip: the daemon's own dependency + capacity diagnostics,
    surfaced as a row of glanceable instrument cells. Answers the three
@@ -1165,56 +1078,19 @@ function renderMarketBrief(st) {
   }
 }
 
-/* "LLM brains" — small panel that maps the operator's headline question
-   ("is Mistral actually driving the fast lane right now?") onto one
-   block. Live ping + role routing, updated on every overview poll but
-   lazy-loaded so the first paint isn't blocked on a 9s subprocess. */
+/* "LLM brains" — provider ping + role routing card. The card lifecycle
+   (dedupe, timeout, pinging state, pending/stale markers) lives in
+   components/llm-health.js as window.LlmHealth.render (P1-1); the
+   fire-and-forget call from loadOverview above stays unchanged. */
 async function renderLlmBrains() {
-  const box = $("#llm-brains");
-  const atEl = $("#llm-brains-at");
-  if (!box) return;
-  let d;
-  try { d = await api("/api/llm/health"); }
-  catch (e) { box.innerHTML = `<div class="empty-note">Provider health unreachable.</div>`; return; }
-  const results = d.results || [];
-  const roles = d.roles || {};
-  const arbProv = d.arbiter_provider || "mistral";
-  if (atEl && d.at) atEl.textContent = `pinged ${relTime(d.at)}`;
-  const dot = (ok) => ok ? "●" : "○";
-  const cls = (ok) => ok ? "ready-cell--on" : "ready-cell--off";
-  const provRow = results.map((r) => {
-    const name = r.provider;
-    const labelMap = { cf: "CF Workers AI", nvidia: "NVIDIA", openrouter: "OpenRouter", mistral: "Mistral" };
-    const lbl = labelMap[name] || name;
-    const err = r.ok ? "" : (r.error || "FAIL");
-    return `<div class="ready-cell ${cls(r.ok)}" title="${esc(err || 'ok')}">
-      <span class="ready-dot">${dot(r.ok)}</span>
-      <span class="ready-key">${esc(lbl)}</span>
-      <span class="ready-val">${r.ok ? `${r.latency_ms}ms` : "down"}</span>
-    </div>`;
-  }).join("");
-  // Role → provider pin matrix (which agent uses which model). The arbiter
-  // (fast-lane capital reallocation) is NOT in the swarm role list — it is
-  // driven by `config.optimizer.llm_provider` and surfaced separately as
-  // `arbiter_provider` so the operator can answer "is Mistral actually
-  // doing the fast lane right now?" at a glance.
-  const swarmRoles = d.role_keys || [];
-  const arbPinned = roles.optimizer;
-  const arbUsing = arbPinned || arbProv || "mistral";
-  const roleRow = (label, roleKey) => {
-    const using = roles[roleKey] || "follow chain";
-    return `<div class="row"><span class="k" title="Pinned provider for ${roleKey}. Default follows the chain.">${esc(label)}</span>
-      <span class="v">${using === "follow chain"
-        ? `<span class="badge badge--dim">follow chain</span>`
-        : `<span class="badge badge--violet">${esc(using)}</span>`}</span></div>`;
-  };
-  const arbRow = `<div class="row"><span class="k" title="Pinned provider for the fast-lane arbiter. Default = ${esc(arbProv || 'mistral')}. Override: config.optimizer.llm_provider.">arbiter (fast lane)</span>
-    <span class="v"><span class="badge badge--violet">${esc(arbUsing)}</span>${arbPinned ? "" : ` <span class="mono" style="color:var(--ink-faint);font-size:10.5px">default</span>`}</span></div>`;
-  const swarmRows = swarmRoles.map((r) => roleRow(r.replace(/_/g, " "), r)).join("");
-  box.innerHTML = `
-    <div class="readiness-cells" style="margin-bottom:8px">${provRow}</div>
-    <div class="mini-kv">${arbRow}${swarmRows}</div>`;
+  // P1-1: the card lifecycle moved to components/llm-health.js — singleton
+  // in-flight request (dedupe), 15s client timeout, "pinging…" placeholder,
+  // monotonic response guard, pending/stale markers. The typeof guard keeps
+  // the console working if the component fails to load.
+  if (typeof window.LlmHealth?.render === "function") return window.LlmHealth.render();
 }
+
+
 
 function renderSummary(ov) {
   const d = ov.daemon || {};
@@ -1582,8 +1458,13 @@ let decSort = { key: "at", dir: -1 };   // default: newest first
 async function loadDecisions() {
   try {
     decisions = (await api("/api/decisions?limit=400")).decisions || [];
-  } catch (e) { toast(`decisions: ${e.message}`, true); return; }
+  } catch (e) {
+    toast(`decisions: ${e.message}`, true);
+    window.StaleGuard?.fail("decisions");   // P1-7: persistent stale marker
+    return;
+  }
   renderDecisions();
+  window.StaleGuard?.ok("decisions");   // P1-7
 }
 
 function _decValue(r, key) {
@@ -1661,7 +1542,8 @@ function renderDecisions() {
     const conf = (r.evidence || {}).confidence;
     const confChip = conf != null
       ? `<span class="badge badge--dim" title="facilitator confidence">c ${fmtNum(conf, 2)}</span>` : "";
-    return `<tr class="dec-row${noGo ? " dec-row--nogo" : ""}" data-id="${esc(r.id)}" title="click to expand the evidence the agents evaluated against — alt-click on id to copy">
+    // P1-6: role/tabindex mirrors the rel-row pattern (keyboard accessible)
+    return `<tr class="dec-row${noGo ? " dec-row--nogo" : ""}" data-id="${esc(r.id)}" role="button" tabindex="0" title="click to expand the evidence the agents evaluated against — alt-click on id to copy">
       <td class="td-mono"><span class="dec-id mono" data-copy="${esc(r.id)}" role="button" tabindex="0" title="alt-click to copy">${esc(r.id)}</span></td>
       <td class="td-mono">${esc(String(r.at || "").replace("T", " ").slice(5, 16))}</td>
       <td class="td-mono"><span class="venue-tag venue-tag--${esc(r.venue)}">${esc(r.venue)}</span>:${esc(r.symbol)}</td>
@@ -1677,6 +1559,8 @@ function renderDecisions() {
       <td><div class="rationale" title="${esc(r.rationale || "")}">${esc(r.rationale || "—")}</div></td>
     </tr>`;
   }).join("") || `<tr><td colspan="12"><div class="empty-note">No decisions match. The ledger fills as the daemon deliberates.</div></td></tr>`;
+  // P1-5: re-expand rows the operator had open before this 20s repaint.
+  if (typeof window.ExpandState?.restoreDecisions === "function") window.ExpandState.restoreDecisions();
 }
 
 /* CSV export of the currently-filtered (and currently-sorted) decision
@@ -1826,7 +1710,12 @@ $("#dec-body").addEventListener("click", async (e) => {
   const tr = e.target.closest("tr.dec-row");
   if (!tr) return;
   const next = tr.nextElementSibling;
-  if (next && next.classList.contains("dec-detail")) { next.remove(); return; }
+  if (next && next.classList.contains("dec-detail")) {
+    next.remove();
+    tr.setAttribute("aria-expanded", "false");   // P1-6: expansion state for SRs
+    window.ExpandState?.toggle(tr.dataset.id);   // P1-5: remember the collapse
+    return;
+  }
   let row = decisions.find((d) => d.id === tr.dataset.id);
   if (!row) return;
   // First expansion: lazy-fetch the cohort context from /api/decisions/<id>
@@ -1849,6 +1738,28 @@ $("#dec-body").addEventListener("click", async (e) => {
   det.className = "dec-detail";
   det.innerHTML = `<td colspan="12">${decEvidenceHTML(row)}</td>`;
   tr.after(det);
+  tr.setAttribute("aria-expanded", "true");    // P1-6
+  window.ExpandState?.toggle(tr.dataset.id);   // P1-5: remember the expansion
+});
+
+// P1-6: keyboard parity for dec rows (mirrors the rel-row pattern).
+// Enter/Space on a focused row re-dispatches a click so the existing
+// delegate handles expand/collapse + the cohort fetch; Enter/Space on the
+// .dec-id span performs its copy affordance (the click path needs
+// alt/meta/ctrl for that — a plain keyboard press has no modifier to hold).
+$("#dec-body").addEventListener("keydown", async (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const idNode = e.target.closest("[data-copy]");
+  if (idNode && idNode.classList.contains("dec-id")) {
+    e.preventDefault();
+    const ok = await copyText(idNode.dataset.copy);
+    toast(ok ? `copied ${idNode.dataset.copy}` : "copy failed", !ok);
+    return;
+  }
+  const tr = e.target.closest("tr.dec-row");
+  if (!tr) return;
+  e.preventDefault();
+  tr.click();
 });
 
 /* ── run cards ────────────────────────────────────────────────────── */
@@ -1856,9 +1767,18 @@ $("#dec-body").addEventListener("click", async (e) => {
 let rcKind = "all";   // active kind filter for the run-card list
 
 async function loadReports() {
+  // P2-6: a tab round-trip used to land back on the stale run-card detail
+  // with the list still hidden — always reset to the list view first.
+  $("#rc-list").hidden = false;
+  $("#rc-detail").hidden = true;
+  $("#rc-back").hidden = true;
   let list;
   try { list = (await api("/api/reports")).reports || []; }
-  catch (e) { toast(`run cards: ${e.message}`, true); return; }
+  catch (e) {
+    toast(`run cards: ${e.message}`, true);
+    window.StaleGuard?.fail("reports");   // P1-7: persistent stale marker
+    return;
+  }
   // kind chips: rescreen (hourly-ish), optimizer (fast-loop, interesting
   // cycles only), audits + anything else — the mix tells the operator at
   // a glance which lanes are actually producing evidence
@@ -1887,6 +1807,7 @@ async function loadReports() {
     item.addEventListener("click", open);
     item.addEventListener("keydown", (e) => { if (e.key === "Enter") open(); });
   }
+  window.StaleGuard?.ok("reports");   // P1-7
 }
 
 async function openRunCard(stem) {
@@ -1982,7 +1903,9 @@ function renderRunCardStats(j) {
     const capCeiling = _pick(j, RUN_CARD_KEYS.capital_ceiling);
     const capIdle = _pick(j, RUN_CARD_KEYS.capital_idle);
     const capFree = _pick(j, RUN_CARD_KEYS.capital_free);
-    parts.push(`<div class="row"><span class="k">capital</span><span class="v">${fmtUsd(capCommitted)} committed / ${fmtUsd(capCeiling)} ceiling · ${fmtUsd(capIdle || 0)} idle${capFree != null ? ` · ${esc(capFree)} free slot(s)` : ""}</span></div>`);
+    // P2-4: capital.free_slots is a LIST — String([]) === "" printed a
+    // blank count; array-guard the length (older cards may carry a number).
+    parts.push(`<div class="row"><span class="k">capital</span><span class="v">${fmtUsd(capCommitted)} committed / ${fmtUsd(capCeiling)} ceiling · ${fmtUsd(capIdle || 0)} idle${capFree != null ? ` · ${esc(Array.isArray(capFree) ? capFree.length : capFree)} free slot(s)` : ""}</span></div>`);
   }
   const ar = _pick(j, RUN_CARD_KEYS.arbiter);
   if (ar && typeof ar === "object") {
@@ -2177,6 +2100,8 @@ function renderOptimizer(d) {
   }
   $("#opt-pending-body").innerHTML = groupRows.join("") ||
     `<tr><td colspan="9"><div class="empty-note">No pending recommendations \u2014 the position optimizer emits one when a bot\u2019s grid is off-price by more than the drift threshold (15 min cadence).</div></td></tr>`;
+  // P1-5: re-open rec groups the operator had expanded before this repaint.
+  if (typeof window.ExpandState?.restoreRecGroups === "function") window.ExpandState.restoreRecGroups();
   // expand/collapse for grouped recs
   for (const head of document.querySelectorAll("#opt-pending-body tr.rec-group")) {
     head.addEventListener("click", (e) => {
@@ -2188,6 +2113,8 @@ function renderOptimizer(d) {
       det.hidden = !show;
       const chev = head.querySelector(".rel-chevron");
       if (chev) chev.textContent = show ? "▾" : "▸";
+      head.setAttribute("aria-expanded", String(show));   // P1-6
+      window.ExpandState?.toggle(head.dataset.gkey);      // P1-5: survive polls
     });
   }
   $("#opt-applied-body").innerHTML = applied.map((r) => row(r, true)).join("") ||
@@ -2225,7 +2152,7 @@ function renderFastOptimizer(f, st) {
       ${kv("State", `${o.enabled ? '<span class="badge badge--ok">enabled</span>' : '<span class="badge badge--dim">disabled</span>'} · every ${esc(o.interval_min ?? "—")} min`, "fast capital-reallocation loop (optimizer.py)")}
       ${kv("Cycles", `${esc(o.cycles ?? "—")} · swaps ${esc(o.swaps_total ?? 0)}`, "completed cycles; total slot swaps executed through the guard/churn machinery")}
       ${kv("Last cycle", esc(relTime(o.last_at)))}
-      ${kv("Capital", `${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd)} idle · ${esc(cap.free_slots ?? "—")} free slot(s)`, "deployable ceiling = free capital available to commit to challengers")}
+      ${kv("Capital", `${fmtUsd(cap.committed_usd)} committed / ${fmtUsd(cap.deployable_ceiling_usd)} ceiling · ${fmtUsd(cap.idle_committed_usd)} idle · ${esc(Array.isArray(cap.free_slots) ? cap.free_slots.length : cap.free_slots ?? "—")} free slot(s)`, "deployable ceiling = free capital available to commit to challengers")}
       ${kv("Projected /24h", (st && st.pnl && isNum(st.pnl.projected_24h_usd)) ? fmtUsd(Number(st.pnl.projected_24h_usd)) : "—", "model-based expected grid income per 24h, net of round-trip fees (from the fleet PnL snapshot)")}
       ${kv("Projected return /yr", (st && st.pnl && isNum(st.pnl.projected_annual_return_pct)) ? `${fmtNum(Number(st.pnl.projected_annual_return_pct), 1)}%` : "—", "approximate annualized return on committed capital")}
       ${kv("Projected doubling time", (st && st.pnl && isNum(st.pnl.projected_double_days)) ? fmtDouble(Number(st.pnl.projected_double_days)) : "—", "approximate time for committed capital to double if the projected rate held")}
@@ -2500,7 +2427,11 @@ function renderSwapLog(sl) {
 async function loadReliability() {
   let rel;
   try { rel = await api("/api/reliability"); }
-  catch (e) { toast(`reliability: ${e.message}`, true); return; }
+  catch (e) {
+    toast(`reliability: ${e.message}`, true);
+    window.StaleGuard?.fail("reliability");   // P1-7: persistent stale marker
+    return;
+  }
   const ladder = rel.ladder || {};
   const archs = Object.entries(rel.archetypes || {}).sort((a, b) =>
     (b[1].samples || 0) - (a[1].samples || 0));
@@ -2581,6 +2512,7 @@ async function loadReliability() {
     </tr>`;
   }).join("") || `<tr><td colspan="11"><div class="empty-note">No closed round-trips yet — the ledger fills as bots complete trades (24h refresh, or force one from Fleet).</div></td></tr>`;
   wireReliabilityExpansion();
+  window.StaleGuard?.ok("reliability");   // P1-7
 }
 
 /* Lazy-load /api/reliability/archive and inject a sub-row with the recent
@@ -2601,11 +2533,13 @@ async function toggleReliabilityRow(row) {
     next.remove();
     const chev = row.querySelector(".rel-chevron");
     if (chev) chev.textContent = "▸";
+    row.setAttribute("aria-expanded", "false");   // P1-6
     return;
   }
   const arch = row.dataset.arch;
   const chev = row.querySelector(".rel-chevron");
   if (chev) chev.textContent = "▾";
+  row.setAttribute("aria-expanded", "true");     // P1-6
   const det = document.createElement("tr");
   det.className = "rel-detail";
   det.innerHTML = `<td colspan="11"><div class="empty-note">Loading recent closed round-trips…</div></td>`;
@@ -2659,7 +2593,11 @@ let configBaseline = {}; // path -> original value (numbers)
 async function loadConfig() {
   let payload;
   try { payload = await api("/api/config"); }
-  catch (e) { toast(`config: ${e.message}`, true); return; }
+  catch (e) {
+    toast(`config: ${e.message}`, true);
+    window.StaleGuard?.fail("config");   // P1-7: persistent stale marker
+    return;
+  }
   const editable = payload.editable || {};
   configBaseline = {};
   const groups = new Map();
@@ -2689,6 +2627,7 @@ async function loadConfig() {
     }
   }
   renderConfigReadonly(payload.config || {});
+  window.StaleGuard?.ok("config");   // P1-7
 }
 
 function renderConfigReadonly(cfg) {
@@ -2761,7 +2700,11 @@ let llmState = null; // last GET /api/llm payload (providers, chain, roles)
 async function loadLlm() {
   let p;
   try { p = await api("/api/llm"); }
-  catch (e) { toast(`llm: ${e.message}`, true); return; }
+  catch (e) {
+    toast(`llm: ${e.message}`, true);
+    window.StaleGuard?.fail("llm");   // P1-7: shares the config view's banner
+    return;
+  }
   llmState = p;
   renderLlmLadder(p);
   renderLlmProviders(p);
@@ -2769,6 +2712,7 @@ async function loadLlm() {
   $("#llm-sidecar-note").textContent = p.sidecar
     ? "sidecar: state/llm.env present"
     : "sidecar: none yet — save to create state/llm.env";
+  window.StaleGuard?.ok("llm");   // P1-7
 }
 
 function renderLlmLadder(p) {
@@ -2971,6 +2915,13 @@ async function loadLogs(force = false) {
   if (activeView !== "logs" && !force) return;
   const follow = $("#log-follow").checked;
   const grep = ($("#log-grep").value || "").trim();
+  // P2-15: a malformed regex dies server-side and looks exactly like "no
+  // matching lines" — compile the pattern client-side first and say so;
+  // the catch below stays silent for transient fetch errors.
+  if (grep) {
+    try { new RegExp(grep, "i"); }
+    catch (e) { toast("invalid grep pattern", true); return; }
+  }
   const lines = $("#log-lines").value;
   const params = new URLSearchParams({
     lines,
@@ -2978,7 +2929,8 @@ async function loadLogs(force = false) {
   });
   let data;
   try { data = await api(`/api/logs?${params}`); }
-  catch (e) { return; }
+  catch (e) { window.StaleGuard?.fail("logs"); return; }   // P1-7
+  window.StaleGuard?.ok("logs");   // P1-7
   // label the view with the file actually being tailed — under launchd the
   // daemon log lives elsewhere and a hard-coded path would lie
   const logPath = $("#log-path");
@@ -3275,11 +3227,12 @@ async function boot() {
   try {
     const meta = await api("/api/meta");
     wtAccountLabel = meta.wt_account || "…";
+    // P2-10: textContent already escapes — esc() here double-escaped "&" labels
     const modeLabel = (lastOverview && lastOverview.daemon && lastOverview.daemon.mode) || "—";
     $("#wt-account").textContent =
-      `mission console · ${esc(modeLabel)} · WT: ${esc(wtAccountLabel)}`;
+      `mission console · ${modeLabel} · WT: ${wtAccountLabel}`;
     $("#footnote").textContent =
-      `grid/autonomy console · ${esc(modeLabel)} · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
+      `grid/autonomy console · ${modeLabel} · console :${meta.console_port} · ctl :${meta.ctl_port} · pb ${meta.pocketbase.replace("http://", "")}`;
   } catch { /* header/footnote stay default */ }
 }
 boot();

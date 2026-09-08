@@ -11,6 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
   <link rel="stylesheet" href="/responsive.css">
+  <link rel="stylesheet" href="/components/components.css">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23F1F4EF'/%3E%3Cpath d='M6 10h20M6 16h20M6 22h20' stroke='%23182420' stroke-width='2.4'/%3E%3Cpath d='M16 4v24' stroke='%230A7E6D' stroke-width='2.4'/%3E%3C/svg%3E">
 </head>
 <body>
@@ -308,6 +309,12 @@
 <div id="modal-root"></div>
 <div class="toast-wrap" id="toasts" aria-live="polite"></div>
 
+<!-- components load FIRST: app.js boots (poll + render) at parse time,
+     and its shims call into these by name at CALL time — never at load time -->
+<script src="/components/llm-health.js"></script>
+<script src="/components/market-chart.js"></script>
+<script src="/components/expand-state.js"></script>
+<script src="/components/stale-guard.js"></script>
 <script src="/app.js"></script>
 <script src="/mobile.js"></script>
 </body>

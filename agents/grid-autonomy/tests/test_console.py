@@ -751,11 +751,17 @@ class TestHTTP(ConsoleTestCase):
                                                   "(import failed — see journal)")
 
     def test_ctl_post_error_when_daemon_down_names_the_connection(self):
-        # nothing answered (dead ctl port from setUp) — the raw transport
-        # error is shown rather than a misleading bare "ctl unreachable"
+        # nothing answered (dead ctl port from setUp) — the error is the
+        # normalized "ctl unreachable" (nothing answered) while the raw
+        # transport error rides in detail.transport so the connection
+        # failure is still named for the operator (reconciled 2026-09-08
+        # with console/test_upgrade.py's contract after _http_json stopped
+        # stuffing transport exceptions into body["error"])
         code, body = self.call("/api/ctl/rescreen", "POST", {})
         self.assertEqual(code, 502)
-        self.assertIn("urlopen error", body["error"])
+        self.assertEqual(body["error"], "ctl unreachable")
+        self.assertIn("Connection refused",
+                      body["detail"]["transport"])
 
     # ── dev-script actions ────────────────────────────────────────────
 

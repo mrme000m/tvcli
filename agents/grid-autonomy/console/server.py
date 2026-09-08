@@ -63,6 +63,9 @@ API (all JSON):
                               → {sweeps: [{…}]} newest-first, last 25
     GET  /api/meta            ports, paths, versions
     GET  /api/llm/health      live provider ping + role routing matrix
+                              (async: cold/expired cache answers
+                              immediately with pending:true while one
+                              background thread refreshes, 60s TTL)
                               (60s in-process cache; keys never returned)
     POST /api/ctl/rescreen    queue an immediate rescreen     {confirm}
     POST /api/ctl/optimize    queue an immediate fast-optimizer
@@ -95,6 +98,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -333,7 +337,12 @@ def _http_json(url, timeout=3.0, method="GET", body=None):
         except Exception:
             return False, {"error": f"HTTP {exc.code}"}
     except Exception as exc:
-        return False, {"error": str(exc)[:200]}
+        # transport-level failure (connection refused, timeout, DNS): the
+        # exception must NOT sit under "error" — _ctl_err() trusts that key
+        # for daemon-ANSWERED error bodies and would otherwise mask a dead
+        # daemon as a daemon message. The raw message still surfaces via
+        # each caller's "detail" field.
+        return False, {"transport": str(exc)[:200]}
 
 
 def _ctl(path, method="GET", body=None):
@@ -1145,69 +1154,37 @@ def optimizer_swap_log() -> dict:
     }
 
 
-def llm_health() -> dict:
-    """Live LLM provider reachability + the role-pinning matrix, served
-    without exposing any keys.
+# ── LLM provider health (async ping — never blocks the request) ────────
+# /api/llm/health used to run the provider ping subprocess synchronously
+# inside the request handler: a cold cache blocked the HTTP response for
+# as long as the slowest provider in the chain answered (measured ~70s).
+# The refresh now runs in ONE background daemon thread; the handler
+# answers sub-second with a pending marker + last-known-good data.
 
-    The same `llm/provider.py --ping` the console's "validate" button
-    uses, but cached for 60s so the Fleet rail / readiness strip / a
-    dedicated panel can poll every 5s without hammering the providers.
-    Surfaces the role routing (which swarm agent uses which provider)
-    so the operator can see at a glance whether Mistral is actually
-    driving the fast-lane arbiter — the headline use case."""
-    cache_key = "llm_health"
-    hit = _CTL_CACHE.get(cache_key)
-    if hit and hit[0] > time.time():
-        return hit[2]
+_LLM_HEALTH_TTL = 60.0
+_LLM_HEALTH_CACHE_KEY = "llm_health"
+_LLM_HEALTH_LOCK = threading.Lock()   # guards the cache entry + refresh flag
+_LLM_HEALTH_REFRESHING = False        # True while one refresh thread runs
+_LLM_HEALTH_LAST: dict | None = None  # last-known-good payload — never
+                                      # evicted on read, only replaced by a
+                                      # newer SUCCESSFUL refresh (stale
+                                      # serving keeps working after the TTL
+                                      # lapses while a refresh is in flight)
 
-    provider_script = os.path.join(GRID_HOME, "llm", "provider.py")
-    ping_results = []
-    chain = []
-    if os.path.isfile(provider_script):
-        env = dict(os.environ)
-        for key, val in _llm_sidecar().items():
-            env[key] = val
-        try:
-            proc = subprocess.run(
-                [sys.executable, provider_script, "--ping", "--json"],
-                capture_output=True, text=True, timeout=180, env=env,
-                cwd=GRID_HOME)
-            if proc.returncode == 0:
-                try:
-                    data = json.loads(proc.stdout)
-                    chain = data.get("chain") or []
-                    for r in (data.get("results") or []):
-                        ping_results.append({
-                            "provider": r.get("provider"),
-                            "ok": bool(r.get("ok")),
-                            "latency_ms": r.get("latency_ms"),
-                            "error": (str(r.get("error", ""))[:160]
-                                      if not r.get("ok") else None),
-                        })
-                except Exception:
-                    pass
-        except subprocess.TimeoutExpired:
-            ping_results = [{"provider": p, "ok": False, "error": "ping timeout (180s)"}
-                            for p in ("cf", "nvidia", "openrouter", "mistral")]
-        except Exception as exc:
-            ping_results = [{"provider": "?", "ok": False,
-                             "error": f"ping failed: {str(exc)[:120]}"}]
+_LLM_HEALTH_PENDING_NOTE = (
+    "Ping runs in the background (async, never blocks the response); "
+    "showing pending/last-known data. Keys never returned. Arbiter default "
+    "= mistral (override via config.optimizer.llm_provider).")
 
-    # fall back to presence-only when the ping subprocess failed
-    if not ping_results:
-        side = _llm_sidecar()
-        for name in LLM_PROVIDERS:
-            kenv = {"cf": ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_TOKEN"),
-                    "nvidia": ("NVIDIA_API_KEY",),
-                    "openrouter": ("OPENROUTER_API_KEY",),
-                    "mistral": ("MISTRAL_API_KEY",)}[name]
-            present = any(side.get(k) or os.environ.get(k) for k in kenv)
-            ping_results.append({"provider": name, "ok": present,
-                                 "error": None if present else "no key"})
 
-    # role pinning (mirrors llm_state from /api/llm but re-parsed here so
-    # the operator sees WHICH model is driving EACH agent in the swarm —
-    # the headline "is Mistral actually doing the arbiter?" question)
+def _llm_health_assemble(ping_results: list, chain: list, *,
+                         pending: bool = False, stale: bool = False,
+                         error: str | None = None,
+                         note: str | None = None) -> dict:
+    """Build the /api/llm/health wire payload: today's schema (at, chain,
+    results, roles, role_keys, arbiter_provider, note) plus the additive
+    pending / stale / error markers. Keys are never included — presence
+    booleans only."""
     side = _llm_sidecar()
     raw_roles = side.get("GRID_LLM_ROLES")
     roles = {}
@@ -1232,12 +1209,155 @@ def llm_health() -> dict:
         "roles": roles,
         "role_keys": LLM_ROLE_KEYS,
         "arbiter_provider": arbiter_provider,
-        "note": ("Live ping cached 60s; keys never returned. "
-                 "Arbiter default = mistral (override via "
-                 "config.optimizer.llm_provider)."),
+        "pending": pending,
+        "note": note or (
+            "Live ping cached 60s, refreshed in a background thread (never "
+            "blocks the response); keys never returned. Arbiter default = "
+            "mistral (override via config.optimizer.llm_provider)."),
     }
-    _CTL_CACHE[cache_key] = (time.time() + 60.0, True, out)
+    if stale:
+        out["stale"] = True
+    if error:
+        out["error"] = error
     return out
+
+
+def _llm_health_probe() -> tuple[dict, str | None]:
+    """Run the provider ping subprocess and build the full health payload.
+
+    BLOCKING — up to the 180s subprocess timeout; only ever called from
+    the background refresh thread (_llm_health_refresh). Returns
+    (payload, error_note): error_note is None on a successful ping and a
+    short human note when the ping failed / timed out / produced no JSON
+    (the payload then carries the existing fallback results). Never
+    raises. Keys are read from the sidecar into the subprocess env but
+    never surfaced."""
+    provider_script = os.path.join(GRID_HOME, "llm", "provider.py")
+    ping_results: list = []
+    chain: list = []
+    error_note: str | None = None
+    if os.path.isfile(provider_script):
+        env = dict(os.environ)
+        for key, val in _llm_sidecar().items():
+            env[key] = val
+        try:
+            proc = subprocess.run(
+                [sys.executable, provider_script, "--ping", "--json"],
+                capture_output=True, text=True, timeout=180, env=env,
+                cwd=GRID_HOME)
+            if proc.returncode == 0:
+                try:
+                    data = json.loads(proc.stdout)
+                    chain = data.get("chain") or []
+                    for r in (data.get("results") or []):
+                        ping_results.append({
+                            "provider": r.get("provider"),
+                            "ok": bool(r.get("ok")),
+                            "latency_ms": r.get("latency_ms"),
+                            "error": (str(r.get("error", ""))[:160]
+                                      if not r.get("ok") else None),
+                        })
+                except Exception:
+                    error_note = "ping output not JSON"
+            else:
+                error_note = f"ping subprocess rc={proc.returncode}"
+        except subprocess.TimeoutExpired:
+            error_note = "ping timeout (180s)"
+            ping_results = [{"provider": p, "ok": False, "error": "ping timeout (180s)"}
+                            for p in ("cf", "nvidia", "openrouter", "mistral")]
+        except Exception as exc:
+            error_note = f"ping failed: {str(exc)[:120]}"
+            ping_results = [{"provider": "?", "ok": False,
+                             "error": f"ping failed: {str(exc)[:120]}"}]
+
+    # fall back to presence-only when the ping subprocess failed
+    if not ping_results:
+        side = _llm_sidecar()
+        for name in LLM_PROVIDERS:
+            kenv = {"cf": ("CLOUDFLARE_ACCOUNT_ID", "CLOUDFLARE_API_KEY", "CLOUDFLARE_AI_TOKEN"),
+                    "nvidia": ("NVIDIA_API_KEY",),
+                    "openrouter": ("OPENROUTER_API_KEY",),
+                    "mistral": ("MISTRAL_API_KEY",)}[name]
+            present = any(side.get(k) or os.environ.get(k) for k in kenv)
+            ping_results.append({"provider": name, "ok": present,
+                                 "error": None if present else "no key"})
+
+    return _llm_health_assemble(ping_results, chain,
+                               error=error_note), error_note
+
+
+def _llm_health_refresh() -> None:
+    """Background daemon-thread refresh: run the blocking probe and
+    publish its result into the 60s cache. At most one instance runs at
+    a time — llm_health() sets _LLM_HEALTH_REFRESHING (under the lock)
+    before spawning this thread; the finally below clears it. Failure
+    semantics: a failed probe + an existing last-known-good payload merge
+    into a stale:true + error-note response; otherwise the presence-only
+    fallback payload is cached for the TTL. Never raises."""
+    global _LLM_HEALTH_LAST, _LLM_HEALTH_REFRESHING
+    try:
+        try:
+            payload, err = _llm_health_probe()
+        except Exception as exc:               # defensive: probe never raises
+            payload = _llm_health_assemble([], [])
+            err = f"probe crashed: {str(exc)[:120]}"
+        with _LLM_HEALTH_LOCK:
+            if err and _LLM_HEALTH_LAST:
+                # failed refresh, previous good data exists → serve stale
+                out = dict(_LLM_HEALTH_LAST)
+                out["stale"] = True
+                out["error"] = err
+            else:
+                out = dict(payload)
+                if err:
+                    out["error"] = err
+                else:
+                    _LLM_HEALTH_LAST = payload   # only success replaces it
+            _CTL_CACHE[_LLM_HEALTH_CACHE_KEY] = (
+                time.time() + _LLM_HEALTH_TTL, True, out)
+    finally:
+        with _LLM_HEALTH_LOCK:
+            _LLM_HEALTH_REFRESHING = False
+
+
+def llm_health() -> dict:
+    """Live LLM provider reachability + the role-pinning matrix, served
+    without exposing any keys — and WITHOUT ever blocking the request
+    thread on the (up to 180s) provider ping.
+
+    Async contract:
+    * cache fresh (≤60s) → served synchronously, exactly as before.
+    * cache cold/expired → immediate 200 (sub-second) with pending:true
+      and the last-known-good results ([] when none), while ONE daemon
+      thread runs the existing `llm/provider.py --ping --json` subprocess
+      and writes the result back into the 60s cache. Additional cold
+      requests while a refresh is in flight get the same pending/stale
+      answer without spawning more threads.
+    * failed/timed-out refresh → presence-only fallback (or the previous
+      payload with stale:true + the error note), cached for the TTL.
+      The last-known-good payload is never evicted on read — only
+      replaced by a newer successful refresh."""
+    global _LLM_HEALTH_REFRESHING
+    now = time.time()
+    with _LLM_HEALTH_LOCK:
+        hit = _CTL_CACHE.get(_LLM_HEALTH_CACHE_KEY)
+        if hit and hit[0] > now:
+            return hit[2]
+        last = _LLM_HEALTH_LAST
+        spawn = not _LLM_HEALTH_REFRESHING
+        if spawn:
+            _LLM_HEALTH_REFRESHING = True
+    if spawn:
+        threading.Thread(target=_llm_health_refresh, daemon=True,
+                         name="llm-health-refresh").start()
+    if last:
+        out = dict(last)
+        out["pending"] = True
+        out["stale"] = True
+        out["note"] = _LLM_HEALTH_PENDING_NOTE
+        return out
+    return _llm_health_assemble([], [], pending=True,
+                                 note=_LLM_HEALTH_PENDING_NOTE)
 
 
 def decisions_payload(limit: int) -> list[dict]:

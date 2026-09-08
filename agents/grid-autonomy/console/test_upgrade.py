@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 import urllib.request
@@ -47,7 +49,14 @@ class UpgradeTestCase(unittest.TestCase):
         self._saved = {
             "STATE_DIR": server.STATE_DIR, "CONFIG_PATH": server.CONFIG_PATH,
             "PB_URL": server.PB_URL, "PB_ENV_PATH": server.PB_ENV_PATH,
+            "_LLM_HEALTH_LAST": server._LLM_HEALTH_LAST,
+            "_PB_CLIENT": server._PB_CLIENT,
         }
+        server._LLM_HEALTH_LAST = None
+        server._LLM_HEALTH_REFRESHING = False
+        # a pbclient cached by an earlier test must not leak in here
+        # (module-level cache → order dependence between tests)
+        server._PB_CLIENT = None
         server.STATE_DIR = os.path.join(self.tmp, "state")
         server.CONFIG_PATH = os.path.join(self.tmp, "config.yaml")
         server.PB_URL = "http://127.0.0.1:59999"          # dead port
@@ -106,13 +115,19 @@ class UpgradeTestCase(unittest.TestCase):
             {"at": f"{today}T02:00:00+00:00"},   # no applied key at all
             {"at": f"{today}T03:00:00+00:00"},
         ]
-        real_http = server._http_json
-        server._http_json = (lambda url, timeout=2.0, method="GET", body=None:
-                             (True, {"items": [dict(r) for r in recs]}))
+        # recommendations_payload's PB ladder never reaches _http_json:
+        # _pb_client() builds a live pbclient.PB (its constructor does not
+        # connect) and _pb_get() is its own raw-urllib path. Patch BOTH of
+        # those seams directly: no PB client, and the raw GET answering the
+        # canned records — an offline stand-in for a live PocketBase.
+        real_client, real_get = server._pb_client, server._pb_get
+        server._pb_client = lambda: None
+        server._pb_get = (lambda url, timeout=2.5, token=None:
+                          (True, {"items": [dict(r) for r in recs]}))
         try:
             payload = server.recommendations_payload(100)
         finally:
-            server._http_json = real_http
+            server._pb_client, server._pb_get = real_client, real_get
         self.assertEqual(payload["apply"], False)          # advisory template
         self.assertEqual(payload["persisted_today"], 3)
         self.assertEqual(payload["recommendations"][0]["blocked_by"], "applied")
@@ -210,6 +225,160 @@ class UpgradeTestCase(unittest.TestCase):
         self.assertEqual(code, 502)
         self.assertEqual(body.get("error"), "ctl unreachable")
         self.assertIn("detail", body)
+
+    # ── /api/llm/health: async (non-blocking) refresh ─────────────────
+
+    def _patch_probe(self, fake):
+        """Patch the module-level blocking probe the refresh thread runs
+        (so no real provider.py subprocess is ever launched offline)."""
+        real = server._llm_health_probe
+        server._llm_health_probe = fake
+        self.addCleanup(setattr, server, "_llm_health_probe", real)
+
+    def wait_llm_refresh(self, timeout=5.0):
+        """Block (bounded) until the background refresh published its
+        cache entry — tests may wait, the request handler never does."""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            hit = server._CTL_CACHE.get("llm_health")
+            if (hit and hit[0] > time.time()
+                    and not server._LLM_HEALTH_REFRESHING):
+                return hit[2]
+            time.sleep(0.02)
+        return None
+
+    def test_llm_health_cold_cache_pending_fast(self):
+        """Cold cache: the endpoint answers 200 in well under 2s with a
+        pending marker and empty results; the refresh runs in a
+        background thread."""
+        started = threading.Event()
+
+        def fake_probe():
+            started.set()
+            return (server._llm_health_assemble(
+                [{"provider": "mistral", "ok": True, "latency_ms": 12,
+                  "error": None}], ["cf", "mistral"]), None)
+        self._patch_probe(fake_probe)
+        t0 = time.perf_counter()
+        code, body = self.call("/api/llm/health")
+        elapsed = time.perf_counter() - t0
+        self.assertEqual(code, 200)
+        self.assertLess(elapsed, 2.0)            # never blocks on the ping
+        self.assertTrue(body.get("pending"))
+        self.assertEqual(body.get("results"), [])  # nothing known yet
+        for key in ("at", "chain", "results", "roles", "role_keys",
+                    "arbiter_provider", "note"):   # backward-compat schema
+            self.assertIn(key, body)
+        self.assertTrue(started.wait(2.0))        # refresh thread launched
+        self.assertIsNotNone(self.wait_llm_refresh())
+
+    def test_llm_health_followup_serves_refreshed_results(self):
+        """After the background refresh lands, requests serve the canned
+        results from the 60s cache (pending false, no stale marker)."""
+        canned = [{"provider": "mistral", "ok": True, "latency_ms": 12,
+                   "error": None}]
+
+        def fake_probe():
+            return (server._llm_health_assemble(canned, ["cf", "mistral"]),
+                    None)
+        self._patch_probe(fake_probe)
+        code, first = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertTrue(first["pending"])          # cold → immediate pending
+        self.assertIsNotNone(self.wait_llm_refresh())
+        code, second = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertFalse(second["pending"])       # fresh from cache
+        self.assertNotIn("stale", second)
+        self.assertEqual(second["results"], canned)
+        code, third = self.call("/api/llm/health")  # still inside the TTL
+        self.assertEqual(third["results"], canned)
+
+    def test_llm_health_concurrent_cold_requests_single_refresh(self):
+        """5 concurrent cold requests spawn exactly ONE refresh thread and
+        every request answers promptly with the pending shape."""
+        calls = []
+        release = threading.Event()
+
+        def fake_probe():
+            calls.append(1)
+            release.wait(10.0)                     # hold the refresh open
+            return (server._llm_health_assemble(
+                [{"provider": "cf", "ok": True, "latency_ms": 3,
+                  "error": None}], ["cf"]), None)
+        self._patch_probe(fake_probe)
+        out, errs = [], []
+
+        def hit():
+            try:
+                out.append(self.call("/api/llm/health"))
+            except Exception as exc:              # pragma: no cover
+                errs.append(exc)
+        threads = [threading.Thread(target=hit) for _ in range(5)]
+        t0 = time.perf_counter()
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(5.0)
+        elapsed = time.perf_counter() - t0
+        self.assertEqual(errs, [])
+        self.assertLess(elapsed, 2.0)              # all 5 answered promptly
+        self.assertEqual(len(calls), 1)            # exactly one refresh
+        for code, body in out:
+            self.assertEqual(code, 200)
+            self.assertTrue(body.get("pending"))
+        release.set()
+        self.assertIsNotNone(self.wait_llm_refresh())
+        code, body = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertFalse(body["pending"])
+        self.assertEqual(body["results"][0]["provider"], "cf")
+
+    def test_llm_health_subprocess_failure_presence_only_no_5xx(self):
+        """A failing ping subprocess (rc != 0, no last-known-good) falls
+        back to presence-only results and never yields a 5xx."""
+        from types import SimpleNamespace
+        real_run = server.subprocess.run
+        server.subprocess.run = (
+            lambda cmd, **kw: SimpleNamespace(returncode=1, stdout="",
+                                               stderr="boom"))
+        self.addCleanup(setattr, server.subprocess, "run", real_run)
+        code, first = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertTrue(first["pending"])
+        self.assertIsNotNone(self.wait_llm_refresh())
+        code, body = self.call("/api/llm/health")
+        self.assertEqual(code, 200)               # never a 500/502
+        self.assertFalse(body["pending"])
+        names = {r["provider"] for r in body["results"]}
+        self.assertEqual(names, {"cf", "nvidia", "openrouter", "mistral"})
+        self.assertIn(body.get("error"), ("ping subprocess rc=1",))
+
+    def test_llm_health_timeout_serves_stale_last_known(self):
+        """A timed-out ping with a previous last-known-good payload serves
+        the stale data (stale: true + error note), not the failure."""
+        good = server._llm_health_assemble(
+            [{"provider": "mistral", "ok": True, "latency_ms": 441,
+              "error": None}], ["mistral"])
+        server._LLM_HEALTH_LAST = good
+
+        def boom(cmd, **kw):
+            raise server.subprocess.TimeoutExpired(cmd, 180)
+        real_run = server.subprocess.run
+        server.subprocess.run = boom
+        self.addCleanup(setattr, server.subprocess, "run", real_run)
+        code, first = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertTrue(first["pending"])          # cold → served from LAST
+        self.assertEqual(first["results"], good["results"])
+        self.assertIsNotNone(self.wait_llm_refresh())
+        code, body = self.call("/api/llm/health")
+        self.assertEqual(code, 200)
+        self.assertFalse(body["pending"])
+        self.assertTrue(body.get("stale"))         # stale, last-known data
+        self.assertEqual(body["results"], good["results"])
+        self.assertEqual(body["at"], good["at"])
+        self.assertEqual(body.get("error"), "ping timeout (180s)")
 
 
 if __name__ == "__main__":

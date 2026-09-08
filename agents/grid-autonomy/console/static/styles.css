@@ -974,8 +974,6 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
   padding: 12px 14px;
 }
 
-@media (max-width: 720px) { .llm-prov-fields { grid-template-columns: 1fr; } }
-
 .llm-field { display: flex; flex-direction: column; gap: 4px; }
 
 .llm-field-l {
@@ -1372,16 +1370,6 @@ table.ledger tr:hover td { background: rgba(10, 126, 109, 0.045); }
 .view-head h2 { margin: 0; font-size: 19px; }
 .view-head .sub { font-size: 13px; color: var(--ink-soft); }
 .view-head .spacer { margin-left: auto; }
-
-@media (max-width: 720px) {
-  .topbar { padding: 10px 14px 0; }
-  .topbar-row { gap: 12px; }
-  .statusbar { margin-left: 0; }
-  .main { padding: 16px 14px 70px; }
-  .slot-metrics { grid-template-columns: repeat(2, 1fr); }
-  .field { grid-template-columns: 1fr 110px; }
-  .field .f-range { display: none; }
-}
 
 
 /* ── fleet PnL header (true net / realized split / capital / demo cap) ── */

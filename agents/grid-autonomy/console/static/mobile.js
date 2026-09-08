@@ -28,6 +28,19 @@
     "tab-logs": "\u2263"         /* ≣ */
   };
 
+  /* Narrow phones give each bnav button ~44px of label space — the full
+     tab names ellipsize to "RELIABILIT…". Short labels keep every view
+     named; unknown tab ids fall back to the full tab text. */
+  var BNAV_SHORT = {
+    "tab-fleet": "FLEET",
+    "tab-decisions": "DECS",
+    "tab-reports": "CARDS",
+    "tab-optimizer": "OPT",
+    "tab-reliability": "REL",
+    "tab-config": "CFG",
+    "tab-logs": "LOGS"
+  };
+
   var bnav = null;
   var passTimer = null;
   var resizeTimer = null;
@@ -95,9 +108,11 @@
       ico.className = "bnav-ico";
       ico.textContent = Object.prototype.hasOwnProperty.call(BNAV_ICONS, tab.id || "")
         ? BNAV_ICONS[tab.id] : "\u2022";
+      btn.title = label; /* full name on long-press / hover */
       var lbl = document.createElement("span");
       lbl.className = "bnav-label";
-      lbl.textContent = label;
+      lbl.textContent = Object.prototype.hasOwnProperty.call(BNAV_SHORT, tab.id || "")
+        ? BNAV_SHORT[tab.id] : label;
       btn.appendChild(ico);
       btn.appendChild(lbl);
       btn.addEventListener("click", function () {
@@ -156,6 +171,95 @@
     }
   }
 
+  /* ── (f) card-mode sort control ────────────────────────────────────
+     Card mode hides thead, which is where the decision ledger's sort
+     affordances live (th.dec-sort in app.js). Mirror them in a compact
+     <select> above the table, driving the SAME app.js globals: decSort
+     is a top-level `let` object (writable via bare reference from this
+     classic script) and renderDecisions is a function declaration
+     (window-reachable). Every global access is typeof-guarded so a
+     rename in app.js degrades to a no-op, not a throw. The table
+     element itself survives the 5s poll (only thead/tbody innerHTML is
+     rewritten), so the injected select persists and is re-asserted
+     from decSort on each pass. */
+
+  var SORT_ARROWS = /[\u25be\u25b4]/g; /* ▾ ▴ the active-sort markers */
+
+  function addSortOption(sel, key, label, dir) {
+    var o = document.createElement("option");
+    o.value = key + "|" + dir;
+    o.textContent = label + (dir < 0 ? " \u25be" : " \u25b4");
+    sel.appendChild(o);
+  }
+
+  function onCardSort(sel) {
+    safe(function () {
+      var parts = String(sel.value || "").split("|");
+      var key = parts[0];
+      var dir = Number(parts[1]);
+      if (!key || !dir) return;
+      if (typeof decSort === "object" && decSort !== null) {
+        decSort.key = key;
+        decSort.dir = dir;
+      }
+      if (typeof renderDecisions === "function") renderDecisions();
+      /* the re-render rebuilds thead → the MutationObserver pass runs
+         applyCardSort again, which re-asserts the value from decSort */
+    });
+  }
+
+  function applyCardSort() {
+    var mobile = isMobile();
+    var tables = document.querySelectorAll("table.ledger");
+    for (var i = 0; i < tables.length; i++) {
+      var table = tables[i];
+      var sortables = table.querySelectorAll("thead th.dec-sort");
+      var sel = table.__cardsortSel || null;
+      if (!mobile || !sortables.length) {
+        if (sel && sel.parentNode) sel.parentNode.removeChild(sel);
+        table.__cardsortSel = null;
+        continue;
+      }
+      var host = table.parentNode; /* .table-wrap holds the whole card */
+      if (!host || typeof host.insertBefore !== "function") continue;
+      if (!sel || sel.parentNode !== host) {
+        sel = document.createElement("select");
+        sel.className = "cardsort";
+        sel.setAttribute("aria-label", "Sort ledger");
+        var s = sel; /* capture per-table */
+        sel.addEventListener("change", function () { onCardSort(s); });
+        host.insertBefore(sel, table);
+        table.__cardsortSel = sel;
+        sel.__cardsortSig = ""; /* force option rebuild below */
+      }
+      /* options come from the hidden thead, which the poll rewrites —
+         rebuild only when the column set actually changed */
+      var sig = [];
+      for (var j = 0; j < sortables.length; j++) {
+        sig.push(sortables[j].getAttribute("data-key") || "");
+      }
+      var sigStr = sig.join(";");
+      if (sel.__cardsortSig !== sigStr) {
+        sel.__cardsortSig = sigStr;
+        sel.innerHTML = "";
+        for (var k = 0; k < sortables.length; k++) {
+          var th = sortables[k];
+          var key = th.getAttribute("data-key") || "";
+          var label = (th.textContent || "")
+            .replace(SORT_ARROWS, "").replace(/\s+/g, " ").trim();
+          addSortOption(sel, key, label, -1);
+          addSortOption(sel, key, label, 1);
+        }
+      }
+      /* re-assert the selection from decSort after each poll re-render */
+      var val = "";
+      if (typeof decSort === "object" && decSort !== null && decSort.key) {
+        val = decSort.key + "|" + (Number(decSort.dir) || 1);
+      }
+      if (sel.value !== val) sel.value = val;
+    }
+  }
+
   /* ── (c) table scroll hints (only when the table really overflows) ── */
 
   function applyScrollHints() {
@@ -191,6 +295,7 @@
 
   function runPass() {
     safe(applyCardMode);
+    safe(applyCardSort);
     safe(applyScrollHints);
     safe(updateTabsAffordance);
   }
@@ -204,8 +309,11 @@
   }
 
   function isOurNode(node) {
+    /* bnav + cardsort nodes are ours: injecting them must not re-trigger
+       the pass (self-inflicted mutation batches are ignored) */
     return !!(node && (node === bnav ||
-      (node.classList && node.classList.contains("bnav"))));
+      (node.classList && (node.classList.contains("bnav") ||
+        node.classList.contains("cardsort")))));
   }
 
   function startBodyObserver() {
@@ -233,7 +341,12 @@
       resizeTimer = null;
       safe(function () {
         if (typeof window.drawPnlChart === "function") {
-          window.drawPnlChart(window.lastPnlPoints || []);
+          /* lastPnlPoints is a top-level `let` in app.js — a global lexical
+             binding, NOT a window property, so window.lastPnlPoints is
+             always undefined and the redraw used to pass []. Classic
+             scripts share the global lexical environment, so the bare
+             reference reaches it; typeof guards an app.js rename. */
+          window.drawPnlChart(typeof lastPnlPoints === "undefined" ? [] : lastPnlPoints);
         }
       });
       safe(applyScrollHints);

@@ -1,0 +1,26 @@
+/* grid/autonomy console — components/components.css
+   Styles for the new console/static/components/*.js (UI_AUDIT P1-1,
+   P1-2, P1-5, P1-7). One file per the ownership plan: styles.css and
+   responsive.css belong to another worker and must not grow. All base
+   classes (banner--warn, spinner, empty-note, mk-svg, ready-cell…)
+   are reused from styles.css unchanged. */
+
+/* P1-1 — muted marker lines inside the "LLM brains" card for the async
+   ping contract (pending / stale last-known-good responses). */
+.llm-stale-note {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+}
+
+/* P1-7 — stale-view marker: a compact warn strip + a subtle dim on the
+   view's content. The dim excludes the banner itself (opacity only —
+   no layout change, so it is trivially safe over any view). */
+.stale-banner {
+  margin-bottom: 12px;
+  padding: 8px 14px;
+  font-size: 12.5px;
+}
+.view.stale-dim > *:not(.stale-banner) {
+  opacity: 0.75;
+}
