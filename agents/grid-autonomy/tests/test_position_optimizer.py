@@ -408,6 +408,30 @@ class TestAnalyzeBot(unittest.TestCase):
         self.assertEqual(rid, "rec-1")
         self.assertEqual(len(ok_persist.recs), 1)
 
+    def test_keep_does_not_consume_daily_persist_cap(self):
+        # entry-keeps are baseline records, not applies: with the cap at
+        # 1, a persisted keep must not block the next actionable rec from
+        # reaching PB (live 2026-09-08: four post-deploy entry keeps
+        # filled the 4/day cap before any actionable rec could persist)
+        opt, journal, _ = make_optimizer(
+            cfg={"max_apply_per_day": 1})
+        fp = FakePersist()
+        opt.persist_fn = fp
+        keep = {"recommendation": "keep", "slot": "1", "symbol": "CHIP"}
+        self.assertEqual(opt._persist(keep), "rec-1")
+        self.assertEqual(opt._persisted_today[1], 0)     # not counted
+        action = {"recommendation": "recenter", "slot": "2",
+                  "symbol": "ARB"}
+        self.assertEqual(opt._persist(action), "rec-2")  # cap not reached
+        self.assertEqual(opt._persisted_today[1], 1)
+        overflow = {"recommendation": "widen", "slot": "3", "symbol": "JUP"}
+        self.assertIsNone(opt._persist(overflow))        # NOW the cap bites
+        self.assertEqual(len(fp.recs), 2)
+        cap_msgs = [e for e in journal.events
+                    if e["kind"] == "position-optimizer"
+                    and "cap reached" in e.get("msg", "")]
+        self.assertEqual(len(cap_msgs), 1)
+
     def test_disabled_returns_none(self):
         opt, _, _ = make_optimizer(cfg={"enabled": False})
         self.assertIsNone(opt.analyze_bot(flat_bot(), "7", now=NOW))

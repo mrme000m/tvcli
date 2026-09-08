@@ -2101,7 +2101,9 @@ function renderOptimizer(d) {
     }
   }
 
-  const pending = recs.filter((r) => !r.applied);
+  // keeps are no-op verdicts (nothing to apply, never pending) — they
+  // used to land in this table with a misleading apply-gate badge
+  const pending = recs.filter((r) => !r.applied && r.recommendation !== "keep");
   const applied = recs.filter((r) => !!r.applied);
   $("#opt-pending-count").textContent = `${pending.length} pending \u00b7 ${applied.length} applied`;
   $("#opt-applied-count").textContent = `${applied.length} applied`;

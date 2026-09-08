@@ -451,6 +451,53 @@ class TestShaping(ConsoleTestCase):
         # journal-derived rows never count toward the PB persist cap
         self.assertEqual(payload["persisted_today"], 0)
 
+    def test_recommendations_keeps_carry_no_gate_verdict(self):
+        # keeps are no-op verdicts: they never wait on an apply gate, so
+        # they must show no blocked_by reason (they used to show
+        # "rate limit" once the day's cap filled) and must not count
+        # toward persisted_today — matching the engine, where keeps
+        # don't consume the per-day persist cap either.
+        from unittest import mock
+        today = server.utcnow()[:10]
+        items = [
+            {"at": today + "T02:58:00+00:00", "slot": "1",
+             "symbol": "CHIP", "recommendation": "keep",
+             "expected_delta_pct": 0.0, "applied": False},
+            {"at": today + "T12:56:00+00:00", "slot": "1",
+             "symbol": "CHIP", "recommendation": "recenter",
+             "expected_delta_pct": 51.25, "applied": False},
+            {"at": today + "T13:18:00+00:00", "slot": "2",
+             "symbol": "ARB", "recommendation": "recenter",
+             "expected_delta_pct": 31.6, "applied": False},
+            {"at": today + "T14:18:00+00:00", "slot": "3",
+             "symbol": "JUP", "recommendation": "recenter",
+             "expected_delta_pct": 12.0, "applied": False},
+            {"at": today + "T15:18:00+00:00", "slot": "6",
+             "symbol": "NEAR", "recommendation": "revalue-grid",
+             "expected_delta_pct": 5.0, "applied": False},
+        ]
+        with mock.patch.object(server, "_pb_get",
+                               return_value=(True, {"items": items})):
+            payload = server.recommendations_payload(limit=50)
+        self.assertEqual(payload["source"], "pocketbase")
+        # the keep does not count toward the cap display
+        self.assertEqual(payload["persisted_today"], 4)
+        recs = payload["recommendations"]
+        keeps = [r for r in recs if r.get("recommendation") == "keep"]
+        self.assertEqual(len(keeps), 1)
+        self.assertEqual(keeps[0]["blocked_by"], "")
+        # actionable unapplied recs carry the honest gate reason for the
+        # current config (apply mode + cap state), never a keep verdict
+        if not payload["apply"]:
+            expected = "apply disabled"
+        elif payload["persisted_today"] >= payload["max_apply_per_day"]:
+            expected = "rate limit"
+        else:
+            expected = ""
+        for r in recs:
+            if r.get("recommendation") != "keep":
+                self.assertEqual(r["blocked_by"], expected)
+
     def test_logs_grep(self):
         with open(os.path.join(server.STATE_DIR, "daemon.log"), "w") as f:
             f.write("a stale line\nb stagnant line\nc veto line\n")

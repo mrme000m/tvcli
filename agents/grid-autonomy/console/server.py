@@ -1327,13 +1327,24 @@ def recommendations_payload(limit: int) -> dict:
     apply_enabled = bool(cfg.get("apply"))
     max_day = cfg.get("max_apply_per_day") or 4
     today = utcnow()[:10]
+    # keeps are baseline records, not applies: they don't consume the
+    # engine's per-day persist budget (position_optimizer._persist skips
+    # them since 2026-09-08) and must not count toward the cap here either.
     persisted_today = sum(1 for r in items
                           if str(r.get("at") or "").startswith(today)
-                          and not r.get("journal_only"))
+                          and not r.get("journal_only")
+                          and r.get("recommendation") != "keep")
     for r in items:
         r.setdefault("applied", False)
         r.setdefault("applied_at", None)
         if r.get("journal_only"):
+            continue
+        if r.get("recommendation") == "keep":
+            # a keep is a no-op verdict — there is nothing to apply, so no
+            # apply-gate reason applies (it used to show "rate limit" once
+            # the daily cap filled, implying the keep was waiting on a
+            # gate it would never pass)
+            r["blocked_by"] = ""
             continue
         if r.get("applied"):
             r["blocked_by"] = "applied"

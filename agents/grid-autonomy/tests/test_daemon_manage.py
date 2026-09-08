@@ -990,13 +990,26 @@ class SupervisionTestCase(unittest.TestCase):
         bots = [{"code": "B1", "paperTrading": True, "status": "active",
                  "exchange": "HYPERLIQUID_SWAP",
                  "pair": "ZEC-USDC", "pairCode": "214"}]
+        # adopt_existing derives the regime from LIVE 1h candles (inline
+        # market_regime import) — this test used to mock only
+        # daemon.reclassify_regime, which that path never calls, so the
+        # assertion depended on the real Hyperliquid market: it passed
+        # or failed with ZEC's actual classification (offline-suite
+        # violation, flaky 2026-09-08: trend_up at 13:30, chop by 18:30).
+        # The flat canned series below classifies deterministically as
+        # trend_up (same fixture shape as ManageHarness.fake_candles).
         with mock.patch("daemon.grid_status_safe", return_value=bots), \
                 mock.patch("daemon.grid_profiles_safe", return_value=[prof]), \
                 mock.patch("daemon.record_decision_safe", fake_record), \
                 mock.patch("daemon.reclassify_regime",
                            return_value="trend_up"), \
                 mock.patch("daemon.fetch_symbol",
-                           side_effect=lambda v, s: s):
+                           side_effect=lambda v, s: s), \
+                mock.patch("market_regime.fetch_candles",
+                           side_effect=lambda venue, symbol, interval,
+                           limit, market="spot": [
+                               (100.0, 101.0, 99.0, 100.0 + i * 0.001)
+                               for i in range(limit or 100)]):
             self.d.adopt_existing(dry_run=True)
         self.assertEqual(len(rec), 1)
         self.assertEqual(rec[0][0]["regime"], "trend_up")

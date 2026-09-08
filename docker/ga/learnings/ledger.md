@@ -4,13 +4,25 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-08 — Keep recs are not applies: cap accounting and a live-network test leak
+
+Two fixes from the recommendations-queue audit (2026-09-08): (1) position_optimizer._persist counted post-deploy entry KEEPS toward max_apply_per_day — four deploys in a day silently filled the 4/day PB-persist cap before any actionable rec could persist (masked only by the twice-restarted daemon resetting the in-memory counter). Keeps are baseline audit records, not applies: they now persist without consuming the cap, the console's persisted_today skips them, they carry no blocked_by verdict (they used to show 'rate limit'), and the UI's Pending table filters them out. (2) tests/test_daemon_manage.test_adopt_records_decision_and_archetype mocked daemon.reclassify_regime, but adopt_existing's regime comes from an INLINE market_regime import over LIVE 1h candles — the test was secretly network-dependent and flipped with the real market (ZEC classified trend_up at 13:30 UTC, chop by 18:30). Fix: mock market_regime.fetch_candles with the flat harness fixture (classifies deterministically as trend_up, matching the existing assertion). Lesson twice over: a mock of function X only proves anything if the code path actually calls X — verify which module attribute the production path imports at runtime.
+
+Changes:
+- agents/grid-autonomy/position_optimizer.py
+- agents/grid-autonomy/console/server.py
+- agents/grid-autonomy/console/static/app.js
+- agents/grid-autonomy/tests/test_daemon_manage.py
+- agents/grid-autonomy/tests/test_position_optimizer.py
+- agents/grid-autonomy/tests/test_console.py
+
+
 ## 2026-09-08 — GHCR propagation race: buildx push succeeds but the immediate host pull 404s the digest
 
 ga-deploy (az00) failed at 'Pull the image on the host' with NotFound: content digest ... — build+push had succeeded seconds earlier. Root cause: GHCR eventual consistency; the manifest is not immediately pullable right after the push step completes (~3s gap here). The running container is untouched when the pull fails (deploy is pull-then-replace), so a failure here is SAFE — no partial state. Remedy: 'gh run rerun <id> --failed' once propagation has caught up (succeeded on first retry ~5 min later; buildx cache makes the rebuild cheap). If it recurs every deploy, consider adding a small retry loop or a sleep after push in the workflow.
 
 Changes:
 - .github/workflows/ga-deploy.yml
-
 
 ## 2026-09-08 — Heartbeat freshness bounds must absorb rescreen blocking; delegation gates must be pure shell
 

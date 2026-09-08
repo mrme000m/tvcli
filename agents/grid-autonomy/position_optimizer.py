@@ -1116,8 +1116,15 @@ class PositionOptimizer:
         day = self._day()
         if day != self._persisted_today[0]:
             self._persisted_today = (day, 0)
-        if self._persisted_today[1] >= int(self.cfg.get("max_apply_per_day",
-                                                        4)):
+        # keeps are baseline records (the post-deploy pass journals +
+        # persists one per bot), not applies: they must not consume the
+        # max_apply_per_day budget, or a day with several deploys starves
+        # every actionable rec out of the PB queue (live 2026-09-08: four
+        # entry keeps filled the 4/day cap before any actionable rec
+        # could persist — only the twice-restarted daemon masked it).
+        is_keep = str(rec.get("recommendation") or "") == "keep"
+        if not is_keep and self._persisted_today[1] >= int(
+                self.cfg.get("max_apply_per_day", 4)):
             self._journal({"kind": "position-optimizer",
                            "msg": "per-day persist cap reached",
                            "slot": rec.get("slot"),
@@ -1142,7 +1149,8 @@ class PositionOptimizer:
                            "slot": rec.get("slot"),
                            "symbol": rec.get("symbol")})
             return None
-        self._persisted_today = (day, self._persisted_today[1] + 1)
+        if not is_keep:
+            self._persisted_today = (day, self._persisted_today[1] + 1)
         return rid
 
     def persist(self, rec):
