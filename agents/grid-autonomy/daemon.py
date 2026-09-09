@@ -1633,12 +1633,24 @@ class Daemon:
     def _pb_recommendation_persist(self, rec):
         """Persist an applied position-optimizer recommendation into the
         PocketBase side channel. Non-fatal: None (id-less) when PB is off
-        or the write fails — the rec then lives in the journal only."""
+        or the write fails — the rec then lives in the journal only.
+
+        Returns the ENGINE's recommendation uuid (rec["id"]), NOT the
+        PocketBase record id: pbclient.recommendation() renames the
+        engine uuid into the `recommendation_id` field, and the apply
+        path's _pb_recommendation_update matches recommendation_update
+        on THAT field. Returning the PB auto id used to clobber
+        rec["id"] (via the engine's `rec["id"] = rid` reassignment), so
+        the later update filtered `recommendation_id = <PB auto id>` —
+        no match, and applied never flipped on the persisted record
+        (live 2026-09-09: 2 geometry applies journaled, every PB rec
+        still applied=false)."""
         pb = _pb()
         if pb is None:
             return None
         try:
-            return (pb.recommendation(rec) or {}).get("id")
+            pb.recommendation(rec) or {}
+            return rec.get("id")
         except Exception:
             return None
 

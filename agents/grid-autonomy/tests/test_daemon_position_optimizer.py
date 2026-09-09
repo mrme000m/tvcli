@@ -398,16 +398,50 @@ class TestPBRecommendation(unittest.TestCase):
         with mock.patch("daemon._pb", return_value=None):
             self.assertIsNone(d._pb_recommendation_persist({"id": "x"}))
         fake = mock.Mock()
-        fake.recommendation.return_value = {"id": "pb-3"}
+        fake.recommendation.return_value = {"id": "pb-3",
+                                            "recommendation_id": "uuid"}
         with mock.patch("daemon._pb", return_value=fake):
+            # the ENGINE uuid comes back (not the PB auto id): the apply
+            # path's recommendation_update matches on recommendation_id,
+            # which pbclient.recommendation() fills from rec["id"] — see
+            # test_persist_keeps_engine_uuid_for_update_match
             self.assertEqual(
-                d._pb_recommendation_persist({"id": "uuid"}), "pb-3")
+                d._pb_recommendation_persist({"id": "uuid"}), "uuid")
         fake.recommendation.assert_called_once_with({"id": "uuid"})
         # a failing PB write must be swallowed (returns None, no raise)
         fake2 = mock.Mock()
         fake2.recommendation.side_effect = RuntimeError("pb down")
         with mock.patch("daemon._pb", return_value=fake2):
             self.assertIsNone(d._pb_recommendation_persist({"id": "y"}))
+
+    def test_persist_keeps_engine_uuid_for_update_match(self):
+        """End-to-end id-chain regression (live 2026-09-09): the persist
+        closure must hand back the ENGINE uuid so `rec["id"] = rid` in
+        the engine keeps it, and _pb_recommendation_update then patches
+        the PB record by recommendation_id — the old code returned the
+        PB auto id, clobbered rec["id"] with it, and the update's
+        `recommendation_id = "<PB auto id>"` filter matched nothing, so
+        applied never flipped (2 geometry applies journaled, every PB
+        rec still applied=false)."""
+        d = daemon.Daemon.__new__(daemon.Daemon)
+        fake = mock.Mock()
+        fake.recommendation.return_value = {"id": "pb-9",
+                                            "recommendation_id": "uuid-7"}
+        with mock.patch("daemon._pb", return_value=fake):
+            rid = d._pb_recommendation_persist(
+                {"id": "uuid-7", "recommendation": "narrow",
+                 "expected_delta_pct": 5.0})
+        self.assertEqual(rid, "uuid-7")
+        # the engine's persist step keeps rec["id"] = engine uuid ...
+        rec = {"id": rid, "applied": True,
+               "applied_at": "2026-09-09T00:00:00+00:00"}
+        # ... so the apply path patches by THAT uuid (recommendation_id)
+        fake2 = mock.Mock()
+        with mock.patch("daemon._pb", return_value=fake2):
+            d._pb_recommendation_update(rec)
+        fake2.recommendation_update.assert_called_once_with(
+            "uuid-7", {"applied": True,
+                       "applied_at": "2026-09-09T00:00:00+00:00"})
 
 
 class TestEngineCycle(unittest.TestCase):

@@ -4,6 +4,15 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-09 — PB recommendation applied-flip never landed: persist closure returned the PB auto id
+
+VERIFIED 2026-09-09: daemon._pb_recommendation_persist returned the PocketBase record id, and the engine's persist step then did rec['id'] = rid — clobbering the engine recommendation uuid. The apply path's _pb_recommendation_update passes rec['id'] into pbclient.recommendation_update, which filters on the recommendation_id field (filled by pbclient.recommendation from the ORIGINAL rec['id'] uuid) — so the filter matched nothing and applied never flipped on persisted records (2 geometry applies journaled, all PB recs applied=false). FIX: _pb_recommendation_persist returns rec.get('id') (the engine uuid); rec['id'] survives the reassignment; recommendation_update matches. +1 regression test pinning the persist→apply id chain; suite 867→868.
+
+Changes:
+- agents/grid-autonomy/daemon.py
+- agents/grid-autonomy/tests/test_daemon_position_optimizer.py
+
+
 ## 2026-09-09 — Console pnl-chart + sparklines extracted to separate components (wave 3)
 
 VERIFIED 2026-09-09: operator asked for additional frontend components in separate files instead of the already-large app.js (3304 L). Extracted drawPnlChart → components/pnl-chart.js (window.PnlChart.draw, 125 L) and the two sparkline painters → components/sparklines.js (window.Sparklines.render/scoreSVG, 113 L) with thin top-level shims kept in app.js so classic-script globals (window.drawPnlChart) and the mobile.js resize handler survive unchanged. app.js 3304→3180 L. Key gotcha: top-level `let`/`const` bindings in app.js are NOT window properties (the P0-1 lastPnlPoints bug) — components must carry local mirrors (isNum) and call-time-guard shared helpers (window.relTime). Byte-identical A/B smoke + 61/61 console tests + 867 suite green.
@@ -13,7 +22,6 @@ Changes:
 - agents/grid-autonomy/console/static/components/sparklines.js
 - agents/grid-autonomy/console/static/app.js
 - agents/grid-autonomy/console/static/index.html
-
 
 ## 2026-09-09 — Idle capital anatomy: 277 of 600 idle is by-design + two structural causes
 
