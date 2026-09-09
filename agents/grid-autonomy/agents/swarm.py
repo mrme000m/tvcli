@@ -171,6 +171,12 @@ def risk_review(brief, ticket, stance, _chain=None):
         {"role": "system", "content": SYS},
         {"role": "user", "content":
          f"You are the {stance} risk manager. Ticket: {json.dumps(ticket)}. "
+         f"max_alloc_mult is the fraction of the approved worst-case slot "
+         f"allocation to commit: 1.0 = the full tier target (the design "
+         f"intent when the ticket is clean). Discount BELOW 1.0 only for "
+         f"concrete risk factors visible in the ticket (wide spread, weak "
+         f"expected fills, extreme volatility, regime mismatch) and name "
+         f"the factor in notes. "
          f"Schema: {{\"approve\":bool,\"max_alloc_mult\":0-1,"
          f'"step_mult":0.5-2,"notes":str,"veto_reason":str|null}}. '
          f'Candidate: {brief_text(brief)}'}],

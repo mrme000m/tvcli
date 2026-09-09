@@ -695,10 +695,10 @@ async function loadSlotCharts(ov) {
   } finally { slotChartsBusy = false; }
 }
 
-/* inline sparkline per .slot-spark node: closes min-max scaled (3px pad),
-   teal when the window is up, crimson when down, plus dashed channel
-   high/low refs when the bot carries a channel. Idempotent per data
-   epoch (dataset.at) so re-renders don't thrash. */
+/* inline sparkline per .slot-spark node: painting moved to
+   components/sparklines.js (window.Sparklines.render). This shim keeps
+   the chartCache data plumbing + the dataset.at epoch guard here so
+   re-renders stay idempotent; the component fails soft if missing. */
 function renderSlotSparklines() {
   const bots = (lastOverview && lastOverview.bots) || [];
   for (const node of document.querySelectorAll(".slot-spark")) {
@@ -710,41 +710,10 @@ function renderSlotSparklines() {
     const stamp = String(hit.at);
     if (node.dataset.at === stamp) continue;
     node.dataset.at = stamp;
-    const closes = [];
-    for (const b of bars) { const c = Number(b && b.c); if (isFinite(c)) closes.push(c); }
-    if (closes.length < 2) continue;
-    const W = 220, H = 48, P = 3;
-    let lo = Math.min(...closes), hi = Math.max(...closes);
-    if (hi - lo < 1e-12) { const e = Math.abs(hi) * 0.001 || 0.001; hi += e; lo -= e; }
-    const X = (i) => P + (i / (bars.length - 1)) * (W - 2 * P);
-    const Y = (v) => P + (1 - (v - lo) / (hi - lo)) * (H - 2 * P);
-    let pts = "";
-    bars.forEach((b, i) => {
-      const c = Number(b && b.c);
-      if (isFinite(c)) pts += `${X(i).toFixed(2)},${Y(c).toFixed(2)} `;
-    });
-    const first = closes[0], last = closes[closes.length - 1];
-    const up = last >= first;
-    const delta = first ? ((last - first) / first) * 100 : 0;
-    let refs = "";
     const bot = bots.find((b) => String(b.slot) === String(node.dataset.slot));
     const ch = (bot && bot.channel) || null;
-    if (ch && isNum(ch.high) && isNum(ch.low)) {
-      const yH = Math.max(P, Math.min(H - P, Y(Number(ch.high)))).toFixed(1);
-      const yL = Math.max(P, Math.min(H - P, Y(Number(ch.low)))).toFixed(1);
-      refs = `<line x1="0" y1="${yH}" x2="${W}" y2="${yH}" class="spark-ref"/>`
-        + `<line x1="0" y1="${yL}" x2="${W}" y2="${yL}" class="spark-ref"/>`;
-    }
-    const slot = node.querySelector(".spark-slot");
-    if (slot) slot.innerHTML = `
-      <svg class="spark-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
-        ${refs}
-        <polyline class="spark-line${up ? "" : " spark-line--down"}" points="${pts.trim()}"/>
-      </svg>`;
-    const d = node.querySelector(".spark-delta");
-    if (d) {
-      d.className = `spark-delta mono ${up ? "spark-delta--up" : "spark-delta--down"}`;
-      d.textContent = `\u0394 ${up ? "+" : "\u2212"}${Math.abs(delta).toFixed(2)}%`;
+    if (typeof window.Sparklines?.render === "function") {
+      window.Sparklines.render(node, bars, ch);
     }
   }
 }
@@ -1080,24 +1049,12 @@ async function jumpToRunCard(stem) {
 }
 
 /* Tiny inline SVG sparkline for the "last screen" rail — top-of-screen
-   score over the last N rescreen cycles. Green when trending up, crimson
-   when trending down (last vs first), gray when flat. */
+   score over the last N rescreen cycles. Painting moved to
+   components/sparklines.js (window.Sparklines.scoreSVG); fails soft
+   with "" if the component is missing. */
 function scoreSparklineSVG(history) {
-  if (!Array.isArray(history) || history.length < 2) return "";
-  const W = 110, H = 18, P = 2;
-  const scores = history.map((h) => Number(h.score)).filter(isFinite);
-  if (scores.length < 2) return "";
-  const lo = Math.min(...scores), hi = Math.max(...scores);
-  const span = Math.max(1e-6, hi - lo);
-  const X = (i) => P + (i / (scores.length - 1)) * (W - 2 * P);
-  const Y = (v) => P + (1 - (v - lo) / span) * (H - 2 * P);
-  const pts = scores.map((v, i) => `${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(" ");
-  const first = scores[0], last = scores[scores.length - 1];
-  const up = last > first, flat = last === first;
-  const stroke = flat ? "var(--ink-faint)" : up ? "var(--teal)" : "var(--crimson)";
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true" class="screen-spark">
-    <polyline fill="none" stroke="${stroke}" stroke-width="1.2" points="${pts}"/>
-  </svg>`;
+  if (typeof window.Sparklines?.scoreSVG === "function") return window.Sparklines.scoreSVG(history);
+  return "";
 }
 
 /* the LLM intelligence lane: the daemon's periodic market brief over the
@@ -1411,96 +1368,15 @@ function renderVetoStrip(ov, st) {
 }
 
 /* PnL timeline — inline canvas (no CDN, works offline). Two series:
-   net (solid + area) and realized (thin), zero line, newest on the right. */
+   net (solid + area) and realized (thin), zero line, newest on the
+   right. Container-driven width: measured from the canvas's parent
+   (.pnl-chart) content box (canvas.parentElement) with a 360 fallback
+   for tests/headless. The renderer moved to components/pnl-chart.js
+   (window.PnlChart.draw) — this shim keeps window.drawPnlChart for the
+   existing call sites (incl. mobile.js's resize handler) and fails soft
+   when the component is missing. */
 function drawPnlChart(points) {
-  const canvas = document.getElementById("pnl-canvas");
-  const meta = document.getElementById("pnl-chart-meta");
-  if (!canvas) return;
-  const pts = (points || []).slice().reverse().filter((p) => p && p.at); // oldest → newest
-  if (meta) meta.textContent = pts.length
-    ? `${pts.length} snapshot${pts.length === 1 ? "" : "s"} \u00b7 ${relTime(pts[pts.length - 1].at)}`
-    : "no history yet";
-  const ctx = canvas.getContext && canvas.getContext("2d");
-  if (!ctx) return;
-  const dpr = window.devicePixelRatio || 1;
-  // container-driven width: measure the canvas's parent (.pnl-chart) content
-  // box — clientWidth includes padding, and desktop .pnl-chart carries
-  // padding-left 18px, so subtract both paddings or the canvas pokes past
-  // the card edge. 360 fallback for tests/headless where the element has
-  // no measured box. Clamped so tiny rails don't crush the chart.
-  const parentEl = canvas.parentElement;
-  let parentW = 0;
-  if (parentEl) {
-    const cs = (typeof getComputedStyle === "function")
-      ? getComputedStyle(parentEl) : null;
-    const padL = cs ? parseFloat(cs.paddingLeft) || 0 : 0;
-    const padR = cs ? parseFloat(cs.paddingRight) || 0 : 0;
-    parentW = Math.max(0, parentEl.clientWidth - padL - padR);
-  }
-  const W = parentW > 0 ? Math.min(480, Math.max(240, parentW)) : 360;
-  const H = 96;
-  if (canvas.width !== W * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
-  canvas.style.width = `${W}px`; canvas.style.height = `${H}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.clearRect(0, 0, W, H);
-  if (pts.length < 1) {
-    ctx.fillStyle = "#7C8B83";
-    ctx.font = "11px 'IBM Plex Mono', monospace";
-    ctx.fillText("no pnl-snapshot history (daemon pre-restart?)", 8, H / 2);
-    return;
-  }
-  const val = (p, k) => {
-    const f = p.fleet || {};
-    return isNum(f[k]) ? Number(f[k]) : null;
-  };
-  const series = [
-    { key: "net", color: "#0A7E6D", fill: "rgba(10,126,109,0.10)", width: 2 },
-    { key: "realized", color: "#9A5B04", fill: null, width: 1.25 },
-  ];
-  const vals = [];
-  for (const p of pts) for (const s of series) { const v = val(p, s.key); if (v !== null) vals.push(v); }
-  if (!vals.length) {
-    ctx.fillStyle = "#7C8B83";
-    ctx.font = "11px 'IBM Plex Mono', monospace";
-    ctx.fillText("snapshots present but no fleet values", 8, H / 2);
-    return;
-  }
-  let min = Math.min(0, ...vals), max = Math.max(0, ...vals);
-  if (max - min < 1e-9) { max += 0.5; min -= 0.5; }
-  const pad = (max - min) * 0.12;
-  min -= pad; max += pad;
-  const padL = 8, padR = 8, padT = 6, padB = 6;
-  const X = (i) => padL + (pts.length === 1 ? (W - padL - padR) / 2
-    : (i / (pts.length - 1)) * (W - padL - padR));
-  const Y = (v) => padT + (1 - (v - min) / (max - min)) * (H - padT - padB);
-  // zero line
-  if (min < 0 && max > 0) {
-    ctx.strokeStyle = "rgba(24,36,32,0.25)";
-    ctx.setLineDash([3, 3]);
-    ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
-    ctx.setLineDash([]);
-  }
-  for (const s of series) {
-    const xy = [];
-    pts.forEach((p, i) => { const v = val(p, s.key); if (v !== null) xy.push([X(i), Y(v)]); });
-    if (!xy.length) continue;
-    if (s.fill) {
-      ctx.beginPath();
-      ctx.moveTo(xy[0][0], H - padB);
-      for (const [x, y] of xy) ctx.lineTo(x, y);
-      ctx.lineTo(xy[xy.length - 1][0], H - padB);
-      ctx.closePath();
-      ctx.fillStyle = s.fill; ctx.fill();
-    }
-    ctx.beginPath();
-    xy.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
-    ctx.strokeStyle = s.color; ctx.lineWidth = s.width;
-    ctx.lineJoin = "round"; ctx.lineCap = "round";
-    ctx.stroke();
-    const lastPt = xy[xy.length - 1];
-    ctx.fillStyle = s.color;
-    ctx.beginPath(); ctx.arc(lastPt[0], lastPt[1], 2.4, 0, Math.PI * 2); ctx.fill();
-  }
+  if (typeof window.PnlChart?.draw === "function") window.PnlChart.draw(points);
 }
 
 async function loadPnlTimeline() {

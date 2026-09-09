@@ -496,3 +496,37 @@ Intentionally skipped:
   responsive.css); the remaining suggestion (collapsing the statusbar
   to 1–2 summary chips at all short heights) left as-is — the current
   chip wrap is acceptable at 740×360.
+
+---
+
+## Fix wave 3 (2026-09-09)
+
+Scope: operator request — "implement additional frontend components in
+separate files instead of existing already large files" + mobile
+coherence re-verification. app.js was 3304 L / 176,564 B; the two
+self-contained renderers were extracted into new component files with
+thin top-level shims left in app.js (classic-script globals preserved:
+`window.drawPnlChart` / `window.renderSlotSparklines` /
+`window.scoreSparklineSVG` all still exist for mobile.js and callers).
+
+- **NEW `components/pnl-chart.js`** (125 L) — `window.PnlChart.draw`,
+  the full DPR-aware PnL timeline canvas renderer extracted from
+  `drawPnlChart` (app.js ~1413–1504). Byte-identical output; local
+  `isNum` mirror + call-time-guarded `window.relTime`; fail-soft on
+  missing canvas/context. app.js shim keeps `window.drawPnlChart` so the
+  mobile.js resize handler (P0-1) is untouched.
+- **NEW `components/sparklines.js`** (113 L) — `window.Sparklines.render`
+  (slot-card `.slot-spark` painter) + `window.Sparklines.scoreSVG`
+  ("last screen" score trend), sharing one min-max scale core. The
+  `dataset.at` epoch guard + `chartCache` plumbing stay in the app.js
+  shim so re-renders remain idempotent.
+- app.js **3304 → 3180 L** (−124; 176,564 → 170,871 B); index.html +2
+  `<script>` tags (pnl-chart.js, sparklines.js) before app.js.
+- Verification: `node --check` clean on every touched file;
+  `tests.test_console` 61/61; DOM-stub smoke 30/30 with byte-identical
+  output vs the originals (A/B on flat/long/gappy series, DPR=2,
+  container widths 0/400/800); full offline suite **867 OK / 8 skipped**.
+- Mobile coherence re-check: no gaps found — viewport meta present,
+  styles.css has no ≤760/≤720 tier (responsive.css owns the mobile
+  layer: 760/430 + 760×480 landscape), bnav short labels cover all 7
+  tabs, MQ_MOBILE matches the CSS breakpoint.

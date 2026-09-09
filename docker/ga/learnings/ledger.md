@@ -4,6 +4,33 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-09 — Console pnl-chart + sparklines extracted to separate components (wave 3)
+
+VERIFIED 2026-09-09: operator asked for additional frontend components in separate files instead of the already-large app.js (3304 L). Extracted drawPnlChart → components/pnl-chart.js (window.PnlChart.draw, 125 L) and the two sparkline painters → components/sparklines.js (window.Sparklines.render/scoreSVG, 113 L) with thin top-level shims kept in app.js so classic-script globals (window.drawPnlChart) and the mobile.js resize handler survive unchanged. app.js 3304→3180 L. Key gotcha: top-level `let`/`const` bindings in app.js are NOT window properties (the P0-1 lastPnlPoints bug) — components must carry local mirrors (isNum) and call-time-guard shared helpers (window.relTime). Byte-identical A/B smoke + 61/61 console tests + 867 suite green.
+
+Changes:
+- agents/grid-autonomy/console/static/components/pnl-chart.js
+- agents/grid-autonomy/console/static/components/sparklines.js
+- agents/grid-autonomy/console/static/app.js
+- agents/grid-autonomy/console/static/index.html
+
+
+## 2026-09-09 — Idle capital anatomy: 277 of 600 idle is by-design + two structural causes
+
+VERIFIED 2026-09-09 on the live deployment: committed 323 / ceiling 510 (85% of 600) / idle 277 (=600-323). Breakdown: (a) 15% cash buffer = 90 (design); (b) the $120 Binance sleeve is STRANDED — WT demo grid-bot cap is 5/5 consumed by Hyperliquid bots (HL is premium/200 so it wins the paper slots; demo-cap-veto skips new deploys) — BN can never deploy; (c) risk-team max_alloc_mult 0.6-0.7 throttles per-slot commitment to 60-70 of the 90 cap (the LLM risk managers discount the tier target). The sizing math itself is CORRECT (tier × mult over side lines, $10/line exchange floor, worst-case ≤ 50% slot). LEVER: swarm.risk_review prompt now instructs max_alloc_mult semantics (1.0 = full tier target; discount only for concrete risk factors) so the design intent — idle capital into fatter ladders — is actually reachable. Idle_committed_usd=0 confirms no committed capital sits in idle bots.
+
+Changes:
+- agents/grid-autonomy/agents/swarm.py
+
+## 2026-09-09 — Rotation double-eval misalignment vetoed every rescreen swap
+
+VERIFIED 2026-09-09: the rescreen rotation pass pre-checks incumbent stagnation with the incumbent's OWN fresh regime + score decay (daemon.py rescreen pass, is_stagnant with fresh.get('regime')), then execute_rotation re-litigates it via should_rotate with CHALLENGER-relative inputs (candidate.regime, inc_score - cand_score). When the challenger's regime matched the policy regime and fills/realized were healthy, the re-check vetoed 'incumbent healthy' — 45 rotation-veto storms in ~7h on healthy incumbents (ARB/JUP/NEAR), one per rescreen cycle, and legitimate swaps on genuinely-decayed incumbents were blocked too. FIX: should_rotate/execute_rotation now accept stag_ok/stag_reasons/inc_score_fresh — the rescreen threads its verdict through and only the Δscore hysteresis gate (vs the FRESH incumbent score) applies. All loss-veto rules untouched; +10 tests; suite 857→867.
+
+Changes:
+- agents/grid-autonomy/daemon.py
+- agents/grid-autonomy/tests/test_rotation_alignment.py
+- agents/grid-autonomy/tests/test_integration.py
+
 ## 2026-09-08 — Tier sizing divisor + WT edit contract: two live bugs that capped capital use and broke PO applies
 
 Verified live 2026-09-08 (fresh deployment, 5 paper bots, full-tier archetype at 40 samples / PF 99, committed $280 of $600, $320 idle): (1) build_ticket_payloads divided the tier worst-case budget by grids_n (ALL lines) though only side_lines ≈ half can fill adversely — the $10 exchange floor then dominated every tier, so even a full-tier neutral-risk bot could only reach ~33% of its $180 slot instead of the designed 50% cap ($90). The reliability ladder was symbolic on capital. Fix: per_line = max(min_cost, alloc_usd / side_lines) — worst-case lands exactly on the tier target; the guard chain (worst ≤ min(tier, 0.5)×slot, committed+worst ≤ 85% ceiling) still binds, size-fit math grids ≤ 2·cap/min_cost still exact. Fatter sizing reaches existing bots at their natural recycle points (profit-exit, rotation) because WT applies amountPerTrade only via stop→edit→restart (echoed-not-applied on live edits — verified in browser-debug/docs/wt/grid-bot-api.md) and stopping an underwater bot would realize losses (never-close-at-a-loss). (2) The position-optimizer apply path 500'd on WT while the daemon's own adjust path succeeded on the same bots: _edit_payload emitted a 7-field partial payload, but the upsert endpoint needs the full compute_upsert contract (exchangeCode, profilesCodes, gridType, initPrice, closest*LevelPrice, stopOnOutOfGrid, …). Fix: overlay the geometry onto a copy of the bot's stored deploy upsert (exit keys stripped first so geometry edits never silently rewrite server exits). (3) The 5-demo-bot paper cap (5/5 active) is the binding constraint on fleet size — fatter per-slot sizing is the only idle-capital lever; capital visibility now ships in the console capital-rail component. (4) Orchestrator gotcha: two delegated workers running the same unittest suite concurrently can fail each other's autonomous quality gate with exit-2 collection errors — always re-run the suite on the integrated tree yourself before trusting either worker's green.
@@ -14,7 +41,6 @@ Changes:
 - agents/grid-autonomy/tests/test_grid_adapter_exits.py
 - agents/grid-autonomy/tests/test_position_optimizer.py
 - agents/grid-autonomy/console/static/components/capital-rail.js
-
 
 ## 2026-09-08 — Orchestration: subprocess-backed prime-agent delegations cannot be steered mid-flight
 

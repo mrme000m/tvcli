@@ -680,31 +680,45 @@ def save_state(state):
 
 
 def should_rotate(candidate, incumbent, policy, observed, now_epoch,
-                  needs_reanalysis=False):
+                  needs_reanalysis=False, stag_ok=None, stag_reasons=None,
+                  inc_score_fresh=None):
     """Pure rotation decision → (rotate: bool, reasons: [str]).
 
     `needs_reanalysis` (set by health_cycle when the incumbent went
     out-of-channel or was stopped) is a hard trigger: a stopped bot earns
     nothing, so the challenger hysteresis does not apply. The min-hold floor
     and per-symbol cooldowns are still enforced by the caller.
+
+    `stag_ok` (rescreen rotation pass): the caller already evaluated
+    stagnation with the incumbent's OWN fresh regime + score decay, so the
+    internal is_stagnant re-check is skipped and `stag_reasons` are carried
+    through. The Δscore hysteresis gate still applies in all cases — the
+    challenger must beat the incumbent's FRESH score (`inc_score_fresh`) by
+    ≥ hysteresis_score, so score-quality protection is never bypassed.
     """
     reasons = []
     # `or 0`: adopted bots carry score_final=None — must not break arithmetic
     inc_score = incumbent.get("score_final") or 0
     cand_score = candidate.get("score_final") or 0
-    stag, s_reasons = is_stagnant(
-        observed, policy,
-        regime_now=candidate.get("regime"),
-        score_drop=inc_score - cand_score,
-        ladder_full=observed.get("ladder_full", False),
-        dd_vs_atr_band=observed.get("dd_vs_atr_band", 0.0))
-    if not stag and needs_reanalysis:
+    if stag_ok is True:
         stag = True
-        s_reasons = list(s_reasons) + [
-            "needs_reanalysis (out-of-channel/stopped)"]
+        s_reasons = list(stag_reasons or [])
+    else:
+        stag, s_reasons = is_stagnant(
+            observed, policy,
+            regime_now=candidate.get("regime"),
+            score_drop=inc_score - cand_score,
+            ladder_full=observed.get("ladder_full", False),
+            dd_vs_atr_band=observed.get("dd_vs_atr_band", 0.0))
+        if not stag and needs_reanalysis:
+            stag = True
+            s_reasons = list(s_reasons) + [
+                "needs_reanalysis (out-of-channel/stopped)"]
     if not stag:
         return False, ["incumbent healthy"]
     reasons.extend(s_reasons)
+    if inc_score_fresh is not None:
+        inc_score = inc_score_fresh
     dscore = cand_score - inc_score
     if not needs_reanalysis and dscore < policy.get("hysteresis_score", 5.0):
         return False, reasons + [f"Δscore {dscore:.1f} < hysteresis"]
@@ -2675,6 +2689,10 @@ class Daemon:
                  and c.get("symbol") == bot.get("symbol")), None)
             manual = bool(bot.get("force_rotate"))
             reasons = []
+            # fresh incumbent score from the screen cache — the manual path
+            # never reaches the non-manual block below, so default to the
+            # stored score (execute_rotation's manual branch ignores it)
+            fresh_score = bot.get("score_final") or 0
             if manual:
                 reasons = ["optimizer swap (fast lane)"
                            if bot.get("optimizer_swap")
@@ -2734,7 +2752,9 @@ class Daemon:
                                         f"stagnant ({'; '.join(reasons)[:100]}) "
                                         f"but no eligible challenger"})
                 continue
-            if self.execute_rotation(slot_key, challenger, dry_run):
+            if self.execute_rotation(
+                    slot_key, challenger, dry_run, stag_ok=True,
+                    stag_reasons=reasons, inc_score_fresh=fresh_score):
                 rotations.append({
                     "slot": int(slot_key), "from": f"{bot.get('venue')}:{bot.get('symbol')}",
                     "to": f"{challenger.get('venue')}:{challenger.get('symbol')}",
@@ -4207,7 +4227,9 @@ class Daemon:
             return None
 
     # ── rotation ───────────────────────────────────────────────────────
-    def execute_rotation(self, slot_key, challenger, dry_run=True):
+    def execute_rotation(self, slot_key, challenger, dry_run=True,
+                         stag_ok=False, stag_reasons=None,
+                         inc_score_fresh=None):
         incumbent = self.state["active_bots"].get(slot_key)
         if not incumbent:
             return False
@@ -4223,7 +4245,9 @@ class Daemon:
             try:
                 ok_rot, reasons = should_rotate(
                     challenger, incumbent, policy, observed, time.time(),
-                    needs_reanalysis=bool(incumbent.get("needs_reanalysis")))
+                    needs_reanalysis=bool(incumbent.get("needs_reanalysis")),
+                    stag_ok=stag_ok or None, stag_reasons=stag_reasons,
+                    inc_score_fresh=inc_score_fresh)
             except Exception as exc:
                 ok_rot, reasons = False, [f"rotation eval failed: {exc}"]
         if not ok_rot:

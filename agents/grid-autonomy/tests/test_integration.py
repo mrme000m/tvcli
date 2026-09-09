@@ -521,7 +521,7 @@ class TestMinHoldFloor(unittest.TestCase):
         with mock.patch("daemon.run_merge", return_value={"results": cands}), \
              mock.patch("daemon.observe_all_safe", side_effect=lambda b: {}), \
              mock.patch.object(d, "execute_rotation",
-                        side_effect=lambda sk, ch, dry_run=True:
+                        side_effect=lambda sk, ch, dry_run=True, **kw:
                         rotated.append(sk) or True):
             d.rescreen_cycle(dry_run=True, max_new=1, top=5)
         self.assertEqual(rotated, ["1"])
