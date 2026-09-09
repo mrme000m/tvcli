@@ -4,6 +4,11 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-09 — PO geometry applies can 400 on initPrice when the analysis price goes stale
+
+VERIFIED 2026-09-09 (live): a revalue-grid apply for XPL (Δ+103.83%) was rejected by WT with 400 'Current price (0.09451) must be between 0.09798 and 0.099071' — the rec's channel was built around the analysis-time 1h-candle price, which the fast-moving token left seconds later. The watch-loop recenters (adjust_bot, live-price-based compute_upsert) DO pass WT validation; the PO apply path uses the analysis-time payload and hits the edge intermittently (2 earlier applies succeeded). The 10-min failed-edit backoff + per-bot PO cooldown contain it; the next analysis regenerates the rec around the fresh price. Pre-existing behavior, unrelated to the PB applied-flip fix; noted for a possible future fix (refresh live price before geometry applies).
+
+
 ## 2026-09-09 — PB recommendation applied-flip never landed: persist closure returned the PB auto id
 
 VERIFIED 2026-09-09: daemon._pb_recommendation_persist returned the PocketBase record id, and the engine's persist step then did rec['id'] = rid — clobbering the engine recommendation uuid. The apply path's _pb_recommendation_update passes rec['id'] into pbclient.recommendation_update, which filters on the recommendation_id field (filled by pbclient.recommendation from the ORIGINAL rec['id'] uuid) — so the filter matched nothing and applied never flipped on persisted records (2 geometry applies journaled, all PB recs applied=false). FIX: _pb_recommendation_persist returns rec.get('id') (the engine uuid); rec['id'] survives the reassignment; recommendation_update matches. +1 regression test pinning the persist→apply id chain; suite 867→868.
@@ -11,7 +16,6 @@ VERIFIED 2026-09-09: daemon._pb_recommendation_persist returned the PocketBase r
 Changes:
 - agents/grid-autonomy/daemon.py
 - agents/grid-autonomy/tests/test_daemon_position_optimizer.py
-
 
 ## 2026-09-09 — Console pnl-chart + sparklines extracted to separate components (wave 3)
 
