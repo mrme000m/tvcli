@@ -123,6 +123,46 @@ def _cache_age(st):
         return None
 
 
+def _live_paper_count(st, code):
+    """LIVE demo-bot count for one paper profile — replica of daemon's
+    _count_paper_bots (this module is deliberately daemon-import-free,
+    see the header note; daemon.py owns the source of truth — keep the
+    two in sync).
+
+    WT-side truth first: capacity.used_pairs[EXCHANGE][code] counts
+    carry-pray PHANTOMS and any other untracked WT bot that still eats
+    the demo cap. Falls back to the tracked count (active_bots on the
+    profile + live carry_pray parks); MAX when both exist (fail-closed —
+    a stale or mid-cycle snapshot never under-counts)."""
+    prof = next((p for p in (st.get("profiles") or [])
+                 if isinstance(p, dict) and p.get("code") == code), None)
+    if not prof or not prof.get("paperTrading"):
+        return 0
+
+    def _on_profile(bot):
+        if not isinstance(bot, dict):
+            return False
+        pc = bot.get("profile_code")
+        if pc is not None:
+            return pc == code
+        ex = prof.get("exchange")
+        return ((bot.get("venue") == "hyperliquid"
+                 and ex == "HYPERLIQUID_SWAP") or
+                (bot.get("venue") == "binance"
+                 and ex in ("BINANCE", "BINANCE_FUTURES")))
+
+    tracked = sum(1 for b in (st.get("active_bots") or {}).values()
+                  if _on_profile(b))
+    tracked += sum(1 for e in (st.get("carry_pray") or {}).values()
+                   if isinstance(e, dict) and _on_profile(e.get("bot")))
+    used = (st.get("capacity") or {}).get("used_pairs")
+    if isinstance(used, dict):
+        exd = used.get((prof.get("exchange") or "").upper())
+        if isinstance(exd, dict) and code in exd:
+            return max(len(exd.get(code) or []), tracked)
+    return tracked
+
+
 def status_payload(daemon):
     """Assemble the GET /status body from daemon state.
 
@@ -155,11 +195,11 @@ def status_payload(daemon):
     per = st.get("demo_bot_caps") or {}
     profiles = st.get("profiles") or []
     paper_codes = {p.get("code") for p in profiles if p.get("paperTrading")}
-    active = st.get("active_bots") or {}
     per_profile = {}
     for code in paper_codes:
-        n = sum(1 for b in active.values()
-                if isinstance(b, dict) and b.get("profile_code") == code)
+        # LIVE count (WT used_pairs + carry-pray phantoms), not just the
+        # tracked active_bots — see _live_paper_count above
+        n = _live_paper_count(st, code)
         per_profile[code] = {
             "cap": per.get(code),
             "active": n,

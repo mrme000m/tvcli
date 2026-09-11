@@ -4,10 +4,20 @@ Distilled knowledge from operating and improving the GA stack.
 Reverse-chronological — newest first. The loop contract, the entry format,
 and the write rules live in [README.md](README.md).
 
+## 2026-09-11 — carry-pray parks free the daemon slot but keep the WT demo bot running — demo-cap gate undercounts and 400-storms
+
+Verified incident 2026-09-11: carry-pray-enter (daemon.py _enter_carry_pray) moves a bot from active_bots into state.carry_pray and frees the daemon slot, but the WT-side grid bot keeps running on the paper profile with a server-side takeProfit — it still consumes one of the 5 WT demo grid-bot slots. Every demo-cap gate (deploy loop break, transition veto journal, queue_rescreen refill-nudge skip, _prune_unfillable_slots at_demo_cap, per-profile gate, ctl /status demo_cap block) counted only len(state.active_bots) vs the learned cap, so 3 tracked bots with 2 carry-pray phantoms looked like headroom-2 → the daemon deliberated and attempted deploys into free slots, every create 400ing with 'You've reached the maximum number of Demo Trading Grid Bots! (Limit: 5)' (130+ deploy-failed entries in ~1.5h, 64% of 00 capital idle). The authoritative WT-side count is observe.grid_capacity() used_pairs[EXCHANGE][profile_code] (already in state.capacity). Fix (delegated, verified, 878 tests green): _count_paper_bots now returns max(WT used_pairs count, tracked active+carry_pray count) fail-closed, _count_paper_bots_total for the scalar gates, all five gate sites use the live total, and a transition-only 'phantom-bot' journal fires when used_pairs > tracked. ctl_http replicates the helper for the /status demo_cap block. Next time: any demo-bot-cap gate must count WT-side live bots, not daemon-tracked ones; a carry-pray park is still a WT bot.
+
+Changes:
+- agents/grid-autonomy/daemon.py
+- agents/grid-autonomy/ctl_http.py
+- agents/grid-autonomy/tests/test_demo_cap_live_count.py
+- docker/ga/notes/wt-demo-cap-cleanup-2026-09-11.md
+
+
 ## 2026-09-09 — PO geometry applies can 400 on initPrice when the analysis price goes stale
 
 VERIFIED 2026-09-09 (live): a revalue-grid apply for XPL (Δ+103.83%) was rejected by WT with 400 'Current price (0.09451) must be between 0.09798 and 0.099071' — the rec's channel was built around the analysis-time 1h-candle price, which the fast-moving token left seconds later. The watch-loop recenters (adjust_bot, live-price-based compute_upsert) DO pass WT validation; the PO apply path uses the analysis-time payload and hits the edge intermittently (2 earlier applies succeeded). The 10-min failed-edit backoff + per-bot PO cooldown contain it; the next analysis regenerates the rec around the fresh price. Pre-existing behavior, unrelated to the PB applied-flip fix; noted for a possible future fix (refresh live price before geometry applies).
-
 
 ## 2026-09-09 — PB recommendation applied-flip never landed: persist closure returned the PB auto id
 

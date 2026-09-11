@@ -1008,36 +1008,96 @@ def _demo_cap_for_profile(state, profile_code):
         return None
 
 
+def _bot_matches_paper_profile(bot, profile):
+    """True when a bot record belongs to the paper profile `profile`
+    (profile_code match, else the legacy venue→exchange grouping used
+    for older adoptions / WT-side changes the daemon hasn't seen)."""
+    if not isinstance(bot, dict):
+        return False
+    code = bot.get("profile_code")
+    if code is not None:
+        return code == profile.get("code")
+    ex_match = (bot.get("venue") == "hyperliquid" and
+                profile.get("exchange") == "HYPERLIQUID_SWAP") or \
+               (bot.get("venue") == "binance" and
+                profile.get("exchange") in ("BINANCE", "BINANCE_FUTURES"))
+    return bool(ex_match)
+
+
+def _count_tracked_paper_bots(state, profile):
+    """Daemon-TRACKED bots on a paper profile: active_bots on the profile
+    PLUS carry_pray entries whose carried bot is still running on WT.
+
+    carry-pray parking (carry-pray-enter) frees the daemon slot but does
+    NOT stop or delete the WT-side bot — it keeps running with a
+    server-side takeProfit and still consumes the demo cap until
+    _check_carry_pray_completion drops the entry. Counting a just-stopped
+    entry is conservative (fail-closed) and self-heals on the sweep.
+    """
+    n = 0
+    for bot in (state.get("active_bots") or {}).values():
+        if not isinstance(bot, dict):
+            continue
+        code = bot.get("profile_code")
+        if code == profile.get("code"):
+            n += 1
+            continue
+        # legacy adoption: match by exchange+symbol against the profile
+        if code is None and _bot_matches_paper_profile(bot, profile):
+            # require a symbol match (the profile was selected FOR
+            # that token via the venue sleeve)
+            n += 1
+    for entry in (state.get("carry_pray") or {}).values():
+        bot = entry.get("bot") if isinstance(entry, dict) else None
+        if _bot_matches_paper_profile(bot, profile):
+            n += 1
+    return n
+
+
 def _count_paper_bots(state, profile_code):
-    """Number of active bots on a given paper profile, for the per-profile
-    demo-cap gate. Falls back to exchange+name matching when the bot
-    record has no profile_code field (older adoptions / WT-side changes
-    that the daemon hasn't seen yet)."""
+    """Number of LIVE demo (paper) grid bots on a paper profile, for the
+    per-profile demo-cap gate. WT-side truth first.
+
+    Authoritative source: state["capacity"]["used_pairs"][EXCHANGE][code]
+    (observe.grid_capacity() — the WT-side live-bot list per paper
+    profile). This counts PHANTOM bots too: carry-pray parks free the
+    daemon slot but keep running on WT, and any other WT-side bot the
+    daemon doesn't track (dropped carry entries, manual creates) still
+    eats the demo cap. Fail-closed: when both views exist the MAX wins,
+    so a mid-cycle deploy (not in the once-per-cycle snapshot yet) or a
+    stale snapshot never under-counts — an over-count only vetoes a
+    create; the next cycle self-heals.
+
+    Falls back to _count_tracked_paper_bots (active_bots on the profile
+    + live carry-pray parks) when the capacity snapshot is missing, and
+    inside it to exchange+name matching when the bot record has no
+    profile_code field (older adoptions / WT-side changes that the
+    daemon hasn't seen yet)."""
     if not profile_code:
         return 0
     profiles = state.get("profiles") or []
     match = next((p for p in profiles if p.get("code") == profile_code), None)
     if not match or not match.get("paperTrading"):
         return 0
-    n = 0
-    for bot in (state.get("active_bots") or {}).values():
-        if not isinstance(bot, dict):
-            continue
-        code = bot.get("profile_code")
-        if code == profile_code:
-            n += 1
-            continue
-        # legacy adoption: match by exchange+symbol against the profile
-        if code is None:
-            ex_match = (bot.get("venue") == "hyperliquid" and
-                        match.get("exchange") == "HYPERLIQUID_SWAP") or \
-                       (bot.get("venue") == "binance" and
-                        match.get("exchange") in ("BINANCE", "BINANCE_FUTURES"))
-            if ex_match:
-                # require a symbol match (the profile was selected FOR
-                # that token via the venue sleeve)
-                n += 1
-    return n
+    tracked = _count_tracked_paper_bots(state, match)
+    used = state.get("capacity") or {}
+    used = used.get("used_pairs") if isinstance(used, dict) else None
+    if isinstance(used, dict):
+        exd = used.get((match.get("exchange") or "").upper())
+        if isinstance(exd, dict) and profile_code in exd:
+            live = len(exd.get(profile_code) or [])
+            return max(live, tracked)
+    return tracked
+
+
+def _count_paper_bots_total(state):
+    """LIVE demo (paper) grid-bot count across ALL paper profiles — the
+    legacy scalar demo-cap gates compare this against the account-wide
+    learned cap. Includes WT-side phantoms via _count_paper_bots."""
+    return sum(_count_paper_bots(state, p.get("code"))
+               for p in (state.get("profiles") or [])
+               if isinstance(p, dict) and p.get("paperTrading")
+               and p.get("code"))
 
 
 def _set_demo_cap_for_profile(state, profile_code, cap):
@@ -1541,14 +1601,17 @@ class Daemon:
         """
         if not force:
             cap = self.state.get("demo_bot_cap")
-            active = self.state.get("active_bots") or {}
-            if cap and len(active) >= int(cap):
+            # LIVE count (WT used_pairs + carry-pray phantoms), not the
+            # tracked active_bots length — at the cap with phantoms the
+            # nudge would re-trigger a futile screen every cycle
+            live = _count_paper_bots_total(self.state)
+            if cap and live >= int(cap):
                 if not getattr(self, "_refill_skip_active", False):
                     self._refill_skip_active = True
                     log(self.state, {
                         "kind": "demo-cap-nudge-skip",
                         "msg": f"fleet at the demo (paper) grid-bot cap "
-                               f"{len(active)}/{int(cap)} — refill rescreen "
+                               f"{live}/{int(cap)} — refill rescreen "
                                f"nudges skipped until headroom returns"})
                 return False
             if getattr(self, "_refill_skip_active", False):
@@ -2425,6 +2488,66 @@ class Daemon:
             # surface provider health
             pass
 
+    def _check_phantom_bots(self):
+        """Transition-only `phantom-bot` journal: WT (grid_capacity
+        used_pairs) reports MORE live demo bots on a paper profile than
+        the daemon tracks (active_bots + live carry-pray parks).
+
+        Those untracked bots still consume the profile's demo cap —
+        carry-pray parks whose entry was already dropped, manual WT-side
+        creates — so every deploy into the apparent headroom would 400
+        ("You've reached the maximum number of Demo Trading Grid Bots").
+        Fires ONCE per profile on entering the phantom state, mirroring
+        the demo-cap-veto transition pattern. Never raises."""
+        try:
+            used = (self.state.get("capacity") or {}).get("used_pairs")
+            if not isinstance(used, dict) or not used:
+                return  # no authoritative WT-side view — nothing to compare
+            phantom = {}
+            for prof in (self.state.get("profiles") or []):
+                if not isinstance(prof, dict):
+                    continue
+                code = prof.get("code")
+                if not code or not prof.get("paperTrading"):
+                    continue
+                exd = used.get((prof.get("exchange") or "").upper())
+                if not isinstance(exd, dict) or code not in exd:
+                    continue
+                pairs = [p for p in (exd.get(code) or []) if p]
+                tracked = _count_tracked_paper_bots(self.state, prof)
+                if len(pairs) > tracked:
+                    # the extra pair codes: live pairs the daemon has no
+                    # record for (fall back to the whole list when the
+                    # tracked records carry no pair_code to diff against)
+                    tracked_pairs = set()
+                    for bot in (self.state.get("active_bots")
+                                or {}).values():
+                        if _bot_matches_paper_profile(bot, prof):
+                            tracked_pairs.add(bot.get("pair_code"))
+                    for entry in (self.state.get("carry_pray")
+                                  or {}).values():
+                        bot = (entry.get("bot")
+                               if isinstance(entry, dict) else None)
+                        if _bot_matches_paper_profile(bot, prof):
+                            tracked_pairs.add(bot.get("pair_code"))
+                    extra = [p for p in pairs if p not in tracked_pairs]
+                    phantom[code] = (len(pairs), tracked,
+                                     extra or sorted(set(pairs)))
+            prev = getattr(self, "_phantom_profiles", set())
+            for code in sorted(set(phantom) - prev):
+                live, tracked, extra = phantom[code]
+                log(self.state, {
+                    "kind": "phantom-bot",
+                    "profile": code,
+                    "msg": f"WT reports {live} live demo grid bots on paper "
+                           f"profile {code} but the daemon tracks only "
+                           f"{tracked} — untracked bots (carry-pray parks / "
+                           f"manual WT-side edits) are consuming the demo "
+                           f"cap; pairs: {','.join(extra)}"})
+            self._phantom_profiles = set(phantom)
+        except Exception:
+            pass
+
     def rescreen_cycle(self, dry_run=True, no_confluence=False, max_new=2,
                        top=None):
         actions = []
@@ -2466,6 +2589,9 @@ class Daemon:
         capacity = grid_capacity_safe()
         if capacity:
             self.state["capacity"] = capacity
+        # phantom-bot watch (transition-only journal): compare the
+        # WT-side live-bot list against what the daemon tracks
+        self._check_phantom_bots()
         limits = account_limits_safe()
         if limits:
             self.state["account_limits"] = limits
@@ -2500,7 +2626,11 @@ class Daemon:
         # reference `demo_cap` (the per-profile gate above is a
         # refinement, not a replacement)
         demo_cap = demo_cap_legacy
-        if demo_cap_legacy and len(self.state["active_bots"]) >= demo_cap_legacy:
+        # LIVE count (used_pairs + carry-pray phantoms), not the tracked
+        # active_bots length: the fleet can sit at the cap while the
+        # daemon only tracks a subset, and every deploy attempt would 400
+        demo_live_total = _count_paper_bots_total(self.state)
+        if demo_cap_legacy and demo_live_total >= demo_cap_legacy:
             # journal the cap-veto on TRANSITION only (entering the capped
             # state) — 44 hourly demo-cap-veto lines in one audit window
             # buried real events while carrying no new information
@@ -2509,7 +2639,7 @@ class Daemon:
                 log(self.state, {
                     "kind": "demo-cap-veto",
                     "msg": f"fleet at the legacy demo (paper) grid-bot cap "
-                           f"{len(self.state['active_bots'])}/{demo_cap_legacy} "
+                           f"{demo_live_total}/{demo_cap_legacy} "
                            f"— new deploys skipped, rotations still allowed"})
         else:
             self._demo_cap_veto_active = False
@@ -2568,8 +2698,11 @@ class Daemon:
             if deployed >= max_new:
                 break
             if not dry_run and demo_cap \
-                    and len(self.state["active_bots"]) >= demo_cap:
+                    and _count_paper_bots_total(self.state) >= demo_cap:
                 # live creates would 400 at the demo cap — stop deliberating.
+                # LIVE count (WT used_pairs + carry-pray phantoms), not the
+                # tracked active_bots length: at the cap with phantoms the
+                # daemon believes it has headroom it does not have.
                 # Dry-run plans carry no create, so the mirror keeps planning
                 # and recording: a dry-run deployment's decision ledger must
                 # reflect what the planner is doing, not freeze at the cap.
@@ -4698,13 +4831,17 @@ class Daemon:
                         (s.get("slot"), s.get("venue"),
                          f"fleet ceiling {total}/{fleet_cap}"))
             cap = self.state.get("demo_bot_cap")
-            at_demo_cap = bool(cap) and len(active or {}) >= int(cap)
+            # LIVE count (WT used_pairs + carry-pray phantoms), not the
+            # tracked active_bots length — the fleet can sit at the demo
+            # cap while the daemon only tracks a subset
+            live_total = _count_paper_bots_total(self.state)
+            at_demo_cap = bool(cap) and live_total >= int(cap)
             for s in list(slots):
                 if str(s.get("slot")) in (active or set()):
                     continue  # live bot — never touched
                 reason = None
                 if at_demo_cap:
-                    reason = (f"demo-bot cap {len(active)}/{int(cap)}")
+                    reason = (f"demo-bot cap {live_total}/{int(cap)}")
                 else:
                     try:
                         blocked = self.venue_capacity_block(
